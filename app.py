@@ -26,10 +26,11 @@ KONEKSI_DROPBOX_BERHASIL = False
 
 # 1. Koneksi Google Sheets (Data Teks disimpan di sini)
 try:
-    scopes = [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive'
-    ]
+    # Perbaikan: Menambahkan 'https://www.googleapis.com/auth/drive' ke dalam list
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
     
     # Menggunakan kredensial dari [gcp_service_account]
     creds_dict = st.secrets["gcp_service_account"]
@@ -224,7 +225,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         # Memastikan kolom ada sebelum memfilter
         # Asumsi nama kolom di GSheet adalah: Timestamp, Nama, Tempat Dikunjungi, Deskripsi, Link Foto
         KOLOM_NAMA = 'Nama'
-        KOLOM_TEMPAT = 'Tempat Dikunjungi'
+        KOLOM_TEMPAT = 'Temat Dikunjungi'
         KOLOM_LINK_FOTO = 'Link Foto' # Sesuaikan jika nama kolom di sheet berbeda
 
         if KOLOM_NAMA not in df.columns or KOLOM_TEMPAT not in df.columns:
