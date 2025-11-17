@@ -20,13 +20,23 @@ NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
 # Folder di Dropbox tempat file akan disimpan (harus dimulai dengan /)
 FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
 
+# --- KONFIGURASI NAMA KOLOM (SUMBER KEBENARAN) ---
+# Ini akan jadi "source of truth" untuk header GSheet & filter DataFrame
+COL_TIMESTAMP = "Timestamp"
+COL_NAMA = "Nama"
+COL_TEMPAT = "Tempat Dikunjungi"
+COL_DESKRIPSI = "Deskripsi"
+COL_LINK_FOTO = "Link Foto"
+# Daftar standar untuk pengecekan header
+NAMA_KOLOM_STANDAR = [COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI, COL_LINK_FOTO]
+
+
 # --- Setup koneksi (MENGGUNAKAN st.secrets) ---
 KONEKSI_GSHEET_BERHASIL = False
 KONEKSI_DROPBOX_BERHASIL = False
 
 # 1. Koneksi Google Sheets (Data Teks disimpan di sini)
 try:
-    # Perbaikan: Menambahkan 'https://www.googleapis.com/auth/drive' ke dalam list
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/drive'
@@ -40,6 +50,26 @@ try:
     
     # Buka Sheet (didefinisikan secara global agar bisa diakses fungsi lain)
     sh = client_gspread.open(NAMA_GOOGLE_SHEET).sheet1
+    
+    # --- PENGECEKAN HEADER OTOMATIS (IMPROVEMENT) ---
+    header_di_sheet = []
+    try:
+        # Coba baca baris pertama
+        header_di_sheet = sh.row_values(1)
+    except Exception:
+        pass # Biarkan list kosong jika sheet benar-benar baru/kosong
+
+    if not header_di_sheet:
+        # SHEET KOSONG: Buat header baru secara otomatis
+        sh.append_row(NAMA_KOLOM_STANDAR)
+        st.toast("Sheet kosong. Header standar berhasil dibuat!")
+    elif header_di_sheet != NAMA_KOLOM_STANDAR:
+        # HEADER SALAH: Beri peringatan dan hentikan
+        st.error(f"Struktur kolom di Google Sheet tidak cocok!")
+        st.error(f"**Yang ada di Sheet:** {header_di_sheet}")
+        st.error(f"**Yang diharapkan App:** {NAMA_KOLOM_STANDAR}")
+        st.info("SOLUSI: Hapus baris pertama (header) di Google Sheet Anda dan refresh aplikasi ini.")
+        st.stop() # Hentikan aplikasi
     
     KONEKSI_GSHEET_BERHASIL = True
 
@@ -119,6 +149,7 @@ def simpan_ke_sheet(data_list):
 @st.cache_data(ttl=60) # Cache data selama 60 detik
 def load_data():
     try:
+        # get_all_records() otomatis menggunakan baris pertama sebagai header
         data = sh.get_all_records()
         return pd.DataFrame(data)
     except Exception as e:
@@ -150,6 +181,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
             tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
         
         with col2:
+            # Perhatikan: 'key' dari input ini (tempat) harus cocok dengan form
             tempat_dikunjungi = st.text_input("Tempat yang Dikunjungin", placeholder="Contoh: Klien A, Kantor Cabang", key="tempat")
             
             foto_bukti = st.file_uploader(
@@ -185,7 +217,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
                 # 2. Siapkan data untuk Google Sheets
-                # Pastikan urutan kolom sesuai: Timestamp, Nama, Tempat Dikunjungi, Deskripsi, Link Foto
+                # Urutan list INI harus sama persis dengan NAMA_KOLOM_STANDAR
                 data_row = [
                     timestamp_sekarang,
                     nama,
@@ -199,8 +231,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     st.success(f"Laporan untuk {nama} berhasil disimpan!")
                     # Hapus cache agar data terbaru muncul di dashboard
                     st.cache_data.clear()
-                    # Muat ulang halaman untuk menampilkan data terbaru (Opsional)
-                    # st.rerun() 
                 else:
                     st.error("Terjadi kesalahan saat menyimpan data ke Google Sheet.")
 
@@ -222,33 +252,28 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         st.subheader("Filter Data")
         col_filter1, col_filter2 = st.columns(2)
         
-        # Memastikan kolom ada sebelum memfilter
-        # Asumsi nama kolom di GSheet adalah: Timestamp, Nama, Tempat Dikunjungi, Deskripsi, Link Foto
-        KOLOM_NAMA = 'Nama'
-        KOLOM_TEMPAT = 'Temat Dikunjungi'
-        KOLOM_LINK_FOTO = 'Link Foto' # Sesuaikan jika nama kolom di sheet berbeda
-
-        if KOLOM_NAMA not in df.columns or KOLOM_TEMPAT not in df.columns:
-            st.error(f"Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom '{KOLOM_NAMA}' dan '{KOLOM_TEMPAT}'.")
+        # --- IMPROVEMENT: Pengecekan kolom menggunakan variabel global ---
+        if COL_NAMA not in df.columns or COL_TEMPAT not in df.columns:
+            st.error(f"Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom '{COL_NAMA}' dan '{COL_TEMPAT}'.")
             st.dataframe(df, use_container_width=True)
             st.stop()
 
         with col_filter1:
             # Filter Nama
-            nama_unik = df[KOLOM_NAMA].unique()
+            nama_unik = df[COL_NAMA].unique()
             # Konversi ke list() agar default multiselect berfungsi dengan baik
             filter_nama = st.multiselect("Filter berdasarkan Nama", options=nama_unik, default=list(nama_unik))
         
         with col_filter2:
             # Filter berdasarkan 'Tempat Dikunjungi'
-            tempat_unik = df[KOLOM_TEMPAT].unique()
+            tempat_unik = df[COL_TEMPAT].unique()
             filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
         
         # Terapkan filter
         if filter_nama and filter_tempat:
             df_filtered = df[
-                df[KOLOM_NAMA].isin(filter_nama) &
-                df[KOLOM_TEMPAT].isin(filter_tempat)
+                df[COL_NAMA].isin(filter_nama) &
+                df[COL_TEMPAT].isin(filter_tempat)
             ].copy() # Gunakan .copy() untuk menghindari SettingWithCopyWarning
         else:
             # Tampilkan tabel kosong jika salah satu filter tidak dipilih
@@ -258,10 +283,9 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
         if not df_filtered.empty:
             try:
-                # Asumsi kolom pertama adalah Timestamp
-                kolom_timestamp = df.columns[0]
+                # Asumsi kolom pertama adalah Timestamp (COL_TIMESTAMP)
                 # Konversi kolom timestamp ke datetime untuk pengurutan yang benar
-                df_filtered['sort_dt'] = pd.to_datetime(df_filtered[kolom_timestamp], format='%d-%m-%Y %H:%M:%S', errors='coerce')
+                df_filtered['sort_dt'] = pd.to_datetime(df_filtered[COL_TIMESTAMP], format='%d-%m-%Y %H:%M:%S', errors='coerce')
                 # Urutkan dari yang terbaru dan hapus kolom bantu 'sort_dt'
                 df_filtered = df_filtered.sort_values(by='sort_dt', ascending=False).drop(columns=['sort_dt'])
             except Exception as e:
@@ -269,10 +293,10 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
         # Tampilkan tabel data
         # Gunakan column_config untuk membuat link foto bisa diklik
-        # Pastikan KOLOM_LINK_FOTO ada di dataframe sebelum konfigurasi
-        if KOLOM_LINK_FOTO in df.columns:
+        # --- IMPROVEMENT: Menggunakan variabel global ---
+        if COL_LINK_FOTO in df.columns:
             st.dataframe(df_filtered, use_container_width=True, column_config={
-                KOLOM_LINK_FOTO: st.column_config.LinkColumn(KOLOM_LINK_FOTO, display_text="Buka Foto")
+                COL_LINK_FOTO: st.column_config.LinkColumn(COL_LINK_FOTO, display_text="Buka Foto")
             })
         else:
             st.dataframe(df_filtered, use_container_width=True)
