@@ -317,13 +317,35 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
             except Exception as e:
                 st.warning(f"Gagal mengurutkan data berdasarkan tanggal. Pastikan format tanggal benar. Error: {e}")
 
-        # Tampilkan tabel data
-        if COL_LINK_FOTO in df.columns:
-            st.dataframe(df_filtered, use_container_width=True, column_config={
-                COL_LINK_FOTO: st.column_config.LinkColumn(COL_LINK_FOTO, display_text="Buka Foto")
-            })
+        # --- IMPROVEMENT: Tampilkan data dalam "folder" (expander) per nama ---
+        st.subheader("Hasil Laporan Terfilter")
+
+        # Dapatkan nama unik dari data yang SUDAH difilter
+        nama_unik_terfilter = df_filtered[COL_NAMA].unique()
+
+        if not nama_unik_terfilter.any():
+            st.info("Tidak ada data yang sesuai dengan filter Anda.")
         else:
-            st.dataframe(df_filtered, use_container_width=True)
+            # Buat expander untuk setiap nama
+            for nama_staf in nama_unik_terfilter:
+                
+                # Ambil data HANYA untuk staf ini dari dataframe yang sudah difilter
+                data_staf = df_filtered[df_filtered[COL_NAMA] == nama_staf]
+                
+                # Hitung jumlah laporan untuk staf ini
+                jumlah_laporan = len(data_staf)
+                
+                # Tampilkan expander (seperti "folder")
+                # 'expanded=True' berarti "folder" ini akan langsung terbuka
+                with st.expander(f"📁 {nama_staf}   ({jumlah_laporan} Laporan)", expanded=True):
+                    
+                    # Tampilkan tabel data di dalam expander
+                    if COL_LINK_FOTO in data_staf.columns:
+                        st.dataframe(data_staf, use_container_width=True, column_config={
+                            COL_LINK_FOTO: st.column_config.LinkColumn(COL_LINK_FOTO, display_text="Buka Foto")
+                        })
+                    else:
+                        st.dataframe(data_staf, use_container_width=True)
 
 
 # Tampilkan pesan jika koneksi gagal
