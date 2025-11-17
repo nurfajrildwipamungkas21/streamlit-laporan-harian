@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
-import io  # Diperlukan untuk menangani file upload
+import io
+import dropbox
+from dropbox.exceptions import AuthError, ApiError
+from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(
@@ -14,63 +15,87 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- KONFIGSIRASI GOOGLE API ---
-# Ini adalah nilai yang Anda berikan
+# --- KONFIGURASI GOOGLE API & DROPBOX ---
 NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
-ID_FOLDER_DRIVE = "1aVWhj_x6TWvINldqfnpj9SP3zOjpP66w"  # ID Folder Drive Anda
+# Folder di Dropbox tempat file akan disimpan (harus dimulai dengan /)
+FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
 
 # --- Setup koneksi (MENGGUNAKAN st.secrets) ---
+KONEKSI_GSHEET_BERHASIL = False
+KONEKSI_DROPBOX_BERHASIL = False
+
+# 1. Koneksi Google Sheets
 try:
-    # Menggunakan st.secrets untuk koneksi yang aman
-    scopes = ['https://www.googleapis.com/auth/spreadsheets',
-              'https://www.googleapis.com/auth/drive']
+    scopes = ['https://www.googleapis.com/auth/spreadsheets']
     
-    # Ambil info credentials dari Streamlit Secrets
     creds_dict = st.secrets["gcp_service_account"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     
-    # Otorisasi gspread (Google Sheets)
     client_gspread = gspread.authorize(creds)
     
-    # Otorisasi Google Drive API
-    client_drive = build('drive', 'v3', credentials=creds)
-    
-    # Buka Sheet
+    # Buka Sheet (didefinisikan secara global agar bisa diakses fungsi lain)
     sh = client_gspread.open(NAMA_GOOGLE_SHEET).sheet1
     
-    KONEKSI_BERHASIL = True
+    KONEKSI_GSHEET_BERHASIL = True
 
 except Exception as e:
-    st.error(f"Koneksi ke Google API Gagal: {e}")
-    st.error("Pastikan Anda sudah mengatur 'gcp_service_account' di Streamlit Secrets dengan benar.")
-    KONEKSI_BERHASIL = False
+    st.error(f"Koneksi ke Google Sheets Gagal: {e}")
 
+# 2. Koneksi Dropbox
+try:
+    DROPBOX_ACCESS_TOKEN = st.secrets["dropbox"]["access_token"]
+    dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+    # Cek koneksi
+    dbx.users_get_current_account()
+    KONEKSI_DROPBOX_BERHASIL = True
+except AuthError:
+    st.error("Otentikasi Dropbox gagal. Pastikan Access Token valid.")
+except Exception as e:
+    st.error(f"Koneksi ke Dropbox Gagal: {e}")
 
-# --- FUNGSI HELPER (JANGAN DIUBAH) ---
+# --- FUNGSI HELPER ---
 
-def upload_ke_drive(file_obj, folder_id):
-    """Upload file ke Google Drive dan mengembalikan link."""
+def upload_ke_dropbox(file_obj):
+    """Upload file ke Dropbox dan mengembalikan link langsung (raw=1) yang bisa dibagikan."""
     try:
-        # File object dari Streamlit perlu dibungkus io.BytesIO
-        file_io = io.BytesIO(file_obj.getvalue())
+        # Dapatkan bytes dari file
+        file_data = file_obj.getvalue()
         
-        file_metadata = {
-            'name': file_obj.name,
-            'parents': [folder_id]
-        }
-        media = MediaIoBaseUpload(file_io, mimetype=file_obj.type)
+        # Buat nama file unik menggunakan timestamp untuk menghindari tumpang tindih
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        file = client_drive.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webViewLink',
-            supportsAllDrives=True,
-        ).execute()
+        # Sanitasi nama file asli
+        nama_file_asli = "".join([c for c in file_obj.name if c.isalnum() or c in ('.', '_', '-')])
         
-        # Dapatkan link untuk dilihat (bukan di-download)
-        return file.get('webViewLink')
+        nama_file_unik = f"{timestamp}_{nama_file_asli}"
+        path_dropbox = f"{FOLDER_DROPBOX}/{nama_file_unik}"
+
+        # 1. Upload file
+        dbx.files_upload(file_data, path_dropbox, mode=dropbox.files.WriteMode.add)
+        
+        # 2. Buat shared link publik
+        # Setelan agar link bisa dilihat publik secara eksplisit
+        settings = SharedLinkSettings(requested_visibility=RequestedVisibility.public)
+        
+        try:
+            link = dbx.sharing_create_shared_link_with_settings(path_dropbox, settings=settings)
+        except ApiError as e:
+            # Menangani kasus jika link sudah ada
+            if e.error.is_shared_link_already_exists():
+                links = dbx.sharing_list_shared_links(path_dropbox, direct_only=True)
+                if links.links:
+                    link = links.links[0]
+                else:
+                    raise Exception("Gagal mendapatkan link Dropbox yang sudah ada.")
+            else:
+                raise e
+        
+        # 3. Dapatkan URL langsung
+        # Ganti dl=0 (halaman preview) dengan raw=1 (file langsung)
+        return link.url.replace("?dl=0", "?raw=1")
+
     except Exception as e:
-        st.error(f"Error upload ke Drive: {e}")
+        st.error(f"Error tidak terduga saat upload ke Dropbox: {e}")
         return None
 
 def simpan_ke_sheet(data_list):
@@ -82,22 +107,29 @@ def simpan_ke_sheet(data_list):
         st.error(f"Error menyimpan ke Sheet: {e}")
         return False
 
+# Fungsi untuk memuat data dengan caching (meningkatkan performa)
+@st.cache_data(ttl=60) # Cache data selama 60 detik
+def load_data():
+    try:
+        data = sh.get_all_records()
+        return pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"Gagal memuat data dari Google Sheet: {e}")
+        return pd.DataFrame()
+
 # --- JUDUL APLIKASI ---
 st.title("✅ Aplikasi Laporan Kegiatan Harian")
 st.write("Silakan masukkan kegiatan yang telah Anda lakukan hari ini.")
 
-# Hanya tampilkan form jika koneksi berhasil
-if KONEKSI_BERHASIL:
+# Hanya tampilkan form jika kedua koneksi berhasil
+if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
-    # --- DAFTAR NAMA STAF (SUDAH DIUBAH) ---
+    # --- DAFTAR NAMA STAF ---
     NAMA_STAF = [
-        "Saya",  # <-- (Pengawas) sudah dihapus
-        "Social Media Specialist", 
+        "Saya",
+        "Social Media Specialist",
         "Deal Maker"
     ]
-
-    # --- KATEGORI PEKERJAAN (Sudah dihapus) ---
-    # Variabel KATEGORI dihapus seluruhnya
 
     # --- 1. FORM INPUT KEGIATAN ---
     st.header("📝 Input Kegiatan Baru")
@@ -110,8 +142,6 @@ if KONEKSI_BERHASIL:
             tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
         
         with col2:
-            # --- SUDAH DIUBAH ---
-            # Mengganti Kategori dengan Tempat yang Dikunjungin
             tempat_dikunjungi = st.text_input("Tempat yang Dikunjungin", placeholder="Contoh: Klien A, Kantor Cabang", key="tempat")
             
             foto_bukti = st.file_uploader(
@@ -135,19 +165,23 @@ if KONEKSI_BERHASIL:
         else:
             with st.spinner("Sedang menyimpan laporan Anda..."):
                 
-                # 1. Handle Upload Foto (jika ada)
+                # 1. Handle Upload Foto ke Dropbox (jika ada)
                 link_foto = "-" # Default jika tidak ada foto
                 if foto_bukti is not None:
-                    link_foto = upload_ke_drive(foto_bukti, ID_FOLDER_DRIVE)
+                    link_foto = upload_ke_dropbox(foto_bukti)
                     if link_foto is None:
-                        st.error("Gagal meng-upload foto, laporan tidak disimpan.")
+                        st.error("Gagal meng-upload foto ke Dropbox, laporan tidak disimpan.")
                         st.stop() 
 
-                # 2. Siapkan data untuk Google Sheets (SUDAH DIUBAH)
+                # Dapatkan timestamp saat ini untuk disimpan
+                timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+
+                # 2. Siapkan data untuk Google Sheets
+                # Pastikan urutan kolom sesuai: Timestamp, Nama, Tempat Dikunjungi, Deskripsi, Link Foto
                 data_row = [
-                    tanggal.strftime('%d-%m-%Y %H:%M:%S'), # Tambah timestamp
+                    timestamp_sekarang,
                     nama,
-                    tempat_dikunjungi,  # <-- Menggunakan variabel baru
+                    tempat_dikunjungi,
                     deskripsi,
                     link_foto
                 ]
@@ -155,6 +189,10 @@ if KONEKSI_BERHASIL:
                 # 3. Simpan ke Google Sheets
                 if simpan_ke_sheet(data_row):
                     st.success(f"Laporan untuk {nama} berhasil disimpan!")
+                    # Hapus cache agar data terbaru muncul di dashboard
+                    st.cache_data.clear()
+                    # Muat ulang halaman untuk menampilkan data terbaru
+                    st.rerun()
                 else:
                     st.error("Terjadi kesalahan saat menyimpan data ke Google Sheet.")
 
@@ -162,40 +200,62 @@ if KONEKSI_BERHASIL:
     # --- 3. DASBOR (TABEL LAPORAN) ---
     st.header("📊 Dasbor Laporan Kegiatan")
     
-    try:
-        # Ambil semua data dari sheet
-        data = sh.get_all_records()
+    # Tombol refresh manual (opsional, karena sudah ada auto-refresh)
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+    df = load_data()
         
-        if not data:
-            st.info("Belum ada data laporan yang masuk.")
-        else:
-            # Konversi ke DataFrame Pandas
-            df = pd.DataFrame(data)
-            
-            # Tampilkan filter
-            st.subheader("Filter Data")
-            col_filter1, col_filter2 = st.columns(2)
-            
-            with col_filter1:
-                # Filter Nama
-                nama_unik = df['Nama'].unique()
-                filter_nama = st.multiselect("Filter berdasarkan Nama", options=nama_unik, default=nama_unik)
-            
-            with col_filter2:
-                # --- SUDAH DIUBAH ---
-                # Filter berdasarkan 'Tempat Dikunjungi' (sesuai nama kolom baru di Sheet)
-                tempat_unik = df['Tempat Dikunjungi'].unique()
-                filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=tempat_unik)
-            
-            # Terapkan filter (SUDAH DIUBAH)
+    if df.empty:
+        st.info("Belum ada data laporan yang masuk atau gagal memuat data.")
+    else:            
+        # Tampilkan filter
+        st.subheader("Filter Data")
+        col_filter1, col_filter2 = st.columns(2)
+        
+        # Memastikan kolom ada sebelum memfilter
+        if 'Nama' not in df.columns or 'Tempat Dikunjungi' not in df.columns:
+            st.error("Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom 'Nama' dan 'Tempat Dikunjungi'.")
+            st.dataframe(df, use_container_width=True)
+            st.stop()
+
+        with col_filter1:
+            # Filter Nama
+            nama_unik = df['Nama'].unique()
+            filter_nama = st.multiselect("Filter berdasarkan Nama", options=nama_unik, default=list(nama_unik))
+        
+        with col_filter2:
+            # Filter berdasarkan 'Tempat Dikunjungi'
+            tempat_unik = df['Tempat Dikunjungi'].unique()
+            filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
+        
+        # Terapkan filter
+        if filter_nama and filter_tempat:
             df_filtered = df[
                 df['Nama'].isin(filter_nama) &
                 df['Tempat Dikunjungi'].isin(filter_tempat)
-            ]
+            ].copy() # Gunakan .copy() untuk menghindari SettingWithCopyWarning
+        else:
+            df_filtered = pd.DataFrame(columns=df.columns) # Tampilkan tabel kosong jika filter kosong
 
-            # Tampilkan tabel data
-            st.dataframe(df_filtered, use_container_width=True)
+        # Urutkan data dari yang terbaru (jika kolom Timestamp ada)
+        # Asumsi kolom pertama adalah Timestamp (sesuai logika penyimpanan)
+        kolom_timestamp = df.columns[0] 
 
-    except Exception as e:
-        st.error(f"Gagal mengambil data dari Google Sheet: {e}")
-        st.error("PASTIKAN Anda sudah mengubah nama kolom 'Kategori' menjadi 'Tempat Dikunjungi' di Google Sheet.")
+        if not df_filtered.empty:
+            try:
+                # Konversi kolom timestamp ke datetime untuk pengurutan yang benar
+                df_filtered['sort_dt'] = pd.to_datetime(df_filtered[kolom_timestamp], format='%d-%m-%Y %H:%M:%S', errors='coerce')
+                df_filtered = df_filtered.sort_values(by='sort_dt', ascending=False).drop(columns=['sort_dt'])
+            except Exception as e:
+                st.warning(f"Gagal mengurutkan data berdasarkan tanggal: {e}")
+
+        # Tampilkan tabel data
+        st.dataframe(df_filtered, use_container_width=True)
+
+# Tampilkan pesan jika koneksi gagal
+elif not KONEKSI_GSHEET_BERHASIL:
+    st.warning("Aplikasi tidak dapat berjalan karena koneksi Google Sheets gagal.")
+elif not KONEKSI_DROPBOX_BERHASIL:
+    st.warning("Aplikasi tidak dapat menerima upload foto karena koneksi Dropbox gagal.")
