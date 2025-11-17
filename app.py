@@ -8,6 +8,10 @@ import dropbox
 from dropbox.exceptions import AuthError, ApiError
 from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 
+# --- DIAGNOSTIK: Cek Versi Streamlit ---
+# Baris ini akan mencetak versi Streamlit yang sedang berjalan di paling atas aplikasi
+st.write(f"Versi Streamlit yang sedang berjalan: {st.__version__}")
+
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(
     page_title="Aplikasi Laporan Kegiatan Harian",
@@ -314,7 +318,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         # Pengecekan kolom
         if COL_NAMA not in df.columns or COL_TEMPAT not in df.columns:
             st.error(f"Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom '{COL_NAMA}' dan '{COL_TEMPAT}'.")
-            st.dataframe(df, use_container_width=True)
+            # --- PENYEMPURNAAN: Mengganti use_container_width ---
+            st.dataframe(df, width='stretch')
             st.stop()
 
         with col_filter1:
@@ -370,11 +375,13 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     
                     # Tampilkan tabel data di dalam expander
                     if COL_LINK_FOTO in data_staf.columns:
-                        st.dataframe(data_staf, use_container_width=True, column_config={
+                        # --- PENYEMPURNAAN: Mengganti use_container_width ---
+                        st.dataframe(data_staf, width='stretch', column_config={
                             COL_LINK_FOTO: st.column_config.LinkColumn(COL_LINK_FOTO, display_text="Buka Foto")
                         })
                     else:
-                        st.dataframe(data_staf, use_container_width=True)
+                        # --- PENYEMPURNAAN: Mengganti use_container_width ---
+                        st.dataframe(data_staf, width='stretch')
 
 
 # Tampilkan pesan jika koneksi gagal
