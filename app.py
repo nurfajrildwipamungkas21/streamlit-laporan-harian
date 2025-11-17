@@ -64,6 +64,7 @@ def upload_ke_drive(file_obj, folder_id):
             body=file_metadata,
             media_body=media,
             fields='id, webViewLink'
+            supportsAllDrives=True
         ).execute()
         
         # Dapatkan link untuk dilihat (bukan di-download)
