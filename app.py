@@ -88,19 +88,15 @@ st.write("Silakan masukkan kegiatan yang telah Anda lakukan hari ini.")
 # Hanya tampilkan form jika koneksi berhasil
 if KONEKSI_BERHASIL:
 
-    # --- DAFTAR NAMA STAF ---
+    # --- DAFTAR NAMA STAF (SUDAH DIUBAH) ---
     NAMA_STAF = [
-        "Saya (Pengawas)", 
+        "Saya",  # <-- (Pengawas) sudah dihapus
         "Social Media Specialist", 
         "Deal Maker"
     ]
 
-    # --- KATEGORI PEKERJAAN ---
-    KATEGORI = {
-        "Social Media Specialist": ["Konten Plan", "Desain", "Copywriting", "Upload", "Analitik", "Lainnya"],
-        "Deal Maker": ["Prospek", "Follow Up", "Meeting", "Negosiasi", "Closing", "Lainnya"],
-        "Saya (Pengawas)": ["Supervisi", "Meeting Internal", "Admin", "Lainnya"]
-    }
+    # --- KATEGORI PEKERJAAN (Sudah dihapus) ---
+    # Variabel KATEGORI dihapus seluruhnya
 
     # --- 1. FORM INPUT KEGIATAN ---
     st.header("📝 Input Kegiatan Baru")
@@ -113,8 +109,9 @@ if KONEKSI_BERHASIL:
             tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
         
         with col2:
-            kategori_pilihan = KATEGORI.get(nama, ["Lainnya"])
-            kategori = st.selectbox("Kategori Pekerjaan", kategori_pilihan, key="kategori")
+            # --- SUDAH DIUBAH ---
+            # Mengganti Kategori dengan Tempat yang Dikunjungin
+            tempat_dikunjungi = st.text_input("Tempat yang Dikunjungin", placeholder="Contoh: Klien A, Kantor Cabang", key="tempat")
             
             foto_bukti = st.file_uploader(
                 "Upload Foto Bukti (Opsional)", 
@@ -142,15 +139,14 @@ if KONEKSI_BERHASIL:
                 if foto_bukti is not None:
                     link_foto = upload_ke_drive(foto_bukti, ID_FOLDER_DRIVE)
                     if link_foto is None:
-                        # Jika upload gagal, hentikan proses
                         st.error("Gagal meng-upload foto, laporan tidak disimpan.")
-                        st.stop() # Menghentikan eksekusi script
+                        st.stop() 
 
-                # 2. Siapkan data untuk Google Sheets
+                # 2. Siapkan data untuk Google Sheets (SUDAH DIUBAH)
                 data_row = [
                     tanggal.strftime('%d-%m-%Y %H:%M:%S'), # Tambah timestamp
                     nama,
-                    kategori,
+                    tempat_dikunjungi,  # <-- Menggunakan variabel baru
                     deskripsi,
                     link_foto
                 ]
@@ -180,19 +176,20 @@ if KONEKSI_BERHASIL:
             col_filter1, col_filter2 = st.columns(2)
             
             with col_filter1:
-                # Ambil nama unik dari kolom 'Nama'
+                # Filter Nama
                 nama_unik = df['Nama'].unique()
                 filter_nama = st.multiselect("Filter berdasarkan Nama", options=nama_unik, default=nama_unik)
             
             with col_filter2:
-                # Ambil kategori unik dari kolom 'Kategori'
-                kategori_unik = df['Kategori'].unique()
-                filter_kategori = st.multiselect("Filter berdasarkan Kategori", options=kategori_unik, default=kategori_unik)
+                # --- SUDAH DIUBAH ---
+                # Filter berdasarkan 'Tempat Dikunjungi' (sesuai nama kolom baru di Sheet)
+                tempat_unik = df['Tempat Dikunjungi'].unique()
+                filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=tempat_unik)
             
-            # Terapkan filter
+            # Terapkan filter (SUDAH DIUBAH)
             df_filtered = df[
                 df['Nama'].isin(filter_nama) &
-                df['Kategori'].isin(filter_kategori)
+                df['Tempat Dikunjungi'].isin(filter_tempat)
             ]
 
             # Tampilkan tabel data
@@ -200,3 +197,4 @@ if KONEKSI_BERHASIL:
 
     except Exception as e:
         st.error(f"Gagal mengambil data dari Google Sheet: {e}")
+        st.error("PASTIKAN Anda sudah mengubah nama kolom 'Kategori' menjadi 'Tempat Dikunjungi' di Google Sheet.")
