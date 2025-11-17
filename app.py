@@ -15,36 +15,18 @@ st.set_page_config(
 )
 
 # --- KONFIGSIRASI GOOGLE API ---
-# Ganti dengan nilai Anda
-NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"  # NAMA GOOGLE SHEET ANDA
-ID_FOLDER_DRIVE = "ID_FOLDER_GOOGLE_DRIVE_ANDA"  # GANTI DENGAN ID FOLDER DRIVE
+# Ini adalah nilai yang Anda berikan
+NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
+ID_FOLDER_DRIVE = "1aVWhj_x6TWvINldqfnpj9SP3zOjpP66w"  # ID Folder Drive Anda
 
-# --- API KEY DEMO (DITANAM / HARDCODED) ---
-# Ini adalah key demo yang Anda berikan
-SERVICE_ACCOUNT_DEMO = {
-    "type": "service_account",
-    "project_id": "sales-hotel-satya-graha",
-    "private_key_id": "eef8eb1414691e8c168a0474ea534615bb3a8c92",
-    "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCjwLjN70CworXm\nDwoNKtFFptVkj/+mTlFee6Kkmk099UxmWcghWBlz1HoGDiF5NOyLynv1Flrw/Wqm\nCx4X2rK3wlZrIdJCuCRjPWW39wVd46sf6sTLq0LGt0i17gYmuPwS4qo+XM058pfW\nbmvKtfWgeI7hWfQWkBAJUY/mjOHUiq5vZUJ4uS0sDLQYvDucllwX7LMBMhkeY7VL\nJlykCFVxkRZPLlQpRDP3rjN/IZgIxbt3JgHnyc2p+1SGCRWHFcgvrw0C4b+emeXN\nyPS7ttVbFkwHrQ54D3bokrWxJFNG8zEJfynUzLGooRlUOl/cBb14ze9yU0Z3Rxy4\nLWhxTxpLAgMBAAECggEACZ+BEhO7TiYMYSavxTJSS1uQiBuw6bRfMm7lkfLCE0q1\nC1a/XLub/fiV6yvYFRK3y/HsSEI2D0TKiFN4Q0Kbj2eg7c7LrRa73LEg/Hyhw3C7\nqmEri3nXBMKEnVxi3tJZeJVQF+DFlrWGQsMJG/KG1Wqq9YdJwYGvJOe2zdT9oyB4\ndtcu47Q4Fs2/GLBf96HJUaQGjsTvoV5cr8bPeokd7QZ0HNLIwo/92ag7be8NOJ6Y\nH2W6eet7/dCOm7/YJAyti8dQ/4ETnA5bUJGeiBB98l+RAfdBEUjY9W9VKiIJtEfB\nTfHF1Gj0KRZ/0MNtM2VDpqVC2CMXI4iPp9PKZlWpYQKBgQDYnF/t3tfMXdiQJd7w\n0STTzod5A05QZwbWldhU+UIKhmj/ToA8w33zFWBT/hBaRTXp1FP/suUBhvZKULRM\nv8V4y305s729QyZ6PPvA38JbvaU+rvzllb2NZbtIoeh8wjT5RewDUDNuUzz6f2Nd\nlAB/2ROj5dOzx0FyIhayjBhOyQKBgQDBh7YG55PBHqTWMY8foft2Pqu3ZBEAcU2q\nrL3LT6BJAO8G4FDWvjgGA7YSJMY658dAEPMei+JSXXotVCS2FdPQzR3J0Nd+fj1E\nMqleSdRCHwC2vow9w6ka8kVfZvBtS/gHytCg5m97TIdg3QtB0RiUnh25fJgVD6vD\ndvkYCrMGcwKBgQDLOmwGkX2GkMYO+HkjGBalYrBYKXHgnckcq5o8n2AG3/TDFLPc\nTs5sszGdnFFbYHQk3sGwtfeGZ0nMj8uZ9pMfskvbR3hNiiMfrPfHDikcSeIv3Z4J\nCWS+tSPyEXY/Fzb8aU32DdkzOYWMwNhJhAKz8McsjwUBN4F/w9vnyOlFgQKBgGa8\nCi8kI9Vy1QI3kMi0Dm842aMi5bucaiReSupwvJ/EdR7rWT6F/+uBcNe02d5PSACE\nfusKSvx6Tu9dKZfXgnfnSxblXF/z18YqNqqs+paXKqPYB06KXWzGi3kXhi4fE+3f\nBl1Dto53k64h6WXo/+l0/kaHE5yqkv3SXG0c0OhtAoGBAIrLURc/31RdJiHk/iap\naKDwVbifQ23mWF7BctVKQhJoaWu4T7/B07e1ga4giruKwuRWJ7SZw4rZ1yUbA/qG\npCVYnRgPvSJTM7xk3wssUxMmLuSxhJ8k7+7YYmaZUBypd5isoc0TX5GwBDmG2bcF\n7KS6sJVaVxQtK+zC3CuXQEWN\n-----END PRIVATE KEY-----\n",
-    "client_email": "bot-laporan-harian@sales-hotel-satya-graha.iam.gserviceaccount.com",
-    "client_id": "102931102151388388973",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/bot-laporan-harian%40sales-hotel-satya-graha.iam.gserviceaccount.com",
-    "universe_domain": "googleapis.com"
-}
-# -----------------------------------------------
-
-
-# Setup koneksi
+# --- Setup koneksi (MENGGUNAKAN st.secrets) ---
 try:
-    # Menggunakan API Key Tanam (Hardcoded)
+    # Menggunakan st.secrets untuk koneksi yang aman
     scopes = ['https://www.googleapis.com/auth/spreadsheets',
               'https://www.googleapis.com/auth/drive']
     
-    # Menggunakan credentials demo yang ditanam
-    creds_dict = SERVICE_ACCOUNT_DEMO
+    # Ambil info credentials dari Streamlit Secrets
+    creds_dict = st.secrets["gcp_service_account"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     
     # Otorisasi gspread (Google Sheets)
@@ -60,7 +42,7 @@ try:
 
 except Exception as e:
     st.error(f"Koneksi ke Google API Gagal: {e}")
-    st.error("Koneksi gagal. Periksa API Key Tanam atau pastikan email robot sudah di-share ke Sheet/Folder.")
+    st.error("Pastikan Anda sudah mengatur 'gcp_service_account' di Streamlit Secrets dengan benar.")
     KONEKSI_BERHASIL = False
 
 
