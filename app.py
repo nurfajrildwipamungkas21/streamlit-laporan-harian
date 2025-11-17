@@ -8,16 +8,16 @@ import dropbox
 from dropbox.exceptions import AuthError, ApiError
 from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 
-# --- DIAGNOSTIK: Cek Versi Streamlit ---
-# Baris ini akan mencetak versi Streamlit yang sedang berjalan di paling atas aplikasi
-st.write(f"Versi Streamlit yang sedang berjalan: {st.__version__}")
-
-# --- KONFIGURASI HALAMAN ---
+# --- KONFIGURASI HALAMAN (HARUS JADI PERINTAH ST PERTAMA) ---
 st.set_page_config(
     page_title="Aplikasi Laporan Kegiatan Harian",
     page_icon="✅",
     layout="wide"
 )
+
+# --- DIAGNOSTIK: Cek Versi Streamlit ---
+# Baris ini akan mencetak versi Streamlit yang sedang berjalan di paling atas aplikasi
+st.write(f"Versi Streamlit yang sedang berjalan: {st.__version__}")
 
 # --- KONFIGURASI GOOGLE API & DROPBOX ---
 NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
