@@ -27,8 +27,17 @@ COL_NAMA = "Nama"
 COL_TEMPAT = "Tempat Dikunjungi"
 COL_DESKRIPSI = "Deskripsi"
 COL_LINK_FOTO = "Link Foto"
+COL_LINK_SOSMED = "Link Sosmed" # --- PERUBAHAN --- Kolom baru ditambahkan
+
 # Daftar standar untuk pengecekan header
-NAMA_KOLOM_STANDAR = [COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI, COL_LINK_FOTO]
+NAMA_KOLOM_STANDAR = [
+    COL_TIMESTAMP, 
+    COL_NAMA, 
+    COL_TEMPAT, 
+    COL_DESKRIPSI, 
+    COL_LINK_FOTO, 
+    COL_LINK_SOSMED # --- PERUBAHAN --- Kolom baru ditambahkan
+]
 
 
 # --- Setup koneksi (MENGGUNAKAN st.secrets) ---
@@ -86,6 +95,19 @@ def get_or_create_worksheet(nama_worksheet):
     try:
         # Coba dapatkan worksheet (tab)
         worksheet = spreadsheet.worksheet(nama_worksheet)
+        
+        # --- PERUBAHAN --- Pengecekan header
+        # Cek apakah header di sheet sudah sesuai dengan standar terbaru
+        headers_di_sheet = worksheet.row_values(1)
+        if headers_di_sheet != NAMA_KOLOM_STANDAR:
+            st.toast(f"Memperbarui header untuk worksheet '{nama_worksheet}'...")
+            # Menyiapkan update batch
+            cell_list = worksheet.range(1, 1, 1, len(NAMA_KOLOM_STANDAR))
+            for i, header_val in enumerate(NAMA_KOLOM_STANDAR):
+                cell_list[i].value = header_val
+            # Update header dalam satu kali panggilan API
+            worksheet.update_cells(cell_list)
+            
         return worksheet
     except gspread.WorksheetNotFound:
         # Jika tidak ada, buat baru
@@ -173,17 +195,22 @@ def load_data(daftar_staf):
             worksheet = get_or_create_worksheet(nama_staf)
             if worksheet:
                 # get_all_records() akan membaca header dan mengambil semua data
-                data = worksheet.get_all_records() 
+                data = worksheet.get_all_records()  
                 if data:
                     all_data.extend(data) # Gabungkan data
         
         if not all_data:
             return pd.DataFrame(columns=NAMA_KOLOM_STANDAR) # Kembalikan DF kosong jika tidak ada data
 
+        # --- PERUBAHAN ---
+        # Membuat DataFrame. Jika ada sheet lama yg belum punya kolom 'Link Sosmed',
+        # pandas otomatis mengisi dgn NaN (Not a Number), yg aman.
         return pd.DataFrame(all_data)
+    
     except Exception as e:
         st.error(f"Gagal memuat data dari Google Sheet: {e}")
-        return pd.DataFrame()
+        # --- PERUBAHAN --- Pastikan DataFrame kosong punya semua kolom
+        return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
 # --- JUDUL APLIKASI ---
 st.title("✅ Aplikasi Laporan Kegiatan Harian")
@@ -206,20 +233,30 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
         col1, col2 = st.columns(2)
         with col1:
-            nama = st.selectbox("Pilih Nama Anda", NAMA_STAF, key="nama")
+            # --- PERUBAHAN --- Label diubah dan input kondisional ditambahkan
+            nama = st.selectbox("Pilih Job Desc Anda", NAMA_STAF, key="nama")
             tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
+            
+            link_sosmed = "" # Inisialisasi variabel
+            if nama == "Social Media Specialist":
+                link_sosmed = st.text_input(
+                    "Link Sosmed", 
+                    placeholder="Contoh: https://www.instagram.com/p/...", 
+                    key="linksosmed"
+                )
+            # --- AKHIR PERUBAHAN ---
         
         with col2:
             tempat_dikunjungi = st.text_input("Tempat yang Dikunjungin", placeholder="Contoh: Klien A, Kantor Cabang", key="tempat")
             
             foto_bukti = st.file_uploader(
-                "Upload Foto Bukti (Opsional)", 
+                "Upload Foto Bukti (Opsional)",  
                 type=['jpg', 'jpeg', 'png'],
                 key="foto"
             )
 
         deskripsi = st.text_area(
-            "Deskripsi Lengkap Kegiatan", 
+            "Deskripsi Lengkap Kegiatan",  
             placeholder="Contoh: Menghubungi 10 prospek baru dari data Pameran.",
             key="deskripsi"
         )
@@ -245,6 +282,9 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 # Dapatkan timestamp saat ini untuk disimpan
                 timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
+                # --- PERUBAHAN --- Siapkan link sosmed (beri default "-" jika kosong)
+                link_sosmed_final = link_sosmed if link_sosmed else "-"
+
                 # 2. Siapkan data untuk Google Sheets
                 # Urutan list INI harus sama persis dengan NAMA_KOLOM_STANDAR
                 data_row = [
@@ -252,7 +292,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     nama,
                     tempat_dikunjungi,
                     deskripsi,
-                    link_foto
+                    link_foto,
+                    link_sosmed_final # --- PERUBAHAN --- Tambahkan data baru
                 ]
                 
                 # 3. Simpan ke Google Sheets
@@ -279,7 +320,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
     if df.empty:
         st.info("Belum ada data laporan yang masuk atau gagal memuat data.")
-    else:            
+    else:      
         # Tampilkan filter
         st.subheader("Filter Data")
         col_filter1, col_filter2 = st.columns(2)
@@ -297,7 +338,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
         with col_filter2:
             # Filter berdasarkan 'Tempat Dikunjungi' (Tetap berfungsi seperti biasa)
-            tempat_unik = df[COL_TEMPAT].unique()
+            # --- PERUBAHAN --- Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
+            tempat_unik = df[COL_TEMPAT].fillna("").unique()
             filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
         
         # Terapkan filter secara dinamis
@@ -309,7 +351,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
         if filter_tempat:
             # Terapkan filter tempat HANYA JIKA ada yang dipilih
-            df_filtered = df_filtered[df_filtered[COL_TEMPAT].isin(filter_tempat)]
+            # --- PERUBAHAN --- Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
+            df_filtered = df_filtered[df_filtered[COL_TEMPAT].fillna("").isin(filter_tempat)]
 
         # Urutkan data dari yang terbaru
         if not df_filtered.empty:
@@ -339,15 +382,30 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 
                 # Tampilkan expander (seperti "folder")
                 # 'expanded=True' berarti "folder" ini akan langsung terbuka
-                with st.expander(f"📁 {nama_staf}   ({jumlah_laporan} Laporan)", expanded=True):
+                with st.expander(f"📁 {nama_staf}    ({jumlah_laporan} Laporan)", expanded=True):
                     
+                    # --- PERUBAHAN ---
                     # Tampilkan tabel data di dalam expander
+                    # Membuat column_config dinamis untuk link
+                    
+                    column_config = {}
+                    
                     if COL_LINK_FOTO in data_staf.columns:
-                        st.dataframe(data_staf, use_container_width=True, column_config={
-                            COL_LINK_FOTO: st.column_config.LinkColumn(COL_LINK_FOTO, display_text="Buka Foto")
-                        })
-                    else:
-                        st.dataframe(data_staf, use_container_width=True)
+                        column_config[COL_LINK_FOTO] = st.column_config.LinkColumn(
+                            COL_LINK_FOTO, display_text="Buka Foto"
+                        )
+                    
+                    if COL_LINK_SOSMED in data_staf.columns:
+                        column_config[COL_LINK_SOSMED] = st.column_config.LinkColumn(
+                            COL_LINK_SOSMED, display_text="Buka Link"
+                        )
+
+                    st.dataframe(
+                        data_staf, 
+                        use_container_width=True, 
+                        column_config=column_config
+                    )
+                    # --- AKHIR PERUBAHAN ---
 
 
 # Tampilkan pesan jika koneksi gagal
