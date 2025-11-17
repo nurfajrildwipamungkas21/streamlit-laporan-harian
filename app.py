@@ -26,9 +26,10 @@ KONEKSI_DROPBOX_BERHASIL = False
 
 # 1. Koneksi Google Sheets (Data Teks disimpan di sini)
 try:
-    scopes = ['https://www.googleapis.com/auth/spreadsheets']
-    'https://www.googleapis.com/auth/drive'
-    ]
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
     
     # Menggunakan kredensial dari [gcp_service_account]
     creds_dict = st.secrets["gcp_service_account"]
