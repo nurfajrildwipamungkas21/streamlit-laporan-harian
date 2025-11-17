@@ -159,14 +159,38 @@ def simpan_ke_sheet(data_list, nama_staf):
         st.error(f"Error menyimpan ke Sheet: {e}")
         return False
 
-# Fungsi untuk memuat data dengan caching (meningkatkan performa)
+# --- FUNGSI HELPER BARU (untuk nama dinamis) ---
+@st.cache_data(ttl=120) # Cache daftar staf selama 2 menit
+def get_all_staff_names():
+    """
+    Mengambil semua nama worksheet (staf) yang ada dari Google Sheet.
+    Ini akan menjadi "source of truth" untuk daftar nama.
+    """
+    try:
+        # 'spreadsheet' adalah variabel global dari koneksi
+        worksheets = spreadsheet.worksheets()
+        # Ambil judul (nama) dari setiap worksheet
+        staff_names = [ws.title for ws in worksheets]
+        
+        # Jika tidak ada nama sama sekali, kembalikan list kosong
+        return staff_names if staff_names else []
+    
+    except Exception as e:
+        st.error(f"Gagal mengambil daftar nama staf: {e}")
+        # Fallback ke daftar default jika GSheet API gagal
+        return ["Saya", "Social Media Specialist", "Deal Maker"]
+
+# --- FUNGSI HELPER YANG DIPERBARUI (untuk data dinamis) ---
 @st.cache_data(ttl=60) # Cache data selama 60 detik
-def load_data(daftar_staf):
+def load_data():
     """
     Memuat data dari SEMUA worksheet staf dan menggabungkannya
     agar bisa ditampilkan di dasbor.
     """
     try:
+        # --- PERBAIKAN: Ambil daftar nama staf langsung dari GSheet ---
+        daftar_staf = get_all_staff_names()
+        
         all_data = []
         for nama_staf in daftar_staf:
             # Dapatkan "laci" (worksheet) untuk staf ini
@@ -192,21 +216,21 @@ st.write("Silakan masukkan kegiatan yang telah Anda lakukan hari ini.")
 # Hanya tampilkan form jika kedua koneksi berhasil
 if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
-    # --- DAFTAR NAMA STAF ---
-    NAMA_STAF = [
-        "Saya",
-        "Social Media Specialist",
-        "Deal Maker"
-    ]
-
     # --- 1. FORM INPUT KEGIATAN ---
     st.header("📝 Input Kegiatan Baru")
+
+    # --- PERBAIKAN: Ambil daftar nama dinamis untuk form ---
+    NAMA_STAF = get_all_staff_names() 
+    # Jika daftarnya kosong (misal GSheet baru), sediakan default
+    if not NAMA_STAF:
+        NAMA_STAF = ["Saya", "Social Media Specialist", "Deal Maker"]
 
     with st.form(key="form_kegiatan", clear_on_submit=True):
         
         col1, col2 = st.columns(2)
         with col1:
-            nama = st.selectbox("Pilih Nama Anda", NAMA_STAF, key="nama")
+            # --- PERBAIKAN: Ganti selectbox menjadi combobox ---
+            nama = st.combobox("Pilih atau Masukkan Nama Anda", NAMA_STAF, key="nama")
             tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
         
         with col2:
@@ -228,15 +252,16 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
     # --- 2. LOGIKA SETELAH TOMBOL SUBMIT DITEKAN ---
     if submitted:
-        if not deskripsi:
-            st.error("Deskripsi kegiatan wajib diisi!")
+        # --- PERBAIKAN: Cek juga jika 'nama' kosong ---
+        if not deskripsi or not nama:
+            st.error("Nama dan Deskripsi kegiatan wajib diisi!")
         else:
             with st.spinner("Sedang menyimpan laporan Anda..."):
                 
                 link_foto = "-" # Default jika tidak ada foto
                 # 1. Handle Upload Foto ke Dropbox (jika ada)
                 if foto_bukti is not None:
-                    # --- IMPROVEMENT: Kirim 'nama' ke fungsi upload ---
+                    # Kirim 'nama' ke fungsi upload
                     link_foto = upload_ke_dropbox(foto_bukti, nama)
                     if link_foto is None:
                         st.error("Gagal meng-upload foto ke Dropbox, laporan tidak disimpan.")
@@ -256,11 +281,11 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 ]
                 
                 # 3. Simpan ke Google Sheets
-                # --- IMPROVEMENT: Kirim 'nama' ke fungsi simpan ---
                 if simpan_ke_sheet(data_row, nama):
                     st.success(f"Laporan untuk {nama} berhasil disimpan!")
-                    # Hapus cache agar data terbaru muncul di dashboard
+                    # --- PERBAIKAN: Hapus SEMUA cache ---
                     st.cache_data.clear()
+                    st.cache_resource.clear()
                 else:
                     st.error("Terjadi kesalahan saat menyimpan data ke Google Sheet.")
 
@@ -270,37 +295,39 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     
     # Tombol refresh manual
     if st.button("🔄 Refresh Data"):
+        # --- PERBAIKAN: Hapus SEMUA cache ---
         st.cache_data.clear()
+        st.cache_resource.clear()
         st.rerun()
 
-    # --- IMPROVEMENT: Kirim 'NAMA_STAF' ke load_data ---
+    # --- PERBAIKAN: Panggil load_data() tanpa argumen ---
     # Fungsi ini akan otomatis memuat dan menggabungkan data dari semua worksheet
-    df = load_data(NAMA_STAF)
+    df = load_data()
         
     if df.empty:
         st.info("Belum ada data laporan yang masuk atau gagal memuat data.")
-    else:            
+    else: 
         # Tampilkan filter
         st.subheader("Filter Data")
         col_filter1, col_filter2 = st.columns(2)
         
-        # Pengecekan kolom (Logika ini tetap sama dan valid)
+        # Pengecekan kolom
         if COL_NAMA not in df.columns or COL_TEMPAT not in df.columns:
             st.error(f"Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom '{COL_NAMA}' dan '{COL_TEMPAT}'.")
             st.dataframe(df, use_container_width=True)
             st.stop()
 
         with col_filter1:
-            # Filter Nama (Tetap berfungsi seperti biasa)
+            # Filter Nama
             nama_unik = df[COL_NAMA].unique()
             filter_nama = st.multiselect("Filter berdasarkan Nama", options=nama_unik, default=list(nama_unik))
         
         with col_filter2:
-            # Filter berdasarkan 'Tempat Dikunjungi' (Tetap berfungsi seperti biasa)
+            # Filter berdasarkan 'Tempat Dikunjungi'
             tempat_unik = df[COL_TEMPAT].unique()
             filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
         
-        # Terapkan filter secara dinamis
+        # --- PERBAIKAN: Terapkan filter secara dinamis ---
         df_filtered = df.copy() # Mulai dengan semua data
 
         if filter_nama:
@@ -319,7 +346,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
             except Exception as e:
                 st.warning(f"Gagal mengurutkan data berdasarkan tanggal. Pastikan format tanggal benar. Error: {e}")
 
-        # --- IMPROVEMENT: Tampilkan data dalam "folder" (expander) per nama ---
+        # --- PERBAIKAN: Tampilkan data dalam "folder" (expander) per nama ---
         st.subheader("Hasil Laporan Terfilter")
 
         # Dapatkan nama unik dari data yang SUDAH difilter
