@@ -27,7 +27,7 @@ COL_NAMA = "Nama"
 COL_TEMPAT = "Tempat Dikunjungi"
 COL_DESKRIPSI = "Deskripsi"
 COL_LINK_FOTO = "Link Foto"
-COL_LINK_SOSMED = "Link Sosmed" # --- PERUBAHAN --- Kolom baru ditambahkan
+COL_LINK_SOSMED = "Link Sosmed" # Kolom baru ditambahkan
 
 # Daftar standar untuk pengecekan header
 NAMA_KOLOM_STANDAR = [
@@ -36,7 +36,7 @@ NAMA_KOLOM_STANDAR = [
     COL_TEMPAT, 
     COL_DESKRIPSI, 
     COL_LINK_FOTO, 
-    COL_LINK_SOSMED # --- PERUBAHAN --- Kolom baru ditambahkan
+    COL_LINK_SOSMED # Kolom baru ditambahkan
 ]
 
 
@@ -96,7 +96,7 @@ def get_or_create_worksheet(nama_worksheet):
         # Coba dapatkan worksheet (tab)
         worksheet = spreadsheet.worksheet(nama_worksheet)
         
-        # --- PERUBAHAN --- Pengecekan header
+        # Pengecekan header
         # Cek apakah header di sheet sudah sesuai dengan standar terbaru
         headers_di_sheet = worksheet.row_values(1)
         if headers_di_sheet != NAMA_KOLOM_STANDAR:
@@ -202,14 +202,13 @@ def load_data(daftar_staf):
         if not all_data:
             return pd.DataFrame(columns=NAMA_KOLOM_STANDAR) # Kembalikan DF kosong jika tidak ada data
 
-        # --- PERUBAHAN ---
         # Membuat DataFrame. Jika ada sheet lama yg belum punya kolom 'Link Sosmed',
         # pandas otomatis mengisi dgn NaN (Not a Number), yg aman.
         return pd.DataFrame(all_data)
     
     except Exception as e:
         st.error(f"Gagal memuat data dari Google Sheet: {e}")
-        # --- PERUBAHAN --- Pastikan DataFrame kosong punya semua kolom
+        # Pastikan DataFrame kosong punya semua kolom
         return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
 # --- JUDUL APLIKASI ---
@@ -229,17 +228,33 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     # --- 1. FORM INPUT KEGIATAN ---
     st.header("📝 Input Kegiatan Baru")
 
+    # --- PERUBAHAN ---
+    # 'nama' dipindahkan ke LUAR form. Ini memungkinkan UI 
+    # untuk bereaksi dan menampilkan input kondisional.
+    nama = st.selectbox(
+        "Pilih Job Desc Anda", 
+        NAMA_STAF, 
+        key="nama_job_desc_selector" 
+    )
+    # --- AKHIR PERUBAHAN ---
+
     with st.form(key="form_kegiatan", clear_on_submit=True):
         
         col1, col2 = st.columns(2)
+        
+        # 'nama' sekarang sudah didefinisikan di luar form
+        
         with col1:
-            # --- PERUBAHAN --- Label diubah dan input kondisional ditambahkan
-            nama = st.selectbox("Pilih Job Desc Anda", NAMA_STAF, key="nama")
             tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
             
-            link_sosmed = "" # Inisialisasi variabel
+            # --- PERUBAHAN ---
+            # Inisialisasi variabel input
+            link_sosmed_input = "" 
+            
+            # Kondisi ini sekarang berfungsi karena 'nama' 
+            # diambil dari selectbox di luar form
             if nama == "Social Media Specialist":
-                link_sosmed = st.text_input(
+                link_sosmed_input = st.text_input(
                     "Link Sosmed", 
                     placeholder="Contoh: https://www.instagram.com/p/...", 
                     key="linksosmed"
@@ -265,42 +280,42 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
     # --- 2. LOGIKA SETELAH TOMBOL SUBMIT DITEKAN ---
     if submitted:
+        # 'nama' sudah benar nilainya dari selectbox di luar form
+        # 'tanggal', 'tempat_dikunjungi', 'foto_bukti', 'deskripsi'
+        # nilainya diambil dari variabel widget di dalam form
+        
         if not deskripsi:
             st.error("Deskripsi kegiatan wajib diisi!")
         else:
             with st.spinner("Sedang menyimpan laporan Anda..."):
                 
                 link_foto = "-" # Default jika tidak ada foto
-                # 1. Handle Upload Foto ke Dropbox (jika ada)
                 if foto_bukti is not None:
-                    # --- IMPROVEMENT: Kirim 'nama' ke fungsi upload ---
+                    # Kirim 'nama' (dari luar form) ke fungsi upload
                     link_foto = upload_ke_dropbox(foto_bukti, nama)
                     if link_foto is None:
                         st.error("Gagal meng-upload foto ke Dropbox, laporan tidak disimpan.")
                         st.stop() 
 
-                # Dapatkan timestamp saat ini untuk disimpan
                 timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
-                # --- PERUBAHAN --- Siapkan link sosmed (beri default "-" jika kosong)
-                link_sosmed_final = link_sosmed if link_sosmed else "-"
+                # --- PERUBAHAN ---
+                # Ambil nilai link_sosmed secara eksplisit dari variabel input-nya
+                link_sosmed_final = link_sosmed_input if link_sosmed_input else "-"
+                # --- AKHIR PERUBAHAN ---
 
-                # 2. Siapkan data untuk Google Sheets
-                # Urutan list INI harus sama persis dengan NAMA_KOLOM_STANDAR
+                # Siapkan data untuk Google Sheets
                 data_row = [
                     timestamp_sekarang,
-                    nama,
+                    nama, # 'nama' dari luar form
                     tempat_dikunjungi,
                     deskripsi,
                     link_foto,
-                    link_sosmed_final # --- PERUBAHAN --- Tambahkan data baru
+                    link_sosmed_final
                 ]
                 
-                # 3. Simpan ke Google Sheets
-                # --- IMPROVEMENT: Kirim 'nama' ke fungsi simpan ---
-                if simpan_ke_sheet(data_row, nama):
+                if simpan_ke_sheet(data_row, nama): # 'nama' dari luar form
                     st.success(f"Laporan untuk {nama} berhasil disimpan!")
-                    # Hapus cache agar data terbaru muncul di dashboard
                     st.cache_data.clear()
                 else:
                     st.error("Terjadi kesalahan saat menyimpan data ke Google Sheet.")
@@ -338,7 +353,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
         with col_filter2:
             # Filter berdasarkan 'Tempat Dikunjungi' (Tetap berfungsi seperti biasa)
-            # --- PERUBAHAN --- Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
+            # Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
             tempat_unik = df[COL_TEMPAT].fillna("").unique()
             filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
         
@@ -351,7 +366,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
         if filter_tempat:
             # Terapkan filter tempat HANYA JIKA ada yang dipilih
-            # --- PERUBAHAN --- Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
+            # Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
             df_filtered = df_filtered[df_filtered[COL_TEMPAT].fillna("").isin(filter_tempat)]
 
         # Urutkan data dari yang terbaru
@@ -384,7 +399,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 # 'expanded=True' berarti "folder" ini akan langsung terbuka
                 with st.expander(f"📁 {nama_staf}    ({jumlah_laporan} Laporan)", expanded=True):
                     
-                    # --- PERUBAHAN ---
                     # Tampilkan tabel data di dalam expander
                     # Membuat column_config dinamis untuk link
                     
@@ -405,7 +419,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                         use_container_width=True, 
                         column_config=column_config
                     )
-                    # --- AKHIR PERUBAHAN ---
 
 
 # Tampilkan pesan jika koneksi gagal
