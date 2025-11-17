@@ -300,14 +300,16 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
             tempat_unik = df[COL_TEMPAT].unique()
             filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
         
-        # Terapkan filter
-        if filter_nama and filter_tempat:
-            df_filtered = df[
-                df[COL_NAMA].isin(filter_nama) &
-                df[COL_TEMPAT].isin(filter_tempat)
-            ].copy() 
-        else:
-            df_filtered = pd.DataFrame(columns=df.columns)
+        # Terapkan filter secara dinamis
+        df_filtered = df.copy() # Mulai dengan semua data
+
+        if filter_nama:
+            # Terapkan filter nama HANYA JIKA ada yang dipilih
+            df_filtered = df_filtered[df_filtered[COL_NAMA].isin(filter_nama)]
+
+        if filter_tempat:
+            # Terapkan filter tempat HANYA JIKA ada yang dipilih
+            df_filtered = df_filtered[df_filtered[COL_TEMPAT].isin(filter_tempat)]
 
         # Urutkan data dari yang terbaru
         if not df_filtered.empty:
