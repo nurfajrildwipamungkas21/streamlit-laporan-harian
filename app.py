@@ -24,10 +24,11 @@ FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
 KONEKSI_GSHEET_BERHASIL = False
 KONEKSI_DROPBOX_BERHASIL = False
 
-# 1. Koneksi Google Sheets
+# 1. Koneksi Google Sheets (Data Teks disimpan di sini)
 try:
     scopes = ['https://www.googleapis.com/auth/spreadsheets']
     
+    # Menggunakan kredensial dari [gcp_service_account]
     creds_dict = st.secrets["gcp_service_account"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     
@@ -39,10 +40,13 @@ try:
     KONEKSI_GSHEET_BERHASIL = True
 
 except Exception as e:
+    # Menampilkan error dan info penting jika gagal koneksi
     st.error(f"Koneksi ke Google Sheets Gagal: {e}")
+    st.info("PENTING: Pastikan Google Sheet sudah dibagikan ke email Service Account (lihat di secrets.toml bagian client_email) dan diberi akses 'Editor'.")
 
-# 2. Koneksi Dropbox
+# 2. Koneksi Dropbox (Foto disimpan di sini)
 try:
+    # Menggunakan kredensial dari [dropbox]
     DROPBOX_ACCESS_TOKEN = st.secrets["dropbox"]["access_token"]
     dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
     # Cek koneksi
@@ -80,7 +84,7 @@ def upload_ke_dropbox(file_obj):
         try:
             link = dbx.sharing_create_shared_link_with_settings(path_dropbox, settings=settings)
         except ApiError as e:
-            # Menangani kasus jika link sudah ada
+            # Menangani kasus jika link sudah ada (seharusnya jarang terjadi karena nama unik)
             if e.error.is_shared_link_already_exists():
                 links = dbx.sharing_list_shared_links(path_dropbox, direct_only=True)
                 if links.links:
@@ -191,8 +195,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     st.success(f"Laporan untuk {nama} berhasil disimpan!")
                     # Hapus cache agar data terbaru muncul di dashboard
                     st.cache_data.clear()
-                    # Muat ulang halaman untuk menampilkan data terbaru
-                    st.rerun()
+                    # Muat ulang halaman untuk menampilkan data terbaru (Opsional)
+                    # st.rerun() 
                 else:
                     st.error("Terjadi kesalahan saat menyimpan data ke Google Sheet.")
 
@@ -200,7 +204,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     # --- 3. DASBOR (TABEL LAPORAN) ---
     st.header("📊 Dasbor Laporan Kegiatan")
     
-    # Tombol refresh manual (opsional, karena sudah ada auto-refresh)
+    # Tombol refresh manual
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
@@ -215,44 +219,60 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         col_filter1, col_filter2 = st.columns(2)
         
         # Memastikan kolom ada sebelum memfilter
-        if 'Nama' not in df.columns or 'Tempat Dikunjungi' not in df.columns:
-            st.error("Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom 'Nama' dan 'Tempat Dikunjungi'.")
+        # Asumsi nama kolom di GSheet adalah: Timestamp, Nama, Tempat Dikunjungi, Deskripsi, Link Foto
+        KOLOM_NAMA = 'Nama'
+        KOLOM_TEMPAT = 'Tempat Dikunjungi'
+        KOLOM_LINK_FOTO = 'Link Foto' # Sesuaikan jika nama kolom di sheet berbeda
+
+        if KOLOM_NAMA not in df.columns or KOLOM_TEMPAT not in df.columns:
+            st.error(f"Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom '{KOLOM_NAMA}' dan '{KOLOM_TEMPAT}'.")
             st.dataframe(df, use_container_width=True)
             st.stop()
 
         with col_filter1:
             # Filter Nama
-            nama_unik = df['Nama'].unique()
+            nama_unik = df[KOLOM_NAMA].unique()
+            # Konversi ke list() agar default multiselect berfungsi dengan baik
             filter_nama = st.multiselect("Filter berdasarkan Nama", options=nama_unik, default=list(nama_unik))
         
         with col_filter2:
             # Filter berdasarkan 'Tempat Dikunjungi'
-            tempat_unik = df['Tempat Dikunjungi'].unique()
+            tempat_unik = df[KOLOM_TEMPAT].unique()
             filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
         
         # Terapkan filter
         if filter_nama and filter_tempat:
             df_filtered = df[
-                df['Nama'].isin(filter_nama) &
-                df['Tempat Dikunjungi'].isin(filter_tempat)
+                df[KOLOM_NAMA].isin(filter_nama) &
+                df[KOLOM_TEMPAT].isin(filter_tempat)
             ].copy() # Gunakan .copy() untuk menghindari SettingWithCopyWarning
         else:
-            df_filtered = pd.DataFrame(columns=df.columns) # Tampilkan tabel kosong jika filter kosong
+            # Tampilkan tabel kosong jika salah satu filter tidak dipilih
+            df_filtered = pd.DataFrame(columns=df.columns)
 
-        # Urutkan data dari yang terbaru (jika kolom Timestamp ada)
-        # Asumsi kolom pertama adalah Timestamp (sesuai logika penyimpanan)
-        kolom_timestamp = df.columns[0] 
-
+        # Urutkan data dari yang terbaru
+        
         if not df_filtered.empty:
             try:
+                # Asumsi kolom pertama adalah Timestamp
+                kolom_timestamp = df.columns[0]
                 # Konversi kolom timestamp ke datetime untuk pengurutan yang benar
                 df_filtered['sort_dt'] = pd.to_datetime(df_filtered[kolom_timestamp], format='%d-%m-%Y %H:%M:%S', errors='coerce')
+                # Urutkan dari yang terbaru dan hapus kolom bantu 'sort_dt'
                 df_filtered = df_filtered.sort_values(by='sort_dt', ascending=False).drop(columns=['sort_dt'])
             except Exception as e:
-                st.warning(f"Gagal mengurutkan data berdasarkan tanggal: {e}")
+                st.warning(f"Gagal mengurutkan data berdasarkan tanggal. Pastikan format tanggal benar. Error: {e}")
 
         # Tampilkan tabel data
-        st.dataframe(df_filtered, use_container_width=True)
+        # Gunakan column_config untuk membuat link foto bisa diklik
+        # Pastikan KOLOM_LINK_FOTO ada di dataframe sebelum konfigurasi
+        if KOLOM_LINK_FOTO in df.columns:
+            st.dataframe(df_filtered, use_container_width=True, column_config={
+                KOLOM_LINK_FOTO: st.column_config.LinkColumn(KOLOM_LINK_FOTO, display_text="Buka Foto")
+            })
+        else:
+            st.dataframe(df_filtered, use_container_width=True)
+
 
 # Tampilkan pesan jika koneksi gagal
 elif not KONEKSI_GSHEET_BERHASIL:
