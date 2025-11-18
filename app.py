@@ -90,7 +90,7 @@ except Exception as e:
 def get_or_create_worksheet(nama_worksheet):
     """
     Dapatkan worksheet (tab) berdasarkan nama, atau buat baru jika tidak ada.
-    Ini adalah "laci" di dalam "lemari" (spreadsheet).
+    Fungsi ini "BERSIH" dari panggilan UI Streamlit agar aman di-cache.
     """
     try:
         # Coba dapatkan worksheet (tab)
@@ -100,7 +100,8 @@ def get_or_create_worksheet(nama_worksheet):
         # Cek apakah header di sheet sudah sesuai dengan standar terbaru
         headers_di_sheet = worksheet.row_values(1)
         if headers_di_sheet != NAMA_KOLOM_STANDAR:
-            st.toast(f"Memperbarui header untuk worksheet '{nama_worksheet}'...")
+            # st.toast(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
+            
             # Menyiapkan update batch
             cell_list = worksheet.range(1, 1, 1, len(NAMA_KOLOM_STANDAR))
             for i, header_val in enumerate(NAMA_KOLOM_STANDAR):
@@ -114,9 +115,10 @@ def get_or_create_worksheet(nama_worksheet):
         # --- AKHIR PERUBAHAN ---
             
         return worksheet
+    
     except gspread.WorksheetNotFound:
         # Jika tidak ada, buat baru
-        st.toast(f"Worksheet '{nama_worksheet}' tidak ditemukan. Membuat baru...")
+        # st.toast(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
         worksheet = spreadsheet.add_worksheet(title=nama_worksheet, rows=1, cols=len(NAMA_KOLOM_STANDAR))
         # Otomatis buat header di worksheet baru
         worksheet.append_row(NAMA_KOLOM_STANDAR)
@@ -126,14 +128,17 @@ def get_or_create_worksheet(nama_worksheet):
         # --- AKHIR PERUBAHAN ---
         
         return worksheet
+    
     except Exception as e:
-        st.error(f"Gagal mendapatkan/membuat worksheet '{nama_worksheet}': {e}")
-        return None
+        # st.error(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
+        # Sebaliknya, lempar error ini agar fungsi pemanggil bisa menanganinya
+        print(f"Error di get_or_create_worksheet: {e}") # Log ke konsol
+        raise e # Lempar lagi error-nya
 
 def upload_ke_dropbox(file_obj, nama_staf):
     """
     Upload file ke subfolder Dropbox berdasarkan nama_staf.
-    Ini adalah "folder" di dalam Dropbox.
+    (Fungsi ini aman, tidak di-cache, st.error boleh ada di sini)
     """
     try:
         # Dapatkan bytes dari file
@@ -179,16 +184,21 @@ def upload_ke_dropbox(file_obj, nama_staf):
         return None
 
 def simpan_ke_sheet(data_list, nama_staf):
-    """Menyimpan satu baris data ke worksheet (tab) yang sesuai."""
+    """
+    Menyimpan satu baris data ke worksheet (tab) yang sesuai.
+    (Fungsi ini tidak di-cache, jadi aman untuk menampilkan st.error)
+    """
     try:
         # Dapatkan "laci" (worksheet) yang benar berdasarkan nama
-        worksheet = get_or_create_worksheet(nama_staf)
+        # Ini sekarang bisa melempar error dari get_or_create_worksheet
+        worksheet = get_or_create_worksheet(nama_staf) 
         if worksheet:
             worksheet.append_row(data_list)
             return True
         return False
     except Exception as e:
-        st.error(f"Error menyimpan ke Sheet: {e}")
+        # TANGKAP errornya DI SINI dan tampilkan ke UI
+        st.error(f"Error saat mencoba mengakses Sheet '{nama_staf}': {e}")
         return False
 
 # Fungsi untuk memuat data dengan caching (meningkatkan performa)
@@ -196,18 +206,26 @@ def simpan_ke_sheet(data_list, nama_staf):
 def load_data(daftar_staf):
     """
     Memuat data dari SEMUA worksheet staf dan menggabungkannya
-    agar bisa ditampilkan di dasbor.
+    agar bisa ditampilkan di dasbor. "BERSIH" dari panggilan UI.
     """
     try:
         all_data = []
         for nama_staf in daftar_staf:
-            # Dapatkan "laci" (worksheet) untuk staf ini
-            worksheet = get_or_create_worksheet(nama_staf)
-            if worksheet:
-                # get_all_records() akan membaca header dan mengambil semua data
-                data = worksheet.get_all_records()  
-                if data:
-                    all_data.extend(data) # Gabungkan data
+            # --- PERUBAHAN: Tambahkan try..except di dalam loop ---
+            # Agar jika satu sheet gagal, aplikasi tidak crash total
+            try:
+                # Dapatkan "laci" (worksheet) untuk staf ini
+                worksheet = get_or_create_worksheet(nama_staf)
+                if worksheet:
+                    # get_all_records() akan membaca header dan mengambil semua data
+                    data = worksheet.get_all_records()  
+                    if data:
+                        all_data.extend(data) # Gabungkan data
+            except Exception as e:
+                # Jika 1 sheet gagal, jangan hentikan semua.
+                # Cukup log ke konsol (BUKAN UI st.error)
+                print(f"PERINGATAN: Gagal memuat data untuk '{nama_staf}'. Error: {e}")
+                pass # Lanjut ke staf berikutnya
         
         if not all_data:
             return pd.DataFrame(columns=NAMA_KOLOM_STANDAR) # Kembalikan DF kosong jika tidak ada data
@@ -217,9 +235,10 @@ def load_data(daftar_staf):
         return pd.DataFrame(all_data)
     
     except Exception as e:
-        st.error(f"Gagal memuat data dari Google Sheet: {e}")
-        # Pastikan DataFrame kosong punya semua kolom
-        return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+        # st.error(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
+        print(f"Error fatal saat load_data: {e}") # Log ke konsol
+        # Lempar error agar bisa ditangani DI LUAR fungsi cache
+        raise e 
 
 # --- JUDUL APLIKASI ---
 st.title("✅ Aplikasi Laporan Kegiatan Harian")
@@ -317,11 +336,12 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     link_sosmed_final
                 ]
                 
+                # --- PERUBAHAN: Fungsi ini sekarang akan menampilkan st.error jika gagal ---
                 if simpan_ke_sheet(data_row, nama): # 'nama' dari luar form
                     st.success(f"Laporan untuk {nama} berhasil disimpan!")
-                    st.cache_data.clear()
-                else:
-                    st.error("Terjadi kesalahan saat menyimpan data ke Google Sheet.")
+                    st.cache_data.clear() # Hapus cache data agar dasbor update
+                # else:
+                #   Pesan error sudah ditangani DI DALAM fungsi simpan_ke_sheet()
 
 
     # --- 3. DASBOR (TABEL LAPORAN) ---
@@ -330,15 +350,25 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     # Tombol refresh manual
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
+        st.cache_resource.clear() # Hapus juga cache resource jika perlu
         st.rerun()
 
-    # Kirim 'NAMA_STAF' ke load_data
-    # Fungsi ini akan otomatis memuat dan menggabungkan data dari semua worksheet
-    df = load_data(NAMA_STAF)
+    # --- PERUBAHAN: Bungkus pemanggilan load_data dengan try...except ---
+    try:
+        # Kirim 'NAMA_STAF' ke load_data
+        # Fungsi ini akan otomatis memuat dan menggabungkan data dari semua worksheet
+        df = load_data(NAMA_STAF)
+    
+    except Exception as e:
+        # Tampilkan error ke UI DI SINI (di luar fungsi cache)
+        st.error(f"Gagal memuat data dari Google Sheet. Error: {e}")
+        # Buat DataFrame kosong agar sisa skrip tidak crash
+        df = pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+        
         
     if df.empty:
         st.info("Belum ada data laporan yang masuk atau gagal memuat data.")
-    else:     
+    else:    
         # Tampilkan filter
         st.subheader("Filter Data")
         col_filter1, col_filter2 = st.columns(2)
