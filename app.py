@@ -432,20 +432,20 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                             COL_LINK_SOSMED, display_text="Buka Link"
                         )
 
-                    # --- PERUBAHAN: Terapkan Styler untuk text wrap ---
-                    # 1. Buat Styler object dari dataframe Anda
-                    styler = data_staf.style.set_properties(
-                        subset=[COL_DESKRIPSI],  # Terapkan hanya ke kolom 'Deskripsi'
-                        **{'white-space': 'pre-wrap'} # Gunakan CSS untuk text wrapping
-                    )
-
-                    # 2. Tampilkan styler-nya, BUKAN dataframe aslinya
-                    st.dataframe(
-                        styler, # <-- Gunakan styler di sini
-                        use_container_width=True, 
-                        column_config=column_config
+                    # --- PERUBAHAN: Ganti st.dataframe + styler dengan st.data_editor ---
+                    
+                    # st.data_editor secara otomatis akan wrap teks di kolom Deskripsi
+                    # dan akan mematuhi column_config untuk Link Foto/Sosmed.
+                    
+                    st.data_editor(
+                        data_staf,
+                        use_container_width=True,
+                        column_config=column_config,
+                        disabled=True, # <-- PENTING: Membuat tabel jadi read-only
+                        key=f"editor_{nama_staf}" # <-- PENTING: Key unik di dalam loop
                     )
                     # --- PERUBAHAN SELESAI ---
+
 
 # Tampilkan pesan jika koneksi gagal
 elif not KONEKSI_GSHEET_BERHASIL:
