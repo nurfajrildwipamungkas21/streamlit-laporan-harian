@@ -333,7 +333,10 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
                 # Ambil nilai link_sosmed secara eksplisit
-                link_sosmed_final = link_sosmed_input if link_sosmed_input else "-"
+                if nama == "Social Media Specialist":
+                    link_sosmed_final = link_sosmed_input if link_sosmed_input else "-" # Jika Socmed, tapi kosong, beri strip
+                else:
+                    link_sosmed_final = "" # Jika bukan Socmed, KOSONGKAN
 
                 # Siapkan data untuk Google Sheets
                 data_row = [
