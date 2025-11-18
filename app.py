@@ -107,6 +107,11 @@ def get_or_create_worksheet(nama_worksheet):
                 cell_list[i].value = header_val
             # Update header dalam satu kali panggilan API
             worksheet.update_cells(cell_list)
+        
+        # --- PERUBAHAN: Atur Format Text Wrapping ---
+        # Terapkan "Bungkus Teks" ke kolom C (Tempat) dan D (Deskripsi)
+        worksheet.format("C:D", {"wrapStrategy": "WRAP"})
+        # --- AKHIR PERUBAHAN ---
             
         return worksheet
     except gspread.WorksheetNotFound:
@@ -115,6 +120,11 @@ def get_or_create_worksheet(nama_worksheet):
         worksheet = spreadsheet.add_worksheet(title=nama_worksheet, rows=1, cols=len(NAMA_KOLOM_STANDAR))
         # Otomatis buat header di worksheet baru
         worksheet.append_row(NAMA_KOLOM_STANDAR)
+        
+        # --- PERUBAHAN: Atur Format Text Wrapping (untuk sheet BARU) ---
+        worksheet.format("C:D", {"wrapStrategy": "WRAP"})
+        # --- AKHIR PERUBAHAN ---
+        
         return worksheet
     except Exception as e:
         st.error(f"Gagal mendapatkan/membuat worksheet '{nama_worksheet}': {e}")
@@ -219,6 +229,7 @@ st.write("Silakan masukkan kegiatan yang telah Anda lakukan hari ini.")
 if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
     # --- DAFTAR NAMA STAF ---
+    # !! SARAN: Pindahkan ini ke st.secrets seperti di diskusi sebelumnya
     NAMA_STAF = [
         "Saya",
         "Social Media Specialist",
@@ -228,7 +239,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     # --- 1. FORM INPUT KEGIATAN ---
     st.header("📝 Input Kegiatan Baru")
 
-    # --- PERUBAHAN ---
     # 'nama' dipindahkan ke LUAR form. Ini memungkinkan UI 
     # untuk bereaksi dan menampilkan input kondisional.
     nama = st.selectbox(
@@ -236,7 +246,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         NAMA_STAF, 
         key="nama_job_desc_selector" 
     )
-    # --- AKHIR PERUBAHAN ---
 
     with st.form(key="form_kegiatan", clear_on_submit=True):
         
@@ -247,7 +256,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         with col1:
             tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
             
-            # --- PERUBAHAN ---
             # Inisialisasi variabel input
             link_sosmed_input = "" 
             
@@ -259,7 +267,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     placeholder="Contoh: https://www.instagram.com/p/...", 
                     key="linksosmed"
                 )
-            # --- AKHIR PERUBAHAN ---
         
         with col2:
             tempat_dikunjungi = st.text_input("Tempat yang Dikunjungin", placeholder="Contoh: Klien A, Kantor Cabang", key="tempat")
@@ -281,8 +288,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     # --- 2. LOGIKA SETELAH TOMBOL SUBMIT DITEKAN ---
     if submitted:
         # 'nama' sudah benar nilainya dari selectbox di luar form
-        # 'tanggal', 'tempat_dikunjungi', 'foto_bukti', 'deskripsi'
-        # nilainya diambil dari variabel widget di dalam form
         
         if not deskripsi:
             st.error("Deskripsi kegiatan wajib diisi!")
@@ -299,10 +304,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
                 timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
-                # --- PERUBAHAN ---
                 # Ambil nilai link_sosmed secara eksplisit dari variabel input-nya
                 link_sosmed_final = link_sosmed_input if link_sosmed_input else "-"
-                # --- AKHIR PERUBAHAN ---
 
                 # Siapkan data untuk Google Sheets
                 data_row = [
@@ -329,30 +332,29 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         st.cache_data.clear()
         st.rerun()
 
-    # --- IMPROVEMENT: Kirim 'NAMA_STAF' ke load_data ---
+    # Kirim 'NAMA_STAF' ke load_data
     # Fungsi ini akan otomatis memuat dan menggabungkan data dari semua worksheet
     df = load_data(NAMA_STAF)
         
     if df.empty:
         st.info("Belum ada data laporan yang masuk atau gagal memuat data.")
-    else:      
+    else:     
         # Tampilkan filter
         st.subheader("Filter Data")
         col_filter1, col_filter2 = st.columns(2)
         
-        # Pengecekan kolom (Logika ini tetap sama dan valid)
         if COL_NAMA not in df.columns or COL_TEMPAT not in df.columns:
             st.error(f"Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom '{COL_NAMA}' dan '{COL_TEMPAT}'.")
             st.dataframe(df, use_container_width=True)
             st.stop()
 
         with col_filter1:
-            # Filter Nama (Tetap berfungsi seperti biasa)
+            # Filter Nama
             nama_unik = df[COL_NAMA].unique()
             filter_nama = st.multiselect("Filter berdasarkan Nama", options=nama_unik, default=list(nama_unik))
         
         with col_filter2:
-            # Filter berdasarkan 'Tempat Dikunjungi' (Tetap berfungsi seperti biasa)
+            # Filter berdasarkan 'Tempat Dikunjungi'
             # Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
             tempat_unik = df[COL_TEMPAT].fillna("").unique()
             filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
@@ -361,11 +363,9 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         df_filtered = df.copy() # Mulai dengan semua data
 
         if filter_nama:
-            # Terapkan filter nama HANYA JIKA ada yang dipilih
             df_filtered = df_filtered[df_filtered[COL_NAMA].isin(filter_nama)]
 
         if filter_tempat:
-            # Terapkan filter tempat HANYA JIKA ada yang dipilih
             # Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
             df_filtered = df_filtered[df_filtered[COL_TEMPAT].fillna("").isin(filter_tempat)]
 
@@ -377,7 +377,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
             except Exception as e:
                 st.warning(f"Gagal mengurutkan data berdasarkan tanggal. Pastikan format tanggal benar. Error: {e}")
 
-        # --- IMPROVEMENT: Tampilkan data dalam "folder" (expander) per nama ---
+        # Tampilkan data dalam "folder" (expander) per nama
         st.subheader("Hasil Laporan Terfilter")
 
         # Dapatkan nama unik dari data yang SUDAH difilter
@@ -396,8 +396,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 jumlah_laporan = len(data_staf)
                 
                 # Tampilkan expander (seperti "folder")
-                # 'expanded=True' berarti "folder" ini akan langsung terbuka
-                with st.expander(f"📁 {nama_staf}    ({jumlah_laporan} Laporan)", expanded=True):
+                with st.expander(f"📁 {nama_staf}     ({jumlah_laporan} Laporan)", expanded=True):
                     
                     # Tampilkan tabel data di dalam expander
                     # Membuat column_config dinamis untuk link
