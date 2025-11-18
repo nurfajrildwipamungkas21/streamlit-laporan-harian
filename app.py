@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 import gspread
 from google.oauth2.service_account import Credentials
 import io
@@ -350,7 +351,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     link_foto_final = "-" # Default jika tidak ada foto
                 # --- AKHIR PERUBAHAN 2 ---
 
-                timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
+                zona_waktu_wib = ZoneInfo("Asia/Jakarta")
+                timestamp_sekarang = datetime.now(tz=zona_waktu_wib).strftime('%d-%m-%Y %H:%M:%S')
 
                 # Ambil nilai link_sosmed secara eksplisit
                 if nama == "Social Media Specialist":
