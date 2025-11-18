@@ -301,11 +301,14 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         with col2:
             tempat_dikunjungi = st.text_input("Tempat yang Dikunjungin", placeholder="Contoh: Klien A, Kantor Cabang", key="tempat")
             
-            foto_bukti = st.file_uploader(
-                "Upload Foto Bukti (Opsional)",  
+            # --- PERUBAHAN 1: Multi-File Upload ---
+            list_foto_bukti = st.file_uploader(
+                "Upload Foto Bukti (Bisa lebih dari 1)",  # Label diubah
                 type=['jpg', 'jpeg', 'png'],
+                accept_multiple_files=True, # Ini kuncinya
                 key="foto"
             )
+            # --- AKHIR PERUBAHAN 1 ---
 
         deskripsi = st.text_area(
             "Deskripsi Lengkap Kegiatan",  
@@ -323,12 +326,29 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         else:
             with st.spinner("Sedang menyimpan laporan Anda..."):
                 
-                link_foto = "-" # Default jika tidak ada foto
-                if foto_bukti is not None:
-                    link_foto = upload_ke_dropbox(foto_bukti, nama)
-                    if link_foto is None:
-                        st.error("Gagal meng-upload foto ke Dropbox, laporan tidak disimpan.")
-                        st.stop() 
+                # --- PERUBAHAN 2: Logika Multi-Upload ---
+                list_link_hasil_upload = [] # Buat list kosong untuk menampung link
+                
+                # Cek apakah list_foto_bukti ada isinya (tidak kosong)
+                if list_foto_bukti:
+                    # Loop setiap file yang di-upload
+                    for foto in list_foto_bukti:
+                        st.info(f"Meng-upload {foto.name}...") # Kasih info ke user
+                        link = upload_ke_dropbox(foto, nama)
+                        
+                        if link:
+                            list_link_hasil_upload.append(link)
+                        else:
+                            # Jika salah satu foto gagal, batalkan semua
+                            st.error(f"Gagal meng-upload foto {foto.name}. Laporan dibatalkan.")
+                            st.stop()
+                
+                # Gabungkan semua link dalam list menjadi satu teks, dipisah baris baru (\n)
+                if list_link_hasil_upload:
+                    link_foto_final = "\n".join(list_link_hasil_upload)
+                else:
+                    link_foto_final = "-" # Default jika tidak ada foto
+                # --- AKHIR PERUBAHAN 2 ---
 
                 timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
@@ -344,7 +364,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     nama,
                     tempat_dikunjungi,
                     deskripsi,
-                    link_foto,
+                    link_foto_final, # Gunakan variabel baru
                     link_sosmed_final
                 ]
                 
@@ -379,7 +399,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
     if df.empty:
         st.info("Belum ada data laporan yang masuk atau gagal memuat data.")
-    else:    
+    else:   
         # Tampilkan filter
         st.subheader("Filter Data")
         col_filter1, col_filter2 = st.columns(2)
@@ -440,10 +460,14 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     # Membuat column_config dinamis untuk link
                     column_config = {}
                     
-                    if COL_LINK_FOTO in data_staf.columns:
-                        column_config[COL_LINK_FOTO] = st.column_config.LinkColumn(
-                            COL_LINK_FOTO, display_text="Buka Foto"
-                        )
+                    # --- PERUBAHAN 3: Hapus Konfigurasi Link Foto ---
+                    # Blok 'if COL_LINK_FOTO' dihapus agar st.data_editor
+                    # menampilkan teks link apa adanya (termasuk multi-baris).
+                    # if COL_LINK_FOTO in data_staf.columns:
+                    #     column_config[COL_LINK_FOTO] = st.column_config.LinkColumn(
+                    #         COL_LINK_FOTO, display_text="Buka Foto"
+                    #     )
+                    # --- AKHIR PERUBAHAN 3 ---
                     
                     if COL_LINK_SOSMED in data_staf.columns:
                         column_config[COL_LINK_SOSMED] = st.column_config.LinkColumn(
