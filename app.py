@@ -100,6 +100,7 @@ def get_or_create_worksheet(nama_worksheet):
         # Cek apakah header di sheet sudah sesuai dengan standar terbaru
         headers_di_sheet = worksheet.row_values(1)
         if headers_di_sheet != NAMA_KOLOM_STANDAR:
+            # --- PERUBAHAN CACHE ---
             # st.toast(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
             
             # Menyiapkan update batch
@@ -109,27 +110,26 @@ def get_or_create_worksheet(nama_worksheet):
             # Update header dalam satu kali panggilan API
             worksheet.update_cells(cell_list)
         
-        # --- PERUBAHAN: Atur Format Text Wrapping ---
-        # Terapkan "Bungkus Teks" ke kolom C (Tempat) dan D (Deskripsi)
+        # Atur Format Text Wrapping
         worksheet.format("C:D", {"wrapStrategy": "WRAP"})
-        # --- AKHIR PERUBAHAN ---
             
         return worksheet
     
     except gspread.WorksheetNotFound:
         # Jika tidak ada, buat baru
+        # --- PERUBAHAN CACHE ---
         # st.toast(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
         worksheet = spreadsheet.add_worksheet(title=nama_worksheet, rows=1, cols=len(NAMA_KOLOM_STANDAR))
         # Otomatis buat header di worksheet baru
         worksheet.append_row(NAMA_KOLOM_STANDAR)
         
-        # --- PERUBAHAN: Atur Format Text Wrapping (untuk sheet BARU) ---
+        # Atur Format Text Wrapping (untuk sheet BARU)
         worksheet.format("C:D", {"wrapStrategy": "WRAP"})
-        # --- AKHIR PERUBAHAN ---
         
         return worksheet
     
     except Exception as e:
+        # --- PERUBAHAN CACHE ---
         # st.error(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
         # Sebaliknya, lempar error ini agar fungsi pemanggil bisa menanganinya
         print(f"Error di get_or_create_worksheet: {e}") # Log ke konsol
@@ -150,12 +150,12 @@ def upload_ke_dropbox(file_obj, nama_staf):
         # Sanitasi nama file asli
         nama_file_asli = "".join([c for c in file_obj.name if c.isalnum() or c in ('.', '_', '-')])
         
-        # --- IMPROVEMENT: Buat subfolder berdasarkan nama staf ---
+        # Buat subfolder berdasarkan nama staf
         nama_folder_staf = "".join([c for c in nama_staf if c.isalnum() or c in (' ', '_', '-')]).replace(' ', '_')
         
         nama_file_unik = f"{timestamp}_{nama_file_asli}"
         
-        # --- IMPROVEMENT: Path baru kini menyertakan subfolder nama_folder_staf ---
+        # Path baru kini menyertakan subfolder nama_folder_staf
         path_dropbox = f"{FOLDER_DROPBOX}/{nama_folder_staf}/{nama_file_unik}"
 
         # 1. Upload file
@@ -190,6 +190,7 @@ def simpan_ke_sheet(data_list, nama_staf):
     """
     try:
         # Dapatkan "laci" (worksheet) yang benar berdasarkan nama
+        # --- PERUBAHAN CACHE ---
         # Ini sekarang bisa melempar error dari get_or_create_worksheet
         worksheet = get_or_create_worksheet(nama_staf) 
         if worksheet:
@@ -211,7 +212,7 @@ def load_data(daftar_staf):
     try:
         all_data = []
         for nama_staf in daftar_staf:
-            # --- PERUBAHAN: Tambahkan try..except di dalam loop ---
+            # --- PERUBAHAN CACHE: Tambahkan try..except di dalam loop ---
             # Agar jika satu sheet gagal, aplikasi tidak crash total
             try:
                 # Dapatkan "laci" (worksheet) untuk staf ini
@@ -230,11 +231,11 @@ def load_data(daftar_staf):
         if not all_data:
             return pd.DataFrame(columns=NAMA_KOLOM_STANDAR) # Kembalikan DF kosong jika tidak ada data
 
-        # Membuat DataFrame. Jika ada sheet lama yg belum punya kolom 'Link Sosmed',
-        # pandas otomatis mengisi dgn NaN (Not a Number), yg aman.
+        # Membuat DataFrame.
         return pd.DataFrame(all_data)
     
     except Exception as e:
+        # --- PERUBAHAN CACHE ---
         # st.error(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
         print(f"Error fatal saat load_data: {e}") # Log ke konsol
         # Lempar error agar bisa ditangani DI LUAR fungsi cache
@@ -248,7 +249,6 @@ st.write("Silakan masukkan kegiatan yang telah Anda lakukan hari ini.")
 if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
     # --- DAFTAR NAMA STAF ---
-    # !! SARAN: Pindahkan ini ke st.secrets seperti di diskusi sebelumnya
     NAMA_STAF = [
         "Saya",
         "Social Media Specialist",
@@ -258,8 +258,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     # --- 1. FORM INPUT KEGIATAN ---
     st.header("📝 Input Kegiatan Baru")
 
-    # 'nama' dipindahkan ke LUAR form. Ini memungkinkan UI 
-    # untuk bereaksi dan menampilkan input kondisional.
+    # 'nama' dipindahkan ke LUAR form.
     nama = st.selectbox(
         "Pilih Job Desc Anda", 
         NAMA_STAF, 
@@ -270,16 +269,13 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
         col1, col2 = st.columns(2)
         
-        # 'nama' sekarang sudah didefinisikan di luar form
-        
         with col1:
             tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
             
             # Inisialisasi variabel input
             link_sosmed_input = "" 
             
-            # Kondisi ini sekarang berfungsi karena 'nama' 
-            # diambil dari selectbox di luar form
+            # Input kondisional
             if nama == "Social Media Specialist":
                 link_sosmed_input = st.text_input(
                     "Link Sosmed", 
@@ -306,7 +302,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
     # --- 2. LOGIKA SETELAH TOMBOL SUBMIT DITEKAN ---
     if submitted:
-        # 'nama' sudah benar nilainya dari selectbox di luar form
         
         if not deskripsi:
             st.error("Deskripsi kegiatan wajib diisi!")
@@ -315,7 +310,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 
                 link_foto = "-" # Default jika tidak ada foto
                 if foto_bukti is not None:
-                    # Kirim 'nama' (dari luar form) ke fungsi upload
                     link_foto = upload_ke_dropbox(foto_bukti, nama)
                     if link_foto is None:
                         st.error("Gagal meng-upload foto ke Dropbox, laporan tidak disimpan.")
@@ -323,25 +317,25 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
                 timestamp_sekarang = datetime.now().strftime('%d-%m-%Y %H:%M:%S')
 
-                # Ambil nilai link_sosmed secara eksplisit dari variabel input-nya
+                # Ambil nilai link_sosmed secara eksplisit
                 link_sosmed_final = link_sosmed_input if link_sosmed_input else "-"
 
                 # Siapkan data untuk Google Sheets
                 data_row = [
                     timestamp_sekarang,
-                    nama, # 'nama' dari luar form
+                    nama,
                     tempat_dikunjungi,
                     deskripsi,
                     link_foto,
                     link_sosmed_final
                 ]
                 
-                # --- PERUBAHAN: Fungsi ini sekarang akan menampilkan st.error jika gagal ---
-                if simpan_ke_sheet(data_row, nama): # 'nama' dari luar form
+                # --- PERUBAHAN CACHE ---
+                # Fungsi ini sekarang akan menampilkan st.error jika gagal
+                if simpan_ke_sheet(data_row, nama): 
                     st.success(f"Laporan untuk {nama} berhasil disimpan!")
                     st.cache_data.clear() # Hapus cache data agar dasbor update
-                # else:
-                #   Pesan error sudah ditangani DI DALAM fungsi simpan_ke_sheet()
+                # else: Pesan error sudah ditangani DI DALAM fungsi simpan_ke_sheet()
 
 
     # --- 3. DASBOR (TABEL LAPORAN) ---
@@ -350,13 +344,12 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     # Tombol refresh manual
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
-        st.cache_resource.clear() # Hapus juga cache resource jika perlu
+        st.cache_resource.clear() # Hapus juga cache resource
         st.rerun()
 
-    # --- PERUBAHAN: Bungkus pemanggilan load_data dengan try...except ---
+    # --- PERUBAHAN CACHE: Bungkus pemanggilan load_data dengan try...except ---
     try:
         # Kirim 'NAMA_STAF' ke load_data
-        # Fungsi ini akan otomatis memuat dan menggabungkan data dari semua worksheet
         df = load_data(NAMA_STAF)
     
     except Exception as e:
@@ -385,7 +378,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
         with col_filter2:
             # Filter berdasarkan 'Tempat Dikunjungi'
-            # Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
             tempat_unik = df[COL_TEMPAT].fillna("").unique()
             filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
         
@@ -396,7 +388,6 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
             df_filtered = df_filtered[df_filtered[COL_NAMA].isin(filter_nama)]
 
         if filter_tempat:
-            # Mengisi NaN (jika ada data lama) dengan string kosong agar filter tetap jalan
             df_filtered = df_filtered[df_filtered[COL_TEMPAT].fillna("").isin(filter_tempat)]
 
         # Urutkan data dari yang terbaru
@@ -428,9 +419,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 # Tampilkan expander (seperti "folder")
                 with st.expander(f"📁 {nama_staf}     ({jumlah_laporan} Laporan)", expanded=True):
                     
-                    # Tampilkan tabel data di dalam expander
                     # Membuat column_config dinamis untuk link
-                    
                     column_config = {}
                     
                     if COL_LINK_FOTO in data_staf.columns:
@@ -443,12 +432,20 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                             COL_LINK_SOSMED, display_text="Buka Link"
                         )
 
+                    # --- PERUBAHAN: Terapkan Styler untuk text wrap ---
+                    # 1. Buat Styler object dari dataframe Anda
+                    styler = data_staf.style.set_properties(
+                        subset=[COL_DESKRIPSI],  # Terapkan hanya ke kolom 'Deskripsi'
+                        **{'white-space': 'pre-wrap'} # Gunakan CSS untuk text wrapping
+                    )
+
+                    # 2. Tampilkan styler-nya, BUKAN dataframe aslinya
                     st.dataframe(
-                        data_staf, 
+                        styler, # <-- Gunakan styler di sini
                         use_container_width=True, 
                         column_config=column_config
                     )
-
+                    # --- PERUBAHAN SELESAI ---
 
 # Tampilkan pesan jika koneksi gagal
 elif not KONEKSI_GSHEET_BERHASIL:
