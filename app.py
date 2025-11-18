@@ -111,7 +111,15 @@ def get_or_create_worksheet(nama_worksheet):
             worksheet.update_cells(cell_list)
         
         # Atur Format Text Wrapping
-        worksheet.format("C:D", {"wrapStrategy": "WRAP"})
+        worksheet.format("C:D", {
+            "wrapStrategy": "WRAP",
+            "verticalAlignment": "TOP"
+        })
+
+        # Atur Format untuk sisanya (Hanya Top Align)
+        # Kolom A, B, dan E, F (sesuai NAMA_KOLOM_STANDAR Anda)
+        worksheet.format("A:B", {"verticalAlignment": "TOP"})
+        worksheet.format("E:F", {"verticalAlignment": "TOP"})
             
         return worksheet
     
@@ -124,7 +132,14 @@ def get_or_create_worksheet(nama_worksheet):
         worksheet.append_row(NAMA_KOLOM_STANDAR)
         
         # Atur Format Text Wrapping (untuk sheet BARU)
-        worksheet.format("C:D", {"wrapStrategy": "WRAP"})
+        worksheet.format("C:D", {
+            "wrapStrategy": "WRAP",
+            "verticalAlignment": "TOP"
+        })
+
+        # Atur Format untuk sisanya (Hanya Top Align)
+        worksheet.format("A:B", {"verticalAlignment": "TOP"})
+        worksheet.format("E:F", {"verticalAlignment": "TOP"})
         
         return worksheet
     
