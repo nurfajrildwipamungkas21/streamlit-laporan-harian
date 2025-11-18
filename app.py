@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta # <-- 1. DITAMBAHKAN 'timedelta'
 from zoneinfo import ZoneInfo
 import gspread
 from google.oauth2.service_account import Credentials
@@ -286,7 +286,20 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         col1, col2 = st.columns(2)
         
         with col1:
-            tanggal = st.date_input("Tanggal Kegiatan", value=date.today(), key="tanggal")
+            # --- 2. PERUBAHAN: MENCEGAH KECURANGAN TANGGAL ---
+            # Dapatkan tanggal HARI INI sesuai zona waktu WIB
+            today_wib = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
+            # Hitung tanggal KEMARIN (toleransi 1 hari)
+            yesterday_wib = today_wib - timedelta(days=1)
+
+            tanggal = st.date_input(
+                "Tanggal Kegiatan", 
+                value=today_wib, 
+                min_value=yesterday_wib, # <-- Boleh input H-1 (Kemarin)
+                max_value=today_wib,     # <-- Paling mentok hari ini
+                key="tanggal"
+            )
+            # --- AKHIR PERUBAHAN 2 ---
             
             # Inisialisasi variabel input
             link_sosmed_input = "" 
@@ -302,14 +315,14 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         with col2:
             tempat_dikunjungi = st.text_input("Tempat yang Dikunjungin", placeholder="Contoh: Klien A, Kantor Cabang", key="tempat")
             
-            # --- PERUBAHAN 1: Multi-File Upload ---
+            # --- Fitur Multi-File Upload (Sudah Ada) ---
             list_foto_bukti = st.file_uploader(
                 "Upload Foto Bukti (Bisa lebih dari 1)",  # Label diubah
                 type=['jpg', 'jpeg', 'png'],
                 accept_multiple_files=True, # Ini kuncinya
                 key="foto"
             )
-            # --- AKHIR PERUBAHAN 1 ---
+            # --- Akhir Fitur Multi-File Upload ---
 
         deskripsi = st.text_area(
             "Deskripsi Lengkap Kegiatan",  
@@ -327,7 +340,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         else:
             with st.spinner("Sedang menyimpan laporan Anda..."):
                 
-                # --- PERUBAHAN 2: Logika Multi-Upload ---
+                # --- Logika Multi-Upload (Sudah Ada) ---
                 list_link_hasil_upload = [] # Buat list kosong untuk menampung link
                 
                 # Cek apakah list_foto_bukti ada isinya (tidak kosong)
@@ -349,10 +362,12 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     link_foto_final = "\n".join(list_link_hasil_upload)
                 else:
                     link_foto_final = "-" # Default jika tidak ada foto
-                # --- AKHIR PERUBAHAN 2 ---
+                # --- Akhir Logika Multi-Upload ---
 
+                # --- Logika Timestamp WIB (Sudah Ada) ---
                 zona_waktu_wib = ZoneInfo("Asia/Jakarta")
                 timestamp_sekarang = datetime.now(tz=zona_waktu_wib).strftime('%d-%m-%Y %H:%M:%S')
+                # --- Akhir Logika Timestamp WIB ---
 
                 # Ambil nilai link_sosmed secara eksplisit
                 if nama == "Social Media Specialist":
@@ -462,14 +477,10 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     # Membuat column_config dinamis untuk link
                     column_config = {}
                     
-                    # --- PERUBAHAN 3: Hapus Konfigurasi Link Foto ---
+                    # --- Tampilan Multi-Link (Sudah Ada) ---
                     # Blok 'if COL_LINK_FOTO' dihapus agar st.data_editor
                     # menampilkan teks link apa adanya (termasuk multi-baris).
-                    # if COL_LINK_FOTO in data_staf.columns:
-                    #     column_config[COL_LINK_FOTO] = st.column_config.LinkColumn(
-                    #         COL_LINK_FOTO, display_text="Buka Foto"
-                    #     )
-                    # --- AKHIR PERUBAHAN 3 ---
+                    # --- Akhir Tampilan Multi-Link ---
                     
                     if COL_LINK_SOSMED in data_staf.columns:
                         column_config[COL_LINK_SOSMED] = st.column_config.LinkColumn(
