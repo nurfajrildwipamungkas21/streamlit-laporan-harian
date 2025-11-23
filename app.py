@@ -17,7 +17,7 @@ try:
 except ImportError:
     HAS_AGGRID = False
 
-# 2. Plotly (Grafik Canggih untuk Dashboard)
+# 2. Plotly (Grafik Canggih)
 try:
     import plotly.express as px
     HAS_PLOTLY = True
@@ -31,7 +31,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- KONFIGURASI VARIABEL ---
+# --- KONFIGURASI ---
 NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
 FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
 
@@ -40,7 +40,7 @@ SHEET_CONFIG_NAMA = "Config_Staf"
 SHEET_TARGET_TEAM = "Target_Team_Checklist"
 SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 
-# --- KOLOM STANDAR ---
+# --- KOLOM LAPORAN HARIAN ---
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
 COL_TEMPAT = "Tempat Dikunjungi"
@@ -59,12 +59,17 @@ dbx = None
 try:
     if "gcp_service_account" in st.secrets:
         scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+        # Fix RSA Key formatting issues if present
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         gc = gspread.authorize(creds)
         spreadsheet = gc.open(NAMA_GOOGLE_SHEET)
         KONEKSI_GSHEET_BERHASIL = True
     else:
-        st.error("GSheet Error: Kredensial tidak ditemukan di secrets.")
+        st.error("GSheet Error: Kredensial tidak ditemukan.")
 except Exception as e:
     st.error(f"GSheet Error: {e}")
 
@@ -82,10 +87,13 @@ except Exception as e:
     st.error(f"Dropbox Error: {e}")
 
 
-# ==========================================
-# 🎨 SMART FORMATTING ENGINE (FITUR BARU)
-# ==========================================
+# --- FUNGSI HELPER CORE & SMART FORMATTING (UPDATED) ---
+
 def auto_format_sheet(worksheet):
+    """
+    Fungsi pemformatan canggih dari Code 2:
+    Mengatur lebar kolom pixel-perfect, warna header, frozen row, dan wrap text.
+    """
     try:
         sheet_id = worksheet.id
         all_values = worksheet.get_all_values()
@@ -93,12 +101,13 @@ def auto_format_sheet(worksheet):
 
         headers = all_values[0]
         data_row_count = len(all_values)
-        formatting_row_count = worksheet.row_count if worksheet.row_count > data_row_count else data_row_count
+        formatting_row_count = worksheet.row_count
+        if data_row_count > formatting_row_count: formatting_row_count = data_row_count
 
         requests = []
+        default_body_format = {"verticalAlignment": "TOP", "wrapStrategy": "CLIP"}
 
-        # 1. Set Default Style (Wrap Text + Align Top)
-        default_body_format = {"verticalAlignment": "TOP", "wrapStrategy": "WRAP"}
+        # 1. Reset Body
         requests.append({
             "repeatCell": {
                 "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": formatting_row_count},
@@ -107,17 +116,27 @@ def auto_format_sheet(worksheet):
             }
         })
 
-        # 2. Resize Columns Logic
+        # 2. Smart Column Sizing & Alignment
         for i, col_name in enumerate(headers):
             col_index = i
+            cell_format_override = {}
             width = 100
-            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed"]:
-                width = 300
-            elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp", "Nama", "Tempat Dikunjungi"]:
-                width = 150
+
+            # Definisi lebar kolom berdasarkan nama header (Gabungan Code 1 & 2)
+            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed", "Tempat Dikunjungi"]:
+                width = 350
+                cell_format_override["wrapStrategy"] = "WRAP"
+            elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
+                width = 150 if col_name == "Timestamp" else 120
+                cell_format_override["horizontalAlignment"] = "CENTER"
             elif col_name in ["Status", "Done?"]:
                 width = 60
+                cell_format_override["horizontalAlignment"] = "CENTER"
+            elif col_name == "Nama":
+                width = 150
+                cell_format_override["wrapStrategy"] = "WRAP"
 
+            # Apply Width
             requests.append({
                 "updateDimensionProperties": {
                     "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": col_index, "endIndex": col_index + 1},
@@ -126,7 +145,17 @@ def auto_format_sheet(worksheet):
                 }
             })
 
-        # 3. Header Styling (Bold & Frozen)
+            # Apply Specific Alignment/Wrapping
+            if cell_format_override:
+                requests.append({
+                    "repeatCell": {
+                        "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": formatting_row_count, "startColumnIndex": col_index, "endColumnIndex": col_index + 1},
+                        "cell": {"userEnteredFormat": cell_format_override},
+                        "fields": f"userEnteredFormat({','.join(cell_format_override.keys())})"
+                    }
+                })
+
+        # 3. Header Styling (Bold, Grey Background, Center)
         requests.append({
             "repeatCell": {
                 "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
@@ -140,6 +169,8 @@ def auto_format_sheet(worksheet):
                 "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor,wrapStrategy)"
             }
         })
+        
+        # 4. Freeze Header
         requests.append({
             "updateSheetProperties": {
                 "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
@@ -147,13 +178,20 @@ def auto_format_sheet(worksheet):
             }
         })
 
+        # 5. Auto Resize Rows (Height)
+        if data_row_count > 1: 
+            requests.append({
+                "autoResizeDimensions": {
+                    "dimensions": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": 1, "endIndex": data_row_count}
+                }
+            })
+
         if requests:
-            worksheet.spreadsheet.batch_update({"requests": requests})
+            body = {"requests": requests}
+            worksheet.spreadsheet.batch_update(body)
+
     except Exception as e:
         print(f"Format Error: {e}")
-
-
-# --- FUNGSI HELPER DATABASE ---
 
 @st.cache_resource(ttl=60)
 def get_or_create_worksheet(nama_worksheet):
@@ -213,8 +251,6 @@ def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
         return link.url.replace("?dl=0", "?raw=1")
     except Exception as e: return "-"
 
-# --- FUNGSI LOGIC UTAMA ---
-
 def clean_bulk_input(text_input):
     lines = text_input.split('\n')
     cleaned_targets = []
@@ -256,7 +292,7 @@ def save_checklist(sheet_name, df):
         df_save = df_save.astype(str)
         data_to_save = [df_save.columns.values.tolist()] + df_save.values.tolist()
         ws.update(range_name="A1", values=data_to_save, value_input_option='USER_ENTERED')
-        auto_format_sheet(ws)
+        auto_format_sheet(ws) 
         return True
     except Exception as e: return False
 
@@ -351,15 +387,10 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 if KONEKSI_GSHEET_BERHASIL:
     if not KONEKSI_DROPBOX_BERHASIL: st.warning("⚠️ Dropbox non-aktif. Fitur foto dimatikan.")
 
-    # ==========================================
-    # SIDEBAR: MENU NAVIGASI (DIPULIHKAN)
-    # ==========================================
+    # SIDEBAR
     with st.sidebar:
         st.header("Navigasi")
-        
-        # MENU SELECTOR (TOMBOL PINDAH HALAMAN)
-        menu_nav = st.radio("Pilih Tampilan:", ["📝 Laporan & Target", "📊 Dashboard Manager"])
-        
+        menu_nav = st.radio("Pilih Menu:", ["📝 Laporan & Target", "📊 Dashboard Manager"])
         st.divider()
         st.header("🎯 Manajemen Target")
         tab_team, tab_individu, tab_admin = st.tabs(["Team", "Pribadi", "Admin"])
@@ -410,13 +441,12 @@ if KONEKSI_GSHEET_BERHASIL:
     st.title("🚀 Sales & Marketing Action Center")
     st.caption(f"Realtime: {datetime.now(tz=ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y %H:%M:%S')}")
 
-    # ==========================================
-    # MENU 1: OPERASIONAL (INPUT & CHECKLIST)
-    # ==========================================
+    # --- MENU 1: OPERASIONAL ---
     if menu_nav == "📝 Laporan & Target":
         st.subheader("📊 Checklist Target (Result KPI)")
         col_dash_1, col_dash_2 = st.columns(2)
         
+        # Load Data
         df_team = load_checklist(SHEET_TARGET_TEAM, ["Misi", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan"])
         df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, ["Nama", "Target", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan"])
 
@@ -427,7 +457,7 @@ if KONEKSI_GSHEET_BERHASIL:
                 st.progress(done/len(df_team) if len(df_team)>0 else 0, text=f"Pencapaian: {done}/{len(df_team)}")
                 edited_team = render_hybrid_table(df_team, "team_table", "Misi")
                 if st.button("💾 Simpan Team", use_container_width=True):
-                    if save_checklist(SHEET_TARGET_TEAM, edited_team): st.toast("Tersimpan & Diformat!", icon="✅"); st.cache_data.clear(); st.rerun()
+                     if save_checklist(SHEET_TARGET_TEAM, edited_team): st.toast("Tersimpan!", icon="✅"); st.cache_data.clear(); st.rerun()
                 
                 with st.expander("📂 Update Bukti (Team)"):
                     pilih_misi = st.selectbox("Misi:", df_team["Misi"].tolist())
@@ -436,7 +466,7 @@ if KONEKSI_GSHEET_BERHASIL:
                     if st.button("Update Team"):
                         pelapor = get_daftar_staf_terbaru()[0] if get_daftar_staf_terbaru() else "Admin"
                         sukses, msg = update_evidence_row(SHEET_TARGET_TEAM, pilih_misi, note_misi, file_misi, pelapor, "Target_Team")
-                        if sukses: st.success("Updated & Diformat!"); st.cache_data.clear(); st.rerun()
+                        if sukses: st.success("Updated!"); st.cache_data.clear(); st.rerun()
                         else: st.error(msg)
 
         with col_dash_2:
@@ -450,76 +480,108 @@ if KONEKSI_GSHEET_BERHASIL:
                     edited_indiv = render_hybrid_table(df_user, f"indiv_{filter_nama}", "Target")
                     if st.button(f"💾 Simpan {filter_nama}", use_container_width=True):
                         df_all_upd = df_indiv_all.copy(); df_all_upd.update(edited_indiv)
-                        if save_checklist(SHEET_TARGET_INDIVIDU, df_all_upd): st.toast("Tersimpan & Diformat!", icon="✅"); st.cache_data.clear(); st.rerun()
+                        if save_checklist(SHEET_TARGET_INDIVIDU, df_all_upd): st.toast("Tersimpan!", icon="✅"); st.cache_data.clear(); st.rerun()
                     
                     with st.expander(f"📂 Update Bukti ({filter_nama})"):
                         pilih_target = st.selectbox("Target:", df_user["Target"].tolist())
                         note_target = st.text_area("Catatan", key="note_indiv")
                         file_target = st.file_uploader("Bukti", key="up_indiv", disabled=not KONEKSI_DROPBOX_BERHASIL)
                         if st.button("Update Pribadi"):
-                            sukses, msg = update_evidence_row(SHEET_TARGET_INDIVIDU, pilih_target, note_target, file_target, filter_nama, "Target_Individu")
-                            if sukses: st.success("Updated & Diformat!"); st.cache_data.clear(); st.rerun()
-                            else: st.error(msg)
+                             sukses, msg = update_evidence_row(SHEET_TARGET_INDIVIDU, pilih_target, note_target, file_target, filter_nama, "Target_Individu")
+                             if sukses: st.success("Updated!"); st.cache_data.clear(); st.rerun()
+                             else: st.error(msg)
                 else: st.info("Belum ada target.")
             else: st.info("Data kosong.")
 
-        # --- INPUT HARIAN (DINAMIS TANPA FORM UNTUK PHOTO LOOP) ---
+        # --- INPUT HARIAN (DYNAMIC + FAIRNESS LOGIC) ---
         st.divider()
         with st.container(border=True):
             st.subheader("📝 Input Laporan Harian (Activity)")
             
+            # 1. Identitas
             nama_pelapor = st.selectbox("Nama Pelapor", get_daftar_staf_terbaru(), key="pelapor_main")
             
-            # KITA GUNAKAN LOGIC NO-FORM DISINI AGAR LOOP FOTO JALAN
+            # 2. Kategori Aktivitas (Fitur Fairness dari Code 1)
+            kategori_aktivitas = st.radio(
+                "Jenis Aktivitas:", 
+                ["🚗 Kunjungan Lapangan (Sales)", "💻 Digital Marketing / Konten / Ads", "📞 Telesales / Follow Up", "🏢 Admin / Lainnya"],
+                horizontal=True
+            )
+
             c1, c2 = st.columns(2)
             with c1:
                 today_now = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
                 st.markdown(f"**Tanggal:** `{today_now.strftime('%d-%m-%Y')}`")
-                sosmed_link = st.text_input("Link Sosmed / Konten (Opsional)")
+                
+                # Logic: Tampilkan input link sosmed hanya jika Digital Marketing
+                sosmed_link = ""
+                if "Digital Marketing" in kategori_aktivitas:
+                    sosmed_link = st.text_input("Link Konten / Ads / Drive (Wajib jika ada)")
+            
             with c2:
-                lokasi_input = st.text_input("📍 Lokasi / Nama Klien / Jenis Tugas")
-                fotos = st.file_uploader("Upload Bukti (Foto/Screenshot)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
+                # Logic: Kolom 'Lokasi' berubah fungsi tergantung kategori
+                lokasi_input = ""
+                if "Kunjungan" in kategori_aktivitas:
+                    lokasi_input = st.text_input("📍 Nama Klien / Lokasi Kunjungan (Wajib)")
+                else:
+                    # Jika Digital, lokasi otomatis diisi kategori agar grafik rapi
+                    lokasi_input = st.text_input("Jenis Tugas (Otomatis)", value=kategori_aktivitas.split(' ')[1], disabled=True)
+                
+                # DYNAMIC INPUT (Code 2 Style): File Uploader di luar form agar bisa trigger rerun
+                fotos = st.file_uploader("Upload Bukti (Foto/Screenshot/Dokumen)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
 
-            # Dynamic Deskripsi Loop
+            # Logic Deskripsi (Dynamic 1 Foto = 1 Desc)
             deskripsi_map = {}
             main_deskripsi = ""
 
             if fotos:
-                st.info("📸 **Detail Bukti:** Berikan keterangan untuk setiap file:")
+                st.info("📸 **Detail Bukti:** Berikan keterangan spesifik untuk setiap file:")
+                # Loop ini memastikan setiap foto punya deskripsi sendiri (Code 2 Style)
                 for i, f in enumerate(fotos):
                     with st.container(border=True):
                         col_img, col_desc = st.columns([1, 3])
                         with col_img:
-                            if f.type.startswith('image'): st.image(f, width=100)
+                            # Preview Gambar
+                            if f.type.startswith('image'): st.image(f, width=150)
                             else: st.markdown(f"📄 **{f.name}**")
                         with col_desc:
-                            deskripsi_map[f.name] = st.text_area(f"Ket. File {i+1}", height=70, key=f"desc_{i}", placeholder=f"Jelaskan aktivitas foto {f.name}...")
+                            # Input Deskripsi per file
+                            deskripsi_map[f.name] = st.text_area(
+                                f"Ket. File: {f.name}", 
+                                height=70, 
+                                key=f"desc_{i}", 
+                                placeholder="Jelaskan aktivitas terkait file ini..."
+                            )
             else:
-                main_deskripsi = st.text_area("Deskripsi Aktivitas", placeholder="Jelaskan apa yang dikerjakan...")
+                placeholder_text = "Jelaskan hasil kunjungan..." if "Kunjungan" in kategori_aktivitas else "Jelaskan konten/ads/calls yang dikerjakan..."
+                main_deskripsi = st.text_area("Deskripsi Aktivitas", placeholder=placeholder_text)
 
+            # BUTTON SUBMIT (Bukan st.form_submit_button karena kita pakai Dynamic Input)
             if st.button("✅ Submit Laporan", type="primary"):
+                # Validasi
                 valid = True
-                if not lokasi_input:
-                    st.error("Lokasi / Jenis Tugas Wajib Diisi!"); valid = False
+                if "Kunjungan" in kategori_aktivitas and not lokasi_input:
+                    st.error("Untuk Kunjungan, Lokasi Wajib Diisi!"); valid = False
                 if not fotos and not main_deskripsi:
                     st.error("Deskripsi Wajib Diisi!"); valid = False
                 
                 if valid:
-                    with st.spinner("Menyimpan dan merapikan spreadsheet..."):
-                        rows_to_insert = []
+                    with st.spinner("Menyimpan dan memformat database..."):
+                        rows = []
                         ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
+                        final_lokasi = lokasi_input if lokasi_input else kategori_aktivitas
                         
-                        # Logic: 1 Foto = 1 Baris (Granular)
+                        # Simpan per foto (Granular - Code 2 Style)
                         if fotos and KONEKSI_DROPBOX_BERHASIL:
                             for f in fotos:
                                 url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
                                 desc = deskripsi_map.get(f.name, "-")
-                                rows_to_insert.append([ts, nama_pelapor, lokasi_input, desc, url, sosmed_link if sosmed_link else "-"])
+                                rows.append([ts, nama_pelapor, final_lokasi, desc, url, sosmed_link if sosmed_link else "-"])
                         else:
-                            rows_to_insert.append([ts, nama_pelapor, lokasi_input, main_deskripsi, "-", sosmed_link if sosmed_link else "-"])
+                            rows.append([ts, nama_pelapor, final_lokasi, main_deskripsi, "-", sosmed_link if sosmed_link else "-"])
                         
-                        if simpan_laporan_harian_batch(rows_to_insert, nama_pelapor):
-                            st.success(f"Laporan Tersimpan! Spreadsheet otomatis dirapikan."); st.balloons(); st.cache_data.clear()
+                        if simpan_laporan_harian_batch(rows, nama_pelapor):
+                            st.success(f"Laporan '{kategori_aktivitas}' Tersimpan!"); st.balloons(); st.cache_data.clear()
                         else: st.error("Gagal simpan.")
         
         # Log Aktivitas
@@ -529,12 +591,10 @@ if KONEKSI_GSHEET_BERHASIL:
             if not df_log.empty: st.dataframe(df_log, use_container_width=True, hide_index=True)
             else: st.info("Kosong")
 
-    # ==========================================
-    # MENU 2: DASHBOARD MANAGER & GALERI (DIPULIHKAN)
-    # ==========================================
+    # --- MENU 2: DASHBOARD MANAGER (FITUR BARU) ---
     elif menu_nav == "📊 Dashboard Manager":
-        st.header("📊 Dashboard & Galeri")
-        st.info("Dashboard ini memisahkan analisa antara Kunjungan Lapangan (Sales) dan Aktivitas Digital (Marketing).")
+        st.header("📊 Dashboard Produktivitas (Split View)")
+        st.info("Dashboard ini memisahkan analisa antara Kunjungan Lapangan (Sales) dan Aktivitas Digital (Marketing) agar penilaian adil.")
         
         if st.button("🔄 Refresh Data"): st.cache_data.clear(); st.rerun()
 
@@ -582,22 +642,29 @@ if KONEKSI_GSHEET_BERHASIL:
                 
                 if not df_mkt.empty:
                     st.subheader("Produktivitas Tim Digital")
+                    # Fallback jika Plotly tidak ada
                     if HAS_PLOTLY:
                         fig = px.pie(df_mkt, names=COL_NAMA, title="Distribusi Beban Kerja Digital")
                         st.plotly_chart(fig, use_container_width=True)
                     else:
+                        st.warning("Install 'plotly' untuk grafik interaktif.")
                         st.bar_chart(df_mkt[COL_NAMA].value_counts())
+                        
+                    st.subheader("Jenis Tugas Digital")
+                    st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
             
-            # --- GALERI BUKTI (PDF PERFECT VIEW) ---
+            # --- GALERI BUKTI (PDF PERFECT VIEW & DESCRIPTION ADDED) ---
             with tab_galeri:
                 st.caption("Menampilkan bukti foto/dokumen terbaru")
                 
-                # Filter link valid
+                # Filter link yang valid
                 df_foto = df_filt[df_filt[COL_LINK_FOTO].str.contains("http", na=False, case=False)].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
                 
                 if not df_foto.empty:
+                    # Konversi ke Dictionary
                     data_dict = df_foto.to_dict('records')
+                    
                     cols = st.columns(4)
                     for idx, row in enumerate(data_dict):
                         with cols[idx % 4]:
@@ -605,7 +672,7 @@ if KONEKSI_GSHEET_BERHASIL:
                                 url = row[COL_LINK_FOTO] 
                                 nama = row[COL_NAMA]
                                 tempat = row[COL_TEMPAT]
-                                deskripsi = row[COL_DESKRIPSI]
+                                deskripsi = row[COL_DESKRIPSI] # Ambil Deskripsi
                                 
                                 url_lower = url.lower()
                                 is_image = any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.webp'])
@@ -613,22 +680,33 @@ if KONEKSI_GSHEET_BERHASIL:
                                 
                                 try:
                                     if is_image:
+                                        # GAMBAR
                                         st.image(url, use_container_width=True)
+                                        
                                     elif is_pdf:
+                                        # PDF View
                                         direct_url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
                                         pdf_viewer_url = f"https://docs.google.com/viewer?url={direct_url}&embedded=true"
-                                        st.markdown(f'<iframe src="{pdf_viewer_url}" width="100%" height="200" frameborder="0" scrolling="no"></iframe>', unsafe_allow_html=True)
+                                        st.markdown(
+                                            f'<iframe src="{pdf_viewer_url}" width="100%" height="200" frameborder="0" scrolling="no"></iframe>',
+                                            unsafe_allow_html=True
+                                        )
                                         st.link_button("📄 Buka PDF Full", url)
+                                        
                                     else:
+                                        # DOKUMEN LAIN
                                         st.markdown(f"📂 **Dokumen**")
                                         st.link_button("Download File", url)
                                     
+                                    # --- INFORMASI LENGKAP ---
                                     st.markdown(f"**{nama}**")
                                     st.caption(f"📍 {tempat}")
                                     st.info(f"📝 {deskripsi}")
+                                    
                                 except Exception as e:
                                     st.error("Gagal memuat file")
-                else: st.info("Belum ada bukti yang terupload.")
+                else: 
+                    st.info("Belum ada bukti yang terupload.")
         else: st.warning("Data Kosong.")
 
 else: st.error("Database Error.")
