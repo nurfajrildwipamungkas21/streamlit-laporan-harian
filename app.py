@@ -58,14 +58,18 @@ try:
 except Exception as e:
     st.error(f"Dropbox Error: {e}")
 
-# --- FUNGSI HELPER CORE & SMART FORMATTING ---
+# --- FUNGSI HELPER CORE & SMART FORMATTING (UPDATED) ---
 
 def auto_format_sheet(worksheet):
     """
     Fungsi Formatting Pintar:
-    Mengatur lebar kolom pixel secara spesifik agar Tanggal tidak turun ke bawah.
+    1. Mengatur lebar kolom.
+    2. Mengatur Wrap Text.
+    3. MEMAKSA Auto-Resize Tinggi Baris (ROWS) agar teks panjang terlihat semua.
     """
     try:
+        sheet_id = worksheet.id
+        
         # 1. Format Header (Bold, Center, Background Abu)
         worksheet.format("A1:Z1", {
             "textFormat": {"bold": True},
@@ -74,40 +78,50 @@ def auto_format_sheet(worksheet):
             "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
         })
         
-        # 2. Logika Lebar Kolom Berdasarkan Header
-        # Kita baca header dulu untuk tahu urutan kolom
+        # 2. Logic Lebar Kolom
         headers = worksheet.row_values(1)
-        
-        requests = []
-        
         for i, col_name in enumerate(headers):
-            col_index = i  # 0-based index for set_column_width (some libraries use 1, gspread uses 0-based in batch usually but wrapper methods vary. We use simple calls here).
+            col_index = i
+            letter = chr(65 + i)
             
-            # Logic Lebar Kolom (Approximation in Pixels)
             if col_name in ["Misi", "Target", "Deskripsi"]:
-                worksheet.set_column_width(col_index, 400) # Lebar untuk teks panjang
-                # Force Wrap Text untuk kolom ini
-                letter = chr(65 + i) # Konversi 0->A, 1->B
+                worksheet.set_column_width(col_index, 500) # Lebar ekstra
+                # WRAP: Agar teks turun ke bawah
                 worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
                 
             elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
-                worksheet.set_column_width(col_index, 120) # Pas untuk tanggal
-                # Force CLIP/OVERFLOW (Jangan turun ke bawah) & Center
-                letter = chr(65 + i)
+                worksheet.set_column_width(col_index, 120)
+                # CLIP: Agar tanggal tetap satu baris
                 worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "CLIP", "horizontalAlignment": "CENTER", "verticalAlignment": "TOP"})
                 
             elif col_name in ["Status", "Done?"]:
                 worksheet.set_column_width(col_index, 60)
-                letter = chr(65 + i)
                 worksheet.format(f"{letter}2:{letter}1000", {"horizontalAlignment": "CENTER", "verticalAlignment": "TOP"})
                 
             elif col_name in ["Bukti/Catatan", "Link Foto", "Link Sosmed"]:
                 worksheet.set_column_width(col_index, 200)
-                letter = chr(65 + i)
                 worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
                 
             elif col_name == "Nama":
                 worksheet.set_column_width(col_index, 150)
+
+        # 3. PERINTAH KHUSUS: AUTO RESIZE ROWS (Agar tinggi baris menyesuaikan isi)
+        # Ini adalah perintah batch API langsung ke Google Sheets
+        body = {
+            "requests": [
+                {
+                    "autoResizeDimensions": {
+                        "dimensions": {
+                            "sheetId": sheet_id,
+                            "dimension": "ROWS",
+                            "startIndex": 1, # Mulai dari baris ke-2 (Index 1)
+                            "endIndex": 1000  # Sampai baris 1000
+                        }
+                    }
+                }
+            ]
+        }
+        worksheet.spreadsheet.batch_update(body)
                 
     except Exception as e:
         print(f"Smart Format Error: {e}")
@@ -210,7 +224,7 @@ def save_checklist(sheet_name, df):
             df_save[col_status] = df_save[col_status].apply(lambda x: "TRUE" if x else "FALSE")
             
         ws.update([df_save.columns.values.tolist()] + df_save.values.tolist())
-        auto_format_sheet(ws) 
+        auto_format_sheet(ws) # FORMAT ULANG SETELAH SAVE
         return True
     except: return False
 
@@ -229,7 +243,7 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
             rows_to_add.append(new_row)
             
         ws.append_rows(rows_to_add)
-        auto_format_sheet(ws) 
+        auto_format_sheet(ws) # FORMAT ULANG SETELAH NAMBAH
         return True
     except: return False
 
@@ -270,7 +284,7 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
             return False, "Kolom Bukti/Catatan hilang."
 
         ws.update_cell(row_idx_gsheet, col_idx_gsheet, final_note)
-        auto_format_sheet(ws) 
+        auto_format_sheet(ws) # FORMAT ULANG SETELAH UPDATE BUKTI
         
         return True, "Berhasil update bukti!"
         
@@ -281,7 +295,7 @@ def simpan_laporan_harian(data_list, nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
         ws.append_row(data_list)
-        auto_format_sheet(ws) 
+        auto_format_sheet(ws) # FORMAT ULANG LAPORAN HARIAN
         return True
     except: return False
 
