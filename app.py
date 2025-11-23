@@ -601,7 +601,7 @@ if KONEKSI_GSHEET_BERHASIL:
 
             # --- BAGIAN BARU: REFLEKSI HARIAN ---
             st.divider()
-            st.markdown("#### 🏁 Wrap Up & Kesimpulan Harian")
+            st.markdown("#### 🏁Kesimpulan Harian")
             st.caption("Bagian ini penting agar progress besok lebih terarah.")
             
             col_ref_1, col_ref_2 = st.columns(2)
