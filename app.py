@@ -457,7 +457,7 @@ if KONEKSI_GSHEET_BERHASIL:
                 st.progress(done/len(df_team) if len(df_team)>0 else 0, text=f"Pencapaian: {done}/{len(df_team)}")
                 edited_team = render_hybrid_table(df_team, "team_table", "Misi")
                 if st.button("💾 Simpan Team", use_container_width=True):
-                     if save_checklist(SHEET_TARGET_TEAM, edited_team): st.toast("Tersimpan!", icon="✅"); st.cache_data.clear(); st.rerun()
+                      if save_checklist(SHEET_TARGET_TEAM, edited_team): st.toast("Tersimpan!", icon="✅"); st.cache_data.clear(); st.rerun()
                 
                 with st.expander("📂 Update Bukti (Team)"):
                     pilih_misi = st.selectbox("Misi:", df_team["Misi"].tolist())
@@ -654,7 +654,7 @@ if KONEKSI_GSHEET_BERHASIL:
                     st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
             
-            # --- GALERI BUKTI (PDF PERFECT VIEW & DESCRIPTION ADDED) ---
+            # --- GALERI BUKTI (PERBAIKAN LOGIKA GAMBAR) ---
             with tab_galeri:
                 st.caption("Menampilkan bukti foto/dokumen terbaru")
                 
@@ -662,51 +662,64 @@ if KONEKSI_GSHEET_BERHASIL:
                 df_foto = df_filt[df_filt[COL_LINK_FOTO].str.contains("http", na=False, case=False)].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
                 
                 if not df_foto.empty:
-                    # Konversi ke Dictionary
                     data_dict = df_foto.to_dict('records')
                     
                     cols = st.columns(4)
                     for idx, row in enumerate(data_dict):
                         with cols[idx % 4]:
                             with st.container(border=True):
-                                url = row[COL_LINK_FOTO] 
+                                url_asli = row[COL_LINK_FOTO] 
                                 nama = row[COL_NAMA]
                                 tempat = row[COL_TEMPAT]
-                                deskripsi = row[COL_DESKRIPSI] # Ambil Deskripsi
+                                deskripsi = row[COL_DESKRIPSI]
                                 
-                                url_lower = url.lower()
-                                is_image = any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.webp'])
+                                # --- 1. MAGIC FIX: Ubah ke Direct Link Murni (dl.dropboxusercontent) ---
+                                # Ini memaksa Dropbox mengirim file gambar asli, bukan halaman preview
+                                direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                                
+                                # --- 2. DETEKSI EKSTENSI LEBIH KUAT ---
+                                url_lower = direct_url.lower()
+                                
+                                # List ekstensi gambar yang umum (termasuk JPEG/JPG WhatsApp)
+                                valid_img_ext = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']
+                                is_image = any(ext in url_lower for ext in valid_img_ext)
                                 is_pdf = '.pdf' in url_lower
                                 
                                 try:
                                     if is_image:
-                                        # GAMBAR
-                                        st.image(url, use_container_width=True)
+                                        # GAMBAR: Render pakai direct_url
+                                        st.image(direct_url, use_container_width=True)
                                         
                                     elif is_pdf:
-                                        # PDF View
-                                        direct_url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
-                                        pdf_viewer_url = f"https://docs.google.com/viewer?url={direct_url}&embedded=true"
+                                        # PDF: Gunakan GDocs Viewer untuk preview
+                                        # Kita encode URL agar aman dibaca Google Viewer
+                                        import urllib.parse
+                                        encoded_url = urllib.parse.quote(direct_url)
+                                        pdf_viewer_url = f"https://docs.google.com/viewer?url={encoded_url}&embedded=true"
+                                        
                                         st.markdown(
                                             f'<iframe src="{pdf_viewer_url}" width="100%" height="200" frameborder="0" scrolling="no"></iframe>',
                                             unsafe_allow_html=True
                                         )
-                                        st.link_button("📄 Buka PDF Full", url)
+                                        st.link_button("📄 Buka PDF", url_asli)
                                         
                                     else:
-                                        # DOKUMEN LAIN
-                                        st.markdown(f"📂 **Dokumen**")
-                                        st.link_button("Download File", url)
+                                        # DOKUMEN LAIN / GAGAL DETEKSI
+                                        st.warning("Preview tidak tersedia")
+                                        st.caption(f"File: ...{url_asli[-10:]}")
+                                        st.link_button("📂 Download File", url_asli)
                                     
                                     # --- INFORMASI LENGKAP ---
                                     st.markdown(f"**{nama}**")
                                     st.caption(f"📍 {tempat}")
-                                    st.info(f"📝 {deskripsi}")
-                                    
+                                    if deskripsi and deskripsi != "-":
+                                        st.info(f"📝 {deskripsi}")
+                                        
                                 except Exception as e:
-                                    st.error("Gagal memuat file")
+                                    st.error("Gagal memuat media")
+                                    st.link_button("Buka Manual", url_asli)
+
                 else: 
                     st.info("Belum ada bukti yang terupload.")
-        else: st.warning("Data Kosong.")
 
 else: st.error("Database Error.")
