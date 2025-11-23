@@ -17,7 +17,7 @@ try:
 except ImportError:
     HAS_AGGRID = False
 
-# 2. Plotly (Grafik Canggih) -> FIX ERROR DISINI
+# 2. Plotly (Grafik Canggih)
 try:
     import plotly.express as px
     HAS_PLOTLY = True
@@ -441,7 +441,7 @@ if KONEKSI_GSHEET_BERHASIL:
                     lokasi_input = st.text_input("Jenis Tugas (Otomatis)", value=kategori_aktivitas.split(' ')[1], disabled=True)
                 
                 # DYNAMIC INPUT: File Uploader di luar form (Fitur User)
-                fotos = st.file_uploader("Upload Bukti (Foto/Screenshot)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
+                fotos = st.file_uploader("Upload Bukti (Foto/Screenshot/Dokumen)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
 
             # Logic Deskripsi (Dynamic 1 Foto = 1 Desc)
             deskripsi_map = {}
@@ -454,12 +454,14 @@ if KONEKSI_GSHEET_BERHASIL:
                     with st.container(border=True):
                         col_img, col_desc = st.columns([1, 3])
                         with col_img:
-                            # Preview Gambar
-                            if f.type.startswith('image'): st.image(f, width=100)
-                            else: st.markdown(f"📄 **{f.name}**")
+                            # Preview Gambar / Dokumen
+                            if f.type.startswith('image'):
+                                st.image(f, width=100)
+                            else:
+                                st.markdown(f"📄 **{f.name}**")
                         with col_desc:
                             # Input Deskripsi per file
-                            deskripsi_map[f.name] = st.text_area(f"Ket. File {i+1}", height=70, key=f"desc_{i}", placeholder="Jelaskan aktivitas...")
+                            deskripsi_map[f.name] = st.text_area(f"Ket. File {i+1}", height=70, key=f"desc_{i}", placeholder="Jelaskan aktivitas terkait file ini...")
             else:
                 placeholder_text = "Jelaskan hasil kunjungan..." if "Kunjungan" in kategori_aktivitas else "Jelaskan konten/ads/calls yang dikerjakan..."
                 main_deskripsi = st.text_area("Deskripsi Aktivitas", placeholder=placeholder_text)
@@ -498,7 +500,7 @@ if KONEKSI_GSHEET_BERHASIL:
             if not df_log.empty: st.dataframe(df_log, use_container_width=True, hide_index=True)
             else: st.info("Kosong")
 
-    # --- MENU 2: DASHBOARD MANAGER (FITUR BARU) ---
+    # --- MENU 2: DASHBOARD MANAGER (FITUR BARU & FIX GALERI) ---
     elif menu_nav == "📊 Dashboard Manager":
         st.header("📊 Dashboard Produktivitas (Split View)")
         st.info("Dashboard ini memisahkan analisa antara Kunjungan Lapangan (Sales) dan Aktivitas Digital (Marketing) agar penilaian adil.")
@@ -561,17 +563,52 @@ if KONEKSI_GSHEET_BERHASIL:
                     st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
             
+            # --- FIX GALERI BUKTI (PDF & GAMBAR) ---
             with tab_galeri:
-                st.caption("Menampilkan bukti foto terbaru dari semua divisi")
-                df_foto = df_filt[df_filt[COL_LINK_FOTO].str.startswith("http", na=False)].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
+                st.caption("Menampilkan bukti foto/dokumen terbaru (Klik tombol untuk melihat dokumen full)")
+                
+                # Ambil yang link-nya valid (mengandung http)
+                df_foto = df_filt[df_filt[COL_LINK_FOTO].str.contains("http", na=False, case=False)].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
+                
                 if not df_foto.empty:
-                    cols = st.columns(4)
+                    cols = st.columns(4) # Grid 4 Kolom
                     for idx, row in enumerate(df_foto.itertuples()):
                         with cols[idx % 4]:
-                            try:
-                                st.image(row._5, caption=f"{row.Nama} ({row._3})", use_container_width=True)
-                            except: pass
-                else: st.info("Belum ada foto bukti.")
+                            with st.container(border=True):
+                                url = row.Link_Foto 
+                                nama = row.Nama
+                                tempat = row.Tempat_Dikunjungi
+                                
+                                # Deteksi Tipe File
+                                url_lower = url.lower()
+                                is_image = any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.webp'])
+                                is_pdf = '.pdf' in url_lower
+                                
+                                try:
+                                    if is_image:
+                                        # TAMPILKAN GAMBAR
+                                        st.image(url, use_container_width=True)
+                                        
+                                    elif is_pdf:
+                                        # TAMPILKAN PDF (Via Google Docs Viewer Wrapper)
+                                        pdf_viewer_url = f"https://docs.google.com/viewer?url={url}&embedded=true"
+                                        st.markdown(
+                                            f'<iframe src="{pdf_viewer_url}" width="100%" height="200" frameborder="0"></iframe>',
+                                            unsafe_allow_html=True
+                                        )
+                                        st.link_button("📄 Buka PDF Full", url)
+                                        
+                                    else:
+                                        # DOKUMEN LAIN (DOCX/XLSX/ZIP)
+                                        st.markdown(f"📂 **Dokumen**")
+                                        st.link_button("Download File", url)
+                                        
+                                    st.caption(f"**{nama}**")
+                                    st.caption(f"📍 {tempat}")
+                                except:
+                                    st.error("Gagal memuat file")
+                else: 
+                    st.info("Belum ada bukti yang terupload.")
         else: st.warning("Data Kosong.")
 
 else: st.error("Database Error.")
