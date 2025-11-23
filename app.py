@@ -4,32 +4,33 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 import gspread
 from google.oauth2.service_account import Credentials
-import io
 import dropbox
 from dropbox.exceptions import AuthError, ApiError
 from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(
-    page_title="Sales Command Center",
-    page_icon="🎯",
+    page_title="Sales Action Center",
+    page_icon="🚀",
     layout="wide"
 )
 
 # --- KONFIGURASI ---
 NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
 FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
-SHEET_CONFIG_NAMA = "Config_Staf"
-SHEET_CONFIG_TARGET = "Config_Target" 
-SHEET_CONFIG_TEAM = "Config_Team_Goal" # Sheet baru untuk target global team
 
+# Sheet Names (NEW STRUCTURE)
+SHEET_CONFIG_NAMA = "Config_Staf"
+SHEET_TARGET_TEAM = "Target_Team_Checklist"       # Tab baru untuk Checklist Team
+SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist" # Tab baru untuk Checklist Individu
+
+# --- KOLOM LAPORAN HARIAN ---
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
 COL_TEMPAT = "Tempat Dikunjungi"
 COL_DESKRIPSI = "Deskripsi"
 COL_LINK_FOTO = "Link Foto"
 COL_LINK_SOSMED = "Link Sosmed"
-
 NAMA_KOLOM_STANDAR = [COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI, COL_LINK_FOTO, COL_LINK_SOSMED]
 
 # --- KONEKSI ---
@@ -38,6 +39,7 @@ KONEKSI_DROPBOX_BERHASIL = False
 spreadsheet = None 
 dbx = None 
 
+# 1. Connect GSheet
 try:
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
@@ -47,6 +49,7 @@ try:
 except Exception as e:
     st.error(f"GSheet Error: {e}")
 
+# 2. Connect Dropbox
 try:
     dbx = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
     dbx.users_get_current_account()
@@ -70,14 +73,13 @@ def get_or_create_worksheet(nama_worksheet):
 def get_daftar_staf_terbaru():
     default_staf = ["Saya"]
     try:
-        try:
-            ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
-        except:
+        try: ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
+        except: 
             ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_NAMA, rows=100, cols=1)
             ws.append_row(["Daftar Nama Staf"])
             ws.append_row(["Saya"])
             return default_staf
-
+        
         nama_list = ws.col_values(1)
         if len(nama_list) > 0 and nama_list[0] == "Daftar Nama Staf": nama_list.pop(0)
         return nama_list if nama_list else default_staf
@@ -85,73 +87,52 @@ def get_daftar_staf_terbaru():
 
 def tambah_staf_baru(nama_baru):
     try:
-        # 1. Tambah ke Config Nama
         try: ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
         except: ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_NAMA, rows=100, cols=1)
-        
         if nama_baru in ws.col_values(1): return False, "Nama sudah ada!"
         ws.append_row([nama_baru])
-
-        # 2. Tambah ke Config Target (Default 5)
-        try: ws_t = spreadsheet.worksheet(SHEET_CONFIG_TARGET)
-        except: 
-            ws_t = spreadsheet.add_worksheet(title=SHEET_CONFIG_TARGET, rows=100, cols=2)
-            ws_t.append_row(["Nama", "Target_Mingguan"])
-        
-        existing_t = ws_t.col_values(1)
-        if nama_baru not in existing_t:
-            ws_t.append_row([nama_baru, 5]) # Default target mingguan
-
         return True, "Berhasil tambah tim!"
     except Exception as e: return False, str(e)
 
-# --- FUNGSI MANAGERIAL (TARGETING) ---
+# --- FUNGSI CHECKLIST TARGET (NEW) ---
 
-def get_team_target_bulanan():
-    """Mengambil 1 angka target team bulanan"""
+def load_checklist(sheet_name, columns):
+    """Load data checklist dari sheet tertentu"""
     try:
-        try: ws = spreadsheet.worksheet(SHEET_CONFIG_TEAM)
+        try: ws = spreadsheet.worksheet(sheet_name)
         except: 
-            ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_TEAM, rows=2, cols=1)
-            ws.update_cell(1,1, "Target_Team_Bulanan")
-            ws.update_cell(2,1, 100) # Default
-            return 100
+            ws = spreadsheet.add_worksheet(title=sheet_name, rows=100, cols=len(columns))
+            ws.append_row(columns)
+            return pd.DataFrame(columns=columns)
         
-        val = ws.cell(2, 1).value
-        return int(val) if val else 100
-    except: return 100
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        # Pastikan kolom checkbox dibaca sebagai boolean
+        if "Selesai" in df.columns:
+            df["Selesai"] = df["Selesai"].apply(lambda x: True if str(x).upper() == "TRUE" else False)
+        return df
+    except: return pd.DataFrame(columns=columns)
 
-def update_team_target_bulanan(angka_baru):
+def save_checklist(sheet_name, df):
+    """Simpan perubahan checklist (centang/edit) ke GSheet"""
     try:
-        ws = spreadsheet.worksheet(SHEET_CONFIG_TEAM)
-        ws.update_cell(2, 1, angka_baru)
+        ws = spreadsheet.worksheet(sheet_name)
+        ws.clear()
+        # Update header & values
+        ws.update([df.columns.values.tolist()] + df.values.tolist())
         return True
     except: return False
 
-def get_individual_targets():
-    """Mengambil DataFrame target mingguan per orang"""
+def add_target_item(sheet_name, row_data):
+    """Menambah baris target baru"""
     try:
-        try: ws = spreadsheet.worksheet(SHEET_CONFIG_TARGET)
-        except: 
-            ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_TARGET, rows=100, cols=2)
-            ws.append_row(["Nama", "Target_Mingguan"])
-            return pd.DataFrame(columns=["Nama", "Target_Mingguan"])
-            
-        data = ws.get_all_records()
-        return pd.DataFrame(data)
-    except: return pd.DataFrame()
-
-def update_individual_targets(df_edited):
-    """Menyimpan editan target individu kembali ke GSheet"""
-    try:
-        ws = spreadsheet.worksheet(SHEET_CONFIG_TARGET)
-        ws.clear()
-        # Tulis ulang header & data
-        ws.update([df_edited.columns.values.tolist()] + df_edited.values.tolist())
+        try: ws = spreadsheet.worksheet(sheet_name)
+        except: return False
+        ws.append_row(row_data)
         return True
-    except Exception as e: return False
+    except: return False
 
-# --- FUNGSI UPLOAD & SIMPAN LAPORAN ---
+# --- FUNGSI UPLOAD ---
 
 def upload_ke_dropbox(file_obj, nama_staf):
     try:
@@ -160,7 +141,6 @@ def upload_ke_dropbox(file_obj, nama_staf):
         clean_name = "".join([c for c in file_obj.name if c.isalnum() or c in ('.','_')])
         folder = "".join([c for c in nama_staf if c.isalnum() or c in (' ','_')]).replace(' ','_')
         path = f"{FOLDER_DROPBOX}/{folder}/{ts}_{clean_name}"
-        
         dbx.files_upload(file_data, path, mode=dropbox.files.WriteMode.add)
         settings = SharedLinkSettings(requested_visibility=RequestedVisibility.public)
         try: link = dbx.sharing_create_shared_link_with_settings(path, settings=settings)
@@ -171,7 +151,7 @@ def upload_ke_dropbox(file_obj, nama_staf):
         return link.url.replace("?dl=0", "?raw=1")
     except: return "-"
 
-def simpan_laporan(data_list, nama_staf):
+def simpan_laporan_harian(data_list, nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
         ws.append_row(data_list)
@@ -189,173 +169,241 @@ def load_all_reports(daftar_staf):
         except: pass
     return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
-# --- UI UTAMA ---
+# --- APLIKASI UTAMA ---
 
 if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
-    # --- SIDEBAR (MANAGER AREA) ---
+    # ==========================================
+    # SIDEBAR: MANAJEMEN TARGET (Action Plan)
+    # ==========================================
     with st.sidebar:
-        st.title("⚙️ Manager Panel")
+        st.header("🎯 Manajemen Target")
         
-        # 1. Tambah Tim
-        with st.expander("➕ Tambah Karyawan Baru"):
-            with st.form("add_staff", clear_on_submit=True):
-                new_name = st.text_input("Nama", placeholder="Riky")
-                new_role = st.text_input("Jabatan", placeholder="Sales")
-                if st.form_submit_button("Tambah"):
-                    if new_name and new_role:
-                        res, msg = tambah_staf_baru(f"{new_name} ({new_role})")
-                        if res: 
-                            st.success("Berhasil!")
+        # TAB PILIHAN: Team vs Perorangan
+        tab_team, tab_individu, tab_admin = st.tabs(["Team", "Pribadi", "Admin"])
+
+        # --- 1. TARGET TEAM (BULANAN/GLOBAL) ---
+        with tab_team:
+            st.caption("Target Bersama (Hasil Rembukan)")
+            
+            # Form Tambah Target Team
+            with st.form("add_team_goal", clear_on_submit=True):
+                goal_team = st.text_input("Target/Misi Team", placeholder="Contoh: Closing 50 Klien Besar")
+                c1, c2 = st.columns(2)
+                today = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
+                start_d = c1.date_input("Mulai", value=today, key="start_team")
+                end_d = c2.date_input("Selesai", value=today + timedelta(days=30), key="end_team")
+                
+                if st.form_submit_button("➕ Tambah Misi Team"):
+                    if goal_team:
+                        row = [goal_team, str(start_d), str(end_d), False, "-"] # False=Belum Selesai, -=Bukti
+                        if add_target_item(SHEET_TARGET_TEAM, row):
+                            st.success("Target Team Ditambahkan!")
                             st.cache_data.clear()
                             st.rerun()
-                        else: st.error(msg)
 
-        # 2. Atur Target (FITUR BARU)
-        st.divider()
-        st.subheader("🎯 Atur Target")
-        
-        # A. Target Team (Bulanan)
-        current_team_target = get_team_target_bulanan()
-        new_team_target = st.number_input("Target Team (Bulanan)", value=current_team_target, step=5)
-        if new_team_target != current_team_target:
-            update_team_target_bulanan(new_team_target)
-            st.toast("Target Team Diupdate!", icon="✅")
-            st.cache_data.clear()
-            st.rerun()
-
-        # B. Target Individu (Mingguan)
-        st.caption("Edit Target Mingguan per Staff:")
-        df_target_raw = get_individual_targets()
-        
-        if not df_target_raw.empty:
-            # Gunakan Data Editor agar bisa edit langsung seperti Excel
-            edited_df = st.data_editor(
-                df_target_raw, 
-                column_config={
-                    "Nama": st.column_config.TextColumn(disabled=True), # Nama jangan diedit
-                    "Target_Mingguan": st.column_config.NumberColumn("Target/Minggu", min_value=1, max_value=100)
-                },
-                hide_index=True,
-                key="editor_target"
-            )
+            st.divider()
+            st.caption("Checklist Progress Team:")
             
-            # Tombol Simpan Perubahan
-            if st.button("💾 Simpan Perubahan Target"):
-                if update_individual_targets(edited_df):
-                    st.success("Target Individu Berhasil Disimpan!")
+            # Load & Edit Checklist
+            cols_team = ["Misi", "Mulai", "Selesai", "Selesai", "Bukti/Catatan"]
+            df_team = load_checklist(SHEET_TARGET_TEAM, cols_team)
+            
+            if not df_team.empty:
+                edited_team = st.data_editor(
+                    df_team,
+                    column_config={
+                        "Selesai": st.column_config.CheckboxColumn("Done?", help="Centang jika selesai"),
+                        "Misi": st.column_config.TextColumn(disabled=True),
+                        "Mulai": st.column_config.TextColumn(disabled=True),
+                        "Selesai": st.column_config.TextColumn(disabled=True),
+                        "Bukti/Catatan": st.column_config.TextColumn("Bukti Link/Ket", width="medium")
+                    },
+                    hide_index=True,
+                    key="editor_team"
+                )
+                if st.button("💾 Simpan Update Team"):
+                    save_checklist(SHEET_TARGET_TEAM, edited_team)
+                    st.success("Update Disimpan!")
                     st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.error("Gagal menyimpan ke Google Sheet.")
 
-    # --- MAIN PAGE ---
-    NAMA_STAF = get_daftar_staf_terbaru()
-    st.title("🚀 Sales Command Center")
+        # --- 2. TARGET INDIVIDU (MINGGUAN) ---
+        with tab_individu:
+            st.caption("Action Plan Pribadi (Mingguan)")
+            
+            # Load Nama
+            NAMA_STAF = get_daftar_staf_terbaru()
+            pilih_nama = st.selectbox("Siapa Anda?", NAMA_STAF, key="sidebar_user")
+            
+            with st.form("add_indiv_goal", clear_on_submit=True):
+                goal_indiv = st.text_input("Target Mingguan", placeholder="Contoh: Follow up 20 data pameran")
+                c1, c2 = st.columns(2)
+                today = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
+                # Default 1 minggu
+                start_i = c1.date_input("Mulai", value=today, key="start_indiv")
+                end_i = c2.date_input("Selesai", value=today + timedelta(days=7), key="end_indiv")
+                
+                if st.form_submit_button("➕ Tambah Target Saya"):
+                    if goal_indiv:
+                        # Format: [Nama, Target, Mulai, Selesai, Done, Bukti]
+                        row = [pilih_nama, goal_indiv, str(start_i), str(end_i), False, "-"] 
+                        if add_target_item(SHEET_TARGET_INDIVIDU, row):
+                            st.success("Target Mingguan Ditambahkan!")
+                            st.cache_data.clear()
+                            st.rerun()
+            
+            st.divider()
+            st.caption(f"Checklist Milik {pilih_nama}:")
+            
+            cols_indiv = ["Nama", "Target", "Mulai", "Selesai", "Selesai", "Bukti/Catatan"]
+            df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, cols_indiv)
+            
+            # Filter hanya punya user yang dipilih
+            if not df_indiv_all.empty:
+                df_indiv_user = df_indiv_all[df_indiv_all["Nama"] == pilih_nama]
+                
+                if not df_indiv_user.empty:
+                    edited_indiv = st.data_editor(
+                        df_indiv_user,
+                        column_config={
+                            "Nama": None, # Sembunyikan kolom nama karena sudah difilter
+                            "Selesai": st.column_config.CheckboxColumn("Done?", help="Centang jika beres"),
+                            "Target": st.column_config.TextColumn(disabled=True),
+                             "Bukti/Catatan": st.column_config.TextColumn("Bukti Link/Ket", width="medium")
+                        },
+                        hide_index=True,
+                        key="editor_indiv"
+                    )
+                    
+                    if st.button("💾 Simpan Progress Saya"):
+                        # Kita harus update dataframe UTAMA (df_indiv_all), bukan cuma yang difilter
+                        # Update data user di df utama
+                        df_indiv_all.update(edited_indiv)
+                        save_checklist(SHEET_TARGET_INDIVIDU, df_indiv_all)
+                        st.success("Progress Tersimpan!")
+                        st.cache_data.clear()
+
+        # --- 3. TAB ADMIN ---
+        with tab_admin:
+            with st.expander("➕ Tambah Karyawan Baru"):
+                with st.form("add_staff", clear_on_submit=True):
+                    new_name = st.text_input("Nama", placeholder="Riky")
+                    new_role = st.text_input("Jabatan", placeholder="Sales")
+                    if st.form_submit_button("Tambah"):
+                        if new_name and new_role:
+                            res, msg = tambah_staf_baru(f"{new_name} ({new_role})")
+                            if res: 
+                                st.success("Berhasil!")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else: st.error(msg)
+
+    # ==========================================
+    # MAIN PAGE: HARIAN & MONITORING
+    # ==========================================
     
-    # --- FORM INPUT ---
-    with st.expander("📝 Input Laporan Harian", expanded=False):
-        nama = st.selectbox("Pilih Nama", NAMA_STAF)
-        with st.form("input_harian", clear_on_submit=True):
+    st.title("🚀 Sales Action Center")
+    st.caption(f"Hari ini: {datetime.now(tz=ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y')}")
+
+    # 1. INPUT HARIAN (Task List Realization)
+    with st.container(border=True):
+        st.subheader("📝 Task List Harian (Realisasi)")
+        st.info("Laporkan apa yang Anda kerjakan **HARI INI** untuk mencapai target mingguan di Sidebar.")
+        
+        # Gunakan nama dari sidebar jika ada, jika tidak default
+        NAMA_STAF_MAIN = get_daftar_staf_terbaru()
+        nama_pelapor = st.selectbox("Nama Pelapor", NAMA_STAF_MAIN)
+
+        with st.form("input_harian_task", clear_on_submit=True):
             c1, c2 = st.columns(2)
-            today = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
             
             with c1:
-                tgl = st.date_input("Tanggal", value=today, max_value=today, min_value=today-timedelta(days=2))
-                sosmed = ""
-                if "Social Media Specialist" in nama:
-                    sosmed = st.text_input("Link Konten")
+                # Tanggal Realtime
+                today_now = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
+                st.markdown(f"**Tanggal:** `{today_now.strftime('%d-%m-%Y')}`")
+                
+                # Input Sosmed dinamis
+                sosmed_link = ""
+                if "Social Media Specialist" in nama_pelapor:
+                    sosmed_link = st.text_input("Link Konten (Sosmed)")
+            
             with c2:
-                tempat = st.text_input("Klien / Tempat")
-                fotos = st.file_uploader("Foto Bukti", accept_multiple_files=True)
+                lokasi = st.text_input("Tempat / Klien", placeholder="Misal: Meeting di PT ABC")
+                fotos = st.file_uploader("Upload Bukti Foto", accept_multiple_files=True)
             
-            desc = st.text_area("Deskripsi Kegiatan")
+            deskripsi = st.text_area("Deskripsi Aktivitas Hari Ini", placeholder="Jelaskan detail apa yang dikerjakan...")
             
-            if st.form_submit_button("Kirim Laporan"):
-                if not desc: st.error("Deskripsi wajib diisi")
+            if st.form_submit_button("✅ Submit Laporan Hari Ini"):
+                if not deskripsi: st.error("Deskripsi wajib diisi!")
                 else:
-                    with st.spinner("Mengirim..."):
-                        links = "\n".join([upload_ke_dropbox(f, nama) for f in fotos]) if fotos else "-"
-                        lsos = sosmed if sosmed else "-" if "Social Media Specialist" in nama else ""
-                        row = [datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S'), nama, tempat, desc, links, lsos]
-                        if simpan_laporan(row, nama):
-                            st.success("Laporan Masuk!")
+                    with st.spinner("Mengupload & Menyimpan..."):
+                        # Upload Foto
+                        link_foto = "\n".join([upload_ke_dropbox(f, nama_pelapor) for f in fotos]) if fotos else "-"
+                        link_sosmed = sosmed_link if sosmed_link else "-" if "Social Media Specialist" in nama_pelapor else ""
+                        timestamp = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
+                        
+                        row_laporan = [timestamp, nama_pelapor, lokasi, deskripsi, link_foto, link_sosmed]
+                        
+                        if simpan_laporan_harian(row_laporan, nama_pelapor):
+                            st.success("Laporan Harian Berhasil Masuk!")
                             st.cache_data.clear()
 
-    # --- DASHBOARD & KPI ---
+    # 2. DASHBOARD MONITORING (CHECKLIST VIEW)
+    st.divider()
+    st.subheader("📊 Monitoring Target")
     
-    # Refresh logic
-    col_ref, _ = st.columns([1, 4])
-    if col_ref.button("🔄 Refresh Dashboard"):
-        st.cache_data.clear()
-        st.rerun()
+    col_dash_1, col_dash_2 = st.columns(2)
+    
+    # LOAD DATA UNTUK DASHBOARD
+    cols_team = ["Misi", "Mulai", "Selesai", "Selesai", "Bukti/Catatan"]
+    df_view_team = load_checklist(SHEET_TARGET_TEAM, cols_team)
+    
+    cols_indiv = ["Nama", "Target", "Mulai", "Selesai", "Selesai", "Bukti/Catatan"]
+    df_view_indiv = load_checklist(SHEET_TARGET_INDIVIDU, cols_indiv)
 
-    # Load All Data
-    df_all = load_all_reports(NAMA_STAF)
-    target_team_val = get_team_target_bulanan() # Load target team dinamis
-    df_targets = get_individual_targets() # Load target individu dinamis
-
-    if not df_all.empty:
-        df_all['dt'] = pd.to_datetime(df_all[COL_TIMESTAMP], format='%d-%m-%Y %H:%M:%S', errors='coerce')
-        now = datetime.now(tz=ZoneInfo("Asia/Jakarta"))
-        
-        # Filter Waktu
-        start_month = now.replace(day=1, hour=0, minute=0, second=0)
-        start_week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0)
-        
-        df_month = df_all[df_all['dt'] >= pd.Timestamp(start_month.date())]
-        df_week = df_all[df_all['dt'] >= pd.Timestamp(start_week.date())]
-
-        # 1. TEAM MONITOR (BULANAN)
-        st.markdown("### 🏆 Team Performance (Bulan Ini)")
-        
-        total_act_month = len(df_month)
-        progress_team = min(total_act_month / target_team_val, 1.0)
-        
-        met_col1, met_col2 = st.columns([3, 1])
-        with met_col1:
-            st.progress(progress_team)
-        with met_col2:
-            st.metric("Pencapaian Team", f"{total_act_month} / {target_team_val}", f"{int(progress_team*100)}%")
-
-        # 2. INDIVIDUAL MONITOR (MINGGUAN)
-        st.markdown("### ⚡ Individual Progress (Minggu Ini)")
-        
-        count_week = df_week[COL_NAMA].value_counts()
-        
-        # Grid layout untuk card
-        cols = st.columns(3)
-        for idx, row in df_targets.iterrows():
-            p_name = row['Nama']
-            # Pastikan kolom target valid angka
-            try: t_weekly = int(row['Target_Mingguan'])
-            except: t_weekly = 5 
+    with col_dash_1:
+        st.markdown("#### 🏆 Target Team (Bulan Ini)")
+        if not df_view_team.empty:
+            # Hitung progress sederhana
+            total_misi = len(df_view_team)
+            selesai_misi = len(df_view_team[df_view_team['Selesai'] == True])
+            if total_misi > 0:
+                prog = selesai_misi/total_misi
+                st.progress(prog, text=f"Progress: {int(prog*100)}%")
             
-            act_weekly = count_week.get(p_name, 0)
-            ind_prog = min(act_weekly / t_weekly, 1.0)
+            # Tampilkan list simple
+            st.dataframe(df_view_team[["Misi", "Selesai", "Selesai"]], hide_index=True, use_container_width=True)
+        else:
+            st.info("Belum ada target team.")
+
+    with col_dash_2:
+        st.markdown("#### ⚡ Target Individu (Minggu Ini)")
+        if not df_view_indiv.empty:
+            # Tampilkan siapa saja yang punya target
+            st.dataframe(
+                df_view_indiv[["Nama", "Target", "Selesai"]].sort_values(by="Nama"),
+                hide_index=True, 
+                use_container_width=True
+            )
+        else:
+            st.info("Belum ada target individu.")
+
+    # 3. RECENT ACTIVITY LOG
+    st.divider()
+    with st.expander("📂 Riwayat Laporan Harian (Log Aktivitas)", expanded=True):
+        if st.button("🔄 Refresh Data"):
+            st.cache_data.clear()
+            st.rerun()
             
-            with cols[idx % 3]:
-                st.metric(
-                    label=p_name,
-                    value=f"{act_weekly} / {t_weekly}",
-                    delta=f"{int(ind_prog*100)}%",
-                    delta_color="normal" if ind_prog < 1.0 else "off"
-                )
-                st.progress(ind_prog)
-                if ind_prog >= 1.0: st.caption("🔥 On Fire!")
-                else: st.caption("⚠️ Keep Pushing")
-
-        # 3. DATA RECENT
-        st.divider()
-        st.subheader("📂 History Terkini")
-        st.dataframe(
-            df_all[[COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI]].sort_values(by=COL_TIMESTAMP, ascending=False).head(10),
-            use_container_width=True,
-            hide_index=True
-        )
-
-    else:
-        st.info("Belum ada data laporan.")
+        df_log = load_all_reports(get_daftar_staf_terbaru())
+        if not df_log.empty:
+            st.dataframe(
+                df_log[[COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI]].sort_values(by=COL_TIMESTAMP, ascending=False),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Belum ada laporan harian.")
 
 else:
-    st.error("Gagal koneksi database.")
+    st.error("Gagal terhubung ke Database.")
