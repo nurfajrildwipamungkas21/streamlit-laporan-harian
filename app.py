@@ -10,8 +10,6 @@ from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 import re
 
 # --- HYBRID LIBRARY IMPORT (FALLBACK MECHANISM) ---
-# Mencoba import AgGrid untuk tampilan tabel advanced.
-# Jika tidak ada, variable HAS_AGGRID menjadi False dan aplikasi memakai tabel standar.
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
     HAS_AGGRID = True
@@ -265,7 +263,6 @@ def load_checklist(sheet_name, columns):
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # Pembersihan Data Awal untuk mencegah error serialisasi
         df.fillna("", inplace=True)
         
         for col in columns:
@@ -290,19 +287,14 @@ def save_checklist(sheet_name, df):
              ws.resize(rows=rows_needed)
 
         df_save = df.copy()
-        
-        # Pastikan tidak ada NaN sebelum konversi string
         df_save.fillna("", inplace=True)
 
         col_status = "Status"
         if col_status in df_save.columns:
             df_save[col_status] = df_save[col_status].apply(lambda x: "TRUE" if x else "FALSE")
             
-        # Konversi semua ke string
         df_save = df_save.astype(str)
         
-        # FIX: Menggunakan parameter 'range_name' dan 'values' untuk kompatibilitas gspread terbaru
-        # Serta memastikan values adalah list of lists
         data_to_save = [df_save.columns.values.tolist()] + df_save.values.tolist()
         ws.update(range_name="A1", values=data_to_save, value_input_option='USER_ENTERED')
         
@@ -382,25 +374,26 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
             return False, "Kolom Bukti/Catatan hilang."
 
         cell_address = gspread.utils.rowcol_to_a1(row_idx_gsheet, col_idx_gsheet)
-        
-        # FIX: Format 'values' harus list of lists (Nested List) [[data]] 
-        # gspread terbaru sangat ketat mengenai ini untuk update single cell sekalipun
         ws.update(range_name=cell_address, values=[[final_note]], value_input_option='USER_ENTERED')
-        
         auto_format_sheet(ws)
         return True, "Berhasil update bukti!"
         
     except Exception as e:
         return False, f"Error: {e}"
 
-def simpan_laporan_harian(data_list, nama_staf):
+# --- UPDATED: FUNGSI SIMPAN BATCH ---
+def simpan_laporan_harian_batch(list_of_rows, nama_staf):
+    """
+    Menyimpan banyak baris sekaligus (Batch Insert)
+    """
     try:
         ws = get_or_create_worksheet(nama_staf)
-        ws.append_row(data_list, value_input_option='USER_ENTERED')
+        # Append multiple rows sekaligus
+        ws.append_rows(list_of_rows, value_input_option='USER_ENTERED')
         auto_format_sheet(ws)
         return True
     except Exception as e:
-        print(f"Error saving daily report for {nama_staf}: {e}")
+        print(f"Error saving daily report batch for {nama_staf}: {e}")
         return False
 
 @st.cache_data(ttl=60)
@@ -415,81 +408,40 @@ def load_all_reports(daftar_staf):
         except: pass
     return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
-# --- FUNGSI HYBRID TABLE RENDERER (CRASH-PROOF VERSION) ---
-
+# --- FUNGSI HYBRID TABLE RENDERER ---
 def render_hybrid_table(df_data, unique_key, main_text_col):
-    """
-    Me-render tabel dengan mode hybrid.
-    Mencoba menggunakan AgGrid, jika error (MarshallComponentException/Lainnya),
-    otomatis fallback ke st.data_editor biasa.
-    """
-    
     use_aggrid_attempt = HAS_AGGRID
-
-    # -- MODE 1: ATTEMPT AG-GRID (PRO) --
     if use_aggrid_attempt:
         try:
-            # COPY dataframe untuk memastikan data bersih dan index tereset
             df_grid = df_data.copy()
             df_grid.reset_index(drop=True, inplace=True)
 
-            # Konfigurasi AgGrid
             gb = GridOptionsBuilder.from_dataframe(df_grid)
-            
-            # Config Kolom Status
             gb.configure_column("Status", editable=True, width=90)
-            
-            # Config Kolom Utama (Misi/Target) - Read Only tapi Wrap Text
             gb.configure_column(main_text_col, wrapText=True, autoHeight=True, width=400, editable=False)
-            
-            # Config Kolom Bukti - Editable & Wrap Text
             gb.configure_column("Bukti/Catatan", wrapText=True, autoHeight=True, editable=True, cellEditor="agLargeTextCellEditor", width=300)
-            
-            # Config Kolom Lain (Hidden/Readonly sesuai kebutuhan)
-            gb.configure_default_column(editable=False) # Default tidak bisa edit
-            
+            gb.configure_default_column(editable=False)
             gridOptions = gb.build()
             
             grid_response = AgGrid(
-                df_grid,
-                gridOptions=gridOptions,
-                update_mode=GridUpdateMode.MODEL_CHANGED,
-                fit_columns_on_grid_load=True,
-                height=400,
-                theme='streamlit',
-                key=f"aggrid_{unique_key}"
+                df_grid, gridOptions=gridOptions, update_mode=GridUpdateMode.MODEL_CHANGED,
+                fit_columns_on_grid_load=True, height=400, theme='streamlit', key=f"aggrid_{unique_key}"
             )
-            # Return dataframenya
             return pd.DataFrame(grid_response['data'])
-            
         except Exception as e:
-            # JIKA AGGRID ERROR, JANGAN TAMPILKAN ERROR MERAH KE USER
             print(f"AgGrid Error (Fallback triggered) for {unique_key}: {e}")
-            use_aggrid_attempt = False # Trigger fallback below
+            use_aggrid_attempt = False
 
-    # -- MODE 2: NATIVE STREAMLIT (FALLBACK) --
     if not use_aggrid_attempt:
-        # Konfigurasi Native
         return st.data_editor(
             df_data,
             column_config={
                 "Status": st.column_config.CheckboxColumn("Done?", width="small"),
-                main_text_col: st.column_config.TextColumn(
-                    main_text_col, 
-                    disabled=True, 
-                    width="large",
-                    help="Double click untuk membaca teks penuh"
-                ),
-                "Bukti/Catatan": st.column_config.TextColumn(
-                    "Bukti/Note (Edit Disini)", 
-                    width="medium",
-                    help="Double click untuk mengedit"
-                )
+                main_text_col: st.column_config.TextColumn(main_text_col, disabled=True, width="large", help="Double click untuk membaca teks penuh"),
+                "Bukti/Catatan": st.column_config.TextColumn("Bukti/Note (Edit Disini)", width="medium", help="Double click untuk mengedit")
             },
             column_order=["Status", main_text_col, "Bukti/Catatan"],
-            hide_index=True,
-            key=f"editor_native_{unique_key}",
-            use_container_width=True
+            hide_index=True, key=f"editor_native_{unique_key}", use_container_width=True
         )
 
 # --- APLIKASI UTAMA ---
@@ -600,8 +552,6 @@ if KONEKSI_GSHEET_BERHASIL:
             
             st.progress(prog_team, text=f"Pencapaian Team: {int(prog_team*100)}% ({done_team}/{total_team})")
             
-            # IMPLEMENTASI HYBRID RENDERER UNTUK TEAM
-            # Kolom teks utama: "Misi"
             edited_team = render_hybrid_table(df_team, "team_table", "Misi")
             
             if st.button("💾 Update Progress Team", use_container_width=True):
@@ -658,7 +608,6 @@ if KONEKSI_GSHEET_BERHASIL:
                 
                 st.progress(prog_indiv, text=f"Progress {filter_nama}: {int(prog_indiv*100)}% ({done_indiv}/{total_indiv})")
                 
-                # IMPLEMENTASI HYBRID RENDERER UNTUK INDIVIDU
                 edited_indiv = render_hybrid_table(df_indiv_user, f"indiv_table_{filter_nama}", "Target")
                 
                 if st.button(f"💾 Update Progress {filter_nama}", use_container_width=True):
@@ -702,7 +651,7 @@ if KONEKSI_GSHEET_BERHASIL:
         else:
             st.info("Belum ada data target individu.")
 
-    # --- 2. INPUT HARIAN ---
+    # --- 2. INPUT HARIAN (UPDATE: 1 FOTO = 1 DESKRIPSI = 1 BARIS) ---
     st.divider()
     with st.container(border=True):
         st.subheader("📝 Laporan Harian (Task List)")
@@ -720,28 +669,80 @@ if KONEKSI_GSHEET_BERHASIL:
                     sosmed_link = st.text_input("Link Konten (Sosmed)")
             with c2:
                 lokasi = st.text_input("Tempat / Klien")
-                fotos = st.file_uploader("Upload Bukti Foto", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
+                # File Uploader
+                fotos = st.file_uploader("Upload Bukti Foto (Bisa Banyak)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
             
-            deskripsi = st.text_area("Deskripsi Aktivitas")
+            # --- DYNAMIC DESCRIPTION LOGIC ---
+            deskripsi_map = {}
+            main_deskripsi = "" # Fallback jika tidak ada foto
+
+            if fotos:
+                st.info("📸 **Detail Foto:** Silakan isi deskripsi untuk masing-masing foto di bawah ini:")
+                for i, f in enumerate(fotos):
+                    st.markdown(f"**Foto #{i+1}: {f.name}**")
+                    # Key harus unik agar tidak bentrok
+                    deskripsi_map[f.name] = st.text_area(
+                        f"Deskripsi untuk foto {i+1}...", 
+                        height=100, 
+                        key=f"desc_input_{i}"
+                    )
+                    st.divider()
+            else:
+                # Jika tidak upload foto, gunakan satu kolom deskripsi umum
+                main_deskripsi = st.text_area("Deskripsi Aktivitas (Tanpa Foto)")
             
+            # --- SUBMIT BUTTON ---
             if st.form_submit_button("✅ Submit Laporan"):
-                if not deskripsi: st.error("Deskripsi wajib diisi!")
-                else:
-                    with st.spinner("Memproses laporan dan memformat database..."):
-                        link_foto = "-"
-                        if fotos and KONEKSI_DROPBOX_BERHASIL:
-                            links = []
-                            for f in fotos:
-                                url = upload_ke_dropbox(f, nama_pelapor, kategori="Laporan_Harian")
-                                links.append(url)
-                            link_foto = "\n".join(links) 
-                        
-                        link_sosmed = sosmed_link if sosmed_link else "-" if "Social Media Specialist" in nama_pelapor else ""
+                
+                # Validasi: Jika tanpa foto, deskripsi umum wajib isi. Jika ada foto, min 1 deskripsi.
+                valid = True
+                if not fotos and not main_deskripsi:
+                    st.error("Harap isi Deskripsi Aktivitas!")
+                    valid = False
+                
+                if valid:
+                    with st.spinner("Memproses laporan..."):
+                        rows_to_insert = []
                         ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
-                        row = [str(ts), str(nama_pelapor), str(lokasi) if lokasi else "-", str(deskripsi), str(link_foto), str(link_sosmed)]
+                        link_sosmed = sosmed_link if sosmed_link else "-" if "Social Media Specialist" in nama_pelapor else ""
                         
-                        if simpan_laporan_harian(row, nama_pelapor):
-                            st.success("Laporan Tersimpan & Database Diformat!")
+                        # CASE A: Ada Foto (1 Foto = 1 Baris)
+                        if fotos and KONEKSI_DROPBOX_BERHASIL:
+                            for f in fotos:
+                                # Upload Foto
+                                url_foto = upload_ke_dropbox(f, nama_pelapor, kategori="Laporan_Harian")
+                                if not url_foto: url_foto = "Gagal Upload"
+                                
+                                # Ambil deskripsi spesifik dari map
+                                desc_spesifik = deskripsi_map.get(f.name, "-")
+                                if not desc_spesifik: desc_spesifik = "-" # Default dash jika kosong
+
+                                # Buat Baris
+                                row = [
+                                    str(ts), 
+                                    str(nama_pelapor), 
+                                    str(lokasi) if lokasi else "-", 
+                                    str(desc_spesifik), 
+                                    str(url_foto), 
+                                    str(link_sosmed)
+                                ]
+                                rows_to_insert.append(row)
+                        
+                        # CASE B: Tidak Ada Foto (1 Baris Teks Saja)
+                        else:
+                            row = [
+                                str(ts), 
+                                str(nama_pelapor), 
+                                str(lokasi) if lokasi else "-", 
+                                str(main_deskripsi), 
+                                "-", # Link Foto Kosong
+                                str(link_sosmed)
+                            ]
+                            rows_to_insert.append(row)
+
+                        # SIMPAN SEMUA BARIS SEKALIGUS (BATCH)
+                        if simpan_laporan_harian_batch(rows_to_insert, nama_pelapor):
+                            st.success(f"Berhasil menyimpan {len(rows_to_insert)} aktivitas!")
                             st.cache_data.clear()
                         else:
                             st.error("Gagal menyimpan laporan.")
