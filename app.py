@@ -222,6 +222,7 @@ def get_daftar_staf_terbaru():
         return nama_list if nama_list else default_staf
     except: return default_staf
 
+# --- (FUNGSI TAMBAH STAF DIHAPUS DARI UI TAPI LOGIC TETAP ADA JIKA BUTUH MANUAL) ---
 def tambah_staf_baru(nama_baru):
     try:
         try: ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
@@ -393,7 +394,9 @@ if KONEKSI_GSHEET_BERHASIL:
         menu_nav = st.radio("Pilih Menu:", ["📝 Laporan & Target", "📊 Dashboard Manager"])
         st.divider()
         st.header("🎯 Manajemen Target")
-        tab_team, tab_individu, tab_admin = st.tabs(["Team", "Pribadi", "Admin"])
+        
+        # --- PERUBAHAN DI SINI: MENGHAPUS TAB ADMIN ---
+        tab_team, tab_individu = st.tabs(["Team", "Pribadi"])
 
         with tab_team:
             st.caption("Bulk Input Target Team")
@@ -426,17 +429,9 @@ if KONEKSI_GSHEET_BERHASIL:
                         if add_bulk_targets(SHEET_TARGET_INDIVIDU, [pilih_nama, "", str(start_i), str(end_i), "FALSE", "-"], targets):
                             st.success(f"{len(targets)} target ditambahkan!"); st.cache_data.clear(); st.rerun()
                         else: st.error("Gagal.")
-
-        with tab_admin:
-            with st.expander("➕ Tambah Karyawan"):
-                with st.form("add_staff", clear_on_submit=True):
-                    new_name = st.text_input("Nama")
-                    new_role = st.text_input("Jabatan")
-                    if st.form_submit_button("Tambah"):
-                        if new_name and new_role:
-                            res, msg = tambah_staf_baru(f"{new_name} ({new_role})")
-                            if res: st.success(msg); st.cache_data.clear(); st.rerun()
-                            else: st.error(msg)
+        
+        # --- FITUR ADMIN YANG DIHAPUS ---
+        # (Kode lama untuk with tab_admin: sudah dihapus)
 
     st.title("🚀 Sales & Marketing Action Center")
     st.caption(f"Realtime: {datetime.now(tz=ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y %H:%M:%S')}")
