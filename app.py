@@ -8,7 +8,7 @@ import dropbox
 from dropbox.exceptions import AuthError, ApiError
 from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 import re
-import plotly.express as px # Kita pakai Plotly agar grafik lebih detail
+import plotly.express as px # Library grafik
 
 # --- HYBRID LIBRARY IMPORT (FALLBACK MECHANISM) ---
 try:
@@ -36,7 +36,7 @@ SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 # --- KOLOM LAPORAN HARIAN ---
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
-COL_TEMPAT = "Tempat Dikunjungi" # Diisi Lokasi (Sales) ATAU Jenis Tugas (Marketing)
+COL_TEMPAT = "Tempat Dikunjungi"
 COL_DESKRIPSI = "Deskripsi"
 COL_LINK_FOTO = "Link Foto"
 COL_LINK_SOSMED = "Link Sosmed"
@@ -76,6 +76,7 @@ except Exception as e:
 
 
 # --- FUNGSI HELPER CORE ---
+
 def auto_format_sheet(worksheet):
     try:
         sheet_id = worksheet.id
@@ -292,6 +293,7 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 if KONEKSI_GSHEET_BERHASIL:
     if not KONEKSI_DROPBOX_BERHASIL: st.warning("⚠️ Dropbox non-aktif. Fitur foto dimatikan.")
 
+    # SIDEBAR
     with st.sidebar:
         st.header("Navigasi")
         menu_nav = st.radio("Pilih Menu:", ["📝 Laporan & Target", "📊 Dashboard Manager"])
@@ -311,9 +313,7 @@ if KONEKSI_GSHEET_BERHASIL:
                     targets = clean_bulk_input(goal_team_text)
                     if targets:
                         if add_bulk_targets(SHEET_TARGET_TEAM, ["", str(start_d), str(end_d), "FALSE", "-"], targets):
-                            st.success(f"{len(targets)} target ditambahkan!")
-                            st.cache_data.clear()
-                            st.rerun()
+                            st.success(f"{len(targets)} target ditambahkan!"); st.cache_data.clear(); st.rerun()
                         else: st.error("Gagal.")
 
         with tab_individu:
@@ -330,9 +330,7 @@ if KONEKSI_GSHEET_BERHASIL:
                     targets = clean_bulk_input(goal_indiv_text)
                     if targets:
                         if add_bulk_targets(SHEET_TARGET_INDIVIDU, [pilih_nama, "", str(start_i), str(end_i), "FALSE", "-"], targets):
-                            st.success(f"{len(targets)} target ditambahkan!")
-                            st.cache_data.clear()
-                            st.rerun()
+                            st.success(f"{len(targets)} target ditambahkan!"); st.cache_data.clear(); st.rerun()
                         else: st.error("Gagal.")
 
         with tab_admin:
@@ -401,7 +399,7 @@ if KONEKSI_GSHEET_BERHASIL:
                 else: st.info("Belum ada target.")
             else: st.info("Data kosong.")
 
-        # --- INPUT HARIAN (FAIRNESS LOGIC) ---
+        # --- INPUT HARIAN (DYNAMIC + FAIRNESS LOGIC) ---
         st.divider()
         with st.container(border=True):
             st.subheader("📝 Input Laporan Harian (Activity)")
@@ -409,7 +407,7 @@ if KONEKSI_GSHEET_BERHASIL:
             # 1. Identitas
             nama_pelapor = st.selectbox("Nama Pelapor", get_daftar_staf_terbaru(), key="pelapor_main")
             
-            # 2. Kategori Aktivitas (KUNCI KEADILAN)
+            # 2. Kategori Aktivitas (Fitur Fairness)
             kategori_aktivitas = st.radio(
                 "Jenis Aktivitas:", 
                 ["🚗 Kunjungan Lapangan (Sales)", "💻 Digital Marketing / Konten / Ads", "📞 Telesales / Follow Up", "🏢 Admin / Lainnya"],
@@ -435,28 +433,32 @@ if KONEKSI_GSHEET_BERHASIL:
                     # Jika Digital, lokasi otomatis diisi kategori agar grafik rapi
                     lokasi_input = st.text_input("Jenis Tugas (Otomatis)", value=kategori_aktivitas.split(' ')[1], disabled=True)
                 
+                # DYNAMIC INPUT: File Uploader di luar form (Fitur User)
                 fotos = st.file_uploader("Upload Bukti (Foto/Screenshot)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
 
-            # Logic Deskripsi
+            # Logic Deskripsi (Dynamic 1 Foto = 1 Desc)
             deskripsi_map = {}
             main_deskripsi = ""
 
             if fotos:
                 st.info("📸 **Detail Bukti:** Berikan keterangan untuk setiap file:")
+                # Loop ini memastikan setiap foto punya deskripsi sendiri
                 for i, f in enumerate(fotos):
                     with st.container(border=True):
                         col_img, col_desc = st.columns([1, 3])
                         with col_img:
+                            # Preview Gambar
                             if f.type.startswith('image'): st.image(f, width=100)
                             else: st.markdown(f"📄 **{f.name}**")
                         with col_desc:
-                            deskripsi_map[f.name] = st.text_area(f"Ket. File {i+1}", height=70, key=f"desc_{i}", placeholder="Jelaskan...")
+                            # Input Deskripsi per file
+                            deskripsi_map[f.name] = st.text_area(f"Ket. File {i+1}", height=70, key=f"desc_{i}", placeholder="Jelaskan aktivitas...")
             else:
                 placeholder_text = "Jelaskan hasil kunjungan..." if "Kunjungan" in kategori_aktivitas else "Jelaskan konten/ads/calls yang dikerjakan..."
                 main_deskripsi = st.text_area("Deskripsi Aktivitas", placeholder=placeholder_text)
 
             if st.button("✅ Submit Laporan", type="primary"):
-                # Validasi Keadilan
+                # Validasi
                 valid = True
                 if "Kunjungan" in kategori_aktivitas and not lokasi_input:
                     st.error("Untuk Kunjungan, Lokasi Wajib Diisi!"); valid = False
@@ -467,9 +469,9 @@ if KONEKSI_GSHEET_BERHASIL:
                     with st.spinner("Menyimpan..."):
                         rows = []
                         ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
-                        # Simpan kategori di kolom 'Tempat' untuk Digital agar bisa difilter di dashboard
                         final_lokasi = lokasi_input if lokasi_input else kategori_aktivitas
                         
+                        # Simpan per foto (Granular)
                         if fotos and KONEKSI_DROPBOX_BERHASIL:
                             for f in fotos:
                                 url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
@@ -481,8 +483,15 @@ if KONEKSI_GSHEET_BERHASIL:
                         if simpan_laporan_harian_batch(rows, nama_pelapor):
                             st.success(f"Laporan '{kategori_aktivitas}' Tersimpan!"); st.balloons(); st.cache_data.clear()
                         else: st.error("Gagal simpan.")
+        
+        # Log Aktivitas
+        with st.expander("📂 Log Data Mentah"):
+            if st.button("🔄 Refresh"): st.cache_data.clear(); st.rerun()
+            df_log = load_all_reports(get_daftar_staf_terbaru())
+            if not df_log.empty: st.dataframe(df_log, use_container_width=True, hide_index=True)
+            else: st.info("Kosong")
 
-    # --- MENU 2: DASHBOARD MANAGER (FAIR & ACCURATE) ---
+    # --- MENU 2: DASHBOARD MANAGER (FITUR BARU) ---
     elif menu_nav == "📊 Dashboard Manager":
         st.header("📊 Dashboard Produktivitas (Split View)")
         st.info("Dashboard ini memisahkan analisa antara Kunjungan Lapangan (Sales) dan Aktivitas Digital (Marketing) agar penilaian adil.")
@@ -496,11 +505,8 @@ if KONEKSI_GSHEET_BERHASIL:
                 df_log['Tanggal'] = df_log[COL_TIMESTAMP].dt.date
             except: df_log['Tanggal'] = datetime.now().date()
             
-            # --- LOGIC PEMISAHAN KATEGORI (FAIRNESS) ---
-            # Kita deteksi berdasarkan isi kolom 'Tempat Dikunjungi'
-            # Jika isinya mengandung keyword digital, masuk bucket Marketing. Sisanya Sales.
+            # Categorization Logic
             keywords_digital = ["Digital", "Marketing", "Konten", "Ads", "Telesales", "Admin", "Follow"]
-            
             def get_category(val):
                 val_str = str(val)
                 if any(k in val_str for k in keywords_digital): return "Digital/Internal"
@@ -513,7 +519,6 @@ if KONEKSI_GSHEET_BERHASIL:
             start_date = date.today() - timedelta(days=days)
             df_filt = df_log[df_log['Tanggal'] >= start_date]
 
-            # --- TAB VIEW UNTUK KEADILAN ---
             tab_sales, tab_marketing, tab_galeri = st.tabs(["🚗 Sales (Lapangan)", "💻 Marketing (Digital)", "🖼️ Galeri Bukti"])
 
             with tab_sales:
@@ -525,7 +530,6 @@ if KONEKSI_GSHEET_BERHASIL:
                 if not df_sales.empty:
                     st.subheader("Top Visiting Sales")
                     st.bar_chart(df_sales[COL_NAMA].value_counts(), color="#FF4B4B")
-                    
                     st.subheader("Lokasi Paling Sering Dikunjungi")
                     st.dataframe(df_sales[COL_TEMPAT].value_counts().head(5), use_container_width=True)
                 else: st.info("Tidak ada data kunjungan lapangan.")
@@ -538,10 +542,8 @@ if KONEKSI_GSHEET_BERHASIL:
                 
                 if not df_mkt.empty:
                     st.subheader("Produktivitas Tim Digital")
-                    # Gunakan Plotly untuk grafik yang lebih bagus (Pie Chart)
                     fig = px.pie(df_mkt, names=COL_NAMA, title="Distribusi Beban Kerja Digital")
                     st.plotly_chart(fig, use_container_width=True)
-                    
                     st.subheader("Jenis Tugas Digital")
                     st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
