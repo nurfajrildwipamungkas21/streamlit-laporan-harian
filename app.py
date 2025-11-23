@@ -121,7 +121,8 @@ def get_daftar_staf_terbaru():
     Mengambil daftar nama staf dari sheet khusus 'Config_Staf'.
     Jika sheet belum ada, akan dibuatkan defaultnya.
     """
-    default_staf = ["Saya", "Social Media Specialist", "Deal Maker"]
+    # DEFAULT HANYA 'Saya'. Yang lain dihapus.
+    default_staf = ["Saya"]
     
     try:
         # Coba buka worksheet config
@@ -165,7 +166,6 @@ def tambah_staf_baru_ke_sheet(nama_baru):
             
         # Cek duplikasi
         existing_names = ws.col_values(1)
-        # Case insensitive check
         if any(nama_baru.lower() == existing.lower() for existing in existing_names):
             return False, "Nama sudah ada di daftar!"
             
@@ -247,28 +247,33 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     # --- FITUR ADMIN: TAMBAH KARYAWAN VIA SIDEBAR ---
     with st.sidebar:
         st.header("⚙️ Pengaturan Karyawan")
-        st.info("Gunakan menu ini untuk menambahkan nama karyawan/jabatan baru ke dalam sistem.")
+        st.info("Tambah karyawan baru dengan format Nama + Jabatan.")
         
         with st.form("form_tambah_staf", clear_on_submit=True):
-            input_nama_baru = st.text_input("Nama/Jabatan Baru")
+            # INPUT BARU: Dipecah jadi 2 kolom
+            nama_karyawan = st.text_input("Nama Karyawan", placeholder="Contoh: Riky")
+            jabatan_karyawan = st.text_input("Jabatan / Job Desc", placeholder="Contoh: Social Media Specialist")
+            
             tombol_tambah = st.form_submit_button("Tambahkan")
             
             if tombol_tambah:
-                if input_nama_baru:
+                if nama_karyawan and jabatan_karyawan:
+                    # GABUNGKAN STRING DI SINI
+                    nama_gabungan = f"{nama_karyawan} ({jabatan_karyawan})"
+                    
                     with st.spinner("Menyimpan konfigurasi..."):
-                        sukses, pesan = tambah_staf_baru_ke_sheet(input_nama_baru)
+                        sukses, pesan = tambah_staf_baru_ke_sheet(nama_gabungan)
                         if sukses:
-                            st.success(pesan)
+                            st.success(f"Berhasil: {nama_gabungan}")
                             # Hapus cache agar dropdown langsung update
                             st.cache_data.clear()
                             st.rerun()
                         else:
                             st.error(pesan)
                 else:
-                    st.warning("Nama tidak boleh kosong.")
+                    st.warning("Nama dan Jabatan harus diisi semua.")
 
     # --- LOAD NAMA STAF DARI GOOGLE SHEET ---
-    # Fungsi ini akan membaca sheet "Config_Staf"
     NAMA_STAF = get_daftar_staf_terbaru()
 
     # --- 1. FORM INPUT KEGIATAN ---
@@ -276,7 +281,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
     # Dropdown sekarang berisi data dinamis
     nama = st.selectbox(
-        "Pilih Nama / Job Desc Anda", 
+        "Pilih Nama (Job Desc)", 
         NAMA_STAF, 
         key="nama_job_desc_selector" 
     )
@@ -297,7 +302,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
             )
             
             link_sosmed_input = "" 
-            if nama == "Social Media Specialist":
+            # LOGIC BARU: Cek apakah mengandung kata kunci
+            if "Social Media Specialist" in nama:
                 link_sosmed_input = st.text_input(
                     "Link Sosmed", 
                     placeholder="Contoh: https://www.instagram.com/p/...", 
@@ -348,7 +354,8 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 zona_waktu_wib = ZoneInfo("Asia/Jakarta")
                 timestamp_sekarang = datetime.now(tz=zona_waktu_wib).strftime('%d-%m-%Y %H:%M:%S')
 
-                if nama == "Social Media Specialist":
+                # LOGIC BARU JUGA DI SINI
+                if "Social Media Specialist" in nama:
                     link_sosmed_final = link_sosmed_input if link_sosmed_input else "-"
                 else:
                     link_sosmed_final = ""
