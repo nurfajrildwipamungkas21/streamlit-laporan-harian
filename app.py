@@ -408,7 +408,7 @@ if KONEKSI_GSHEET_BERHASIL:
         # 3. Area Login Tersembunyi (Expander)
         # Jika belum login, tampilkan form password
         if not st.session_state["is_manager"]:
-            with st.expander("🔐 Akses Manager (Khusus Admin)"):
+            with st.expander("🔐 Akses Khusus Admin"):
                 pwd = st.text_input("Password:", type="password", key="input_pwd")
                 if st.button("Login Manager"):
                     # --- INFO: GANTI PASSWORD DISINI ---
