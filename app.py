@@ -95,7 +95,39 @@ def tambah_staf_baru(nama_baru):
         return True, "Berhasil tambah tim!"
     except Exception as e: return False, str(e)
 
-# --- FUNGSI CHECKLIST TARGET ---
+# --- FUNGSI UPLOAD DENGAN SUB-FOLDER (REVISI) ---
+
+def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
+    """
+    Upload file ke Dropbox dengan struktur:
+    /Laporan_Kegiatan_Harian/{Nama_User}/{Kategori}/{File}
+    """
+    try:
+        file_data = file_obj.getvalue()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Bersihkan nama file & folder
+        clean_filename = "".join([c for c in file_obj.name if c.isalnum() or c in ('.','_')])
+        clean_user_folder = "".join([c for c in nama_staf if c.isalnum() or c in (' ','_')]).replace(' ','_')
+        clean_kategori = "".join([c for c in kategori if c.isalnum() or c in (' ','_')]).replace(' ','_')
+        
+        # STRUKTUR FOLDER BARU
+        path = f"{FOLDER_DROPBOX}/{clean_user_folder}/{clean_kategori}/{ts}_{clean_filename}"
+        
+        dbx.files_upload(file_data, path, mode=dropbox.files.WriteMode.add)
+        settings = SharedLinkSettings(requested_visibility=RequestedVisibility.public)
+        try: 
+            link = dbx.sharing_create_shared_link_with_settings(path, settings=settings)
+        except ApiError as e: 
+            if e.error.is_shared_link_already_exists():
+                link = dbx.sharing_list_shared_links(path, direct_only=True).links[0]
+            else: return "-"
+        return link.url.replace("?dl=0", "?raw=1")
+    except Exception as e: 
+        print(f"Upload Error: {e}")
+        return "-"
+
+# --- FUNGSI CHECKLIST ---
 
 def clean_bulk_input(text_input):
     lines = text_input.split('\n')
@@ -154,41 +186,41 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
         return True
     except: return False
 
-# --- FUNGSI UPDATE BUKTI SPESIFIK (NEW) ---
-def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_name, col_target_name="Target"):
+# --- FUNGSI UPDATE BUKTI SPESIFIK (REVISI BUG) ---
+def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_name, kategori_folder):
     """
-    Update catatan dan upload foto untuk target spesifik tanpa menimpa data lain
+    Update catatan dan upload foto HANYA untuk baris yang sesuai target_name.
     """
     try:
         ws = spreadsheet.worksheet(sheet_name)
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # Cari index baris yang sesuai dengan target name
-        # Note: GSheet index starts at 2 (1 for header)
-        # DF index starts at 0
+        # Tentukan kolom pencarian (Misi atau Target)
+        col_target_key = "Misi" if sheet_name == SHEET_TARGET_TEAM else "Target"
         
-        # Kolom target name berbeda di team vs individu
-        # Team -> "Misi", Individu -> "Target"
+        # Cari row index (GSheet index dimulai dari 1, header row 1, jadi data pertama row 2)
+        # Pandas index mulai dari 0.
+        # Jadi: GSheet Row ID = Pandas Index + 2
         
-        row_idx = -1
-        col_misi = "Misi" if sheet_name == SHEET_TARGET_TEAM else "Target"
+        # Filter dataframe untuk mencari index yang tepat
+        matches = df.index[df[col_target_key] == target_name].tolist()
         
-        # Cari baris yang cocok
-        found = df[df[col_misi] == target_name]
-        
-        if found.empty:
-            return False, "Target tidak ditemukan."
+        if not matches:
+            return False, f"Target '{target_name}' tidak ditemukan di database."
             
-        row_idx = found.index[0]
+        # Ambil match pertama (asumsi nama target unik per user)
+        # Jika ada duplikat nama target, ini akan ambil yang pertama dibuat.
+        row_idx_pandas = matches[0] 
+        row_idx_gsheet = row_idx_pandas + 2 
         
-        # 1. Upload Foto jika ada
+        # 1. Upload Foto (Gunakan Kategori Folder)
         link_bukti = ""
         if file_obj:
-            link_bukti = upload_ke_dropbox(file_obj, user_folder_name)
+            link_bukti = upload_ke_dropbox(file_obj, user_folder_name, kategori=kategori_folder)
         
-        # 2. Gabungkan Catatan Lama + Baru
-        catatan_lama = df.at[row_idx, "Bukti/Catatan"]
+        # 2. Ambil catatan lama dari DataFrame (bukan cell GSheet biar hemat API call)
+        catatan_lama = df.at[row_idx_pandas, "Bukti/Catatan"]
         catatan_lama = str(catatan_lama) if catatan_lama else "-"
         if catatan_lama == "-": catatan_lama = ""
         
@@ -197,35 +229,22 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
         if link_bukti and link_bukti != "-": update_text += f"[FOTO: {link_bukti}]"
         
         final_note = f"{catatan_lama} | {update_text}" if catatan_lama else update_text
-        if not final_note: final_note = "-" # Balik ke dash jika kosong
+        if not final_note: final_note = "-"
         
-        # 3. Update DF
-        df.at[row_idx, "Bukti/Catatan"] = final_note
+        # 3. Update LANGSUNG ke Cell Spesifik di GSheet (Biar gak overwrite checkbox)
+        # Cari kolom "Bukti/Catatan" ada di urutan keberapa (1-based index)
+        headers = df.columns.tolist()
+        try:
+            col_idx_gsheet = headers.index("Bukti/Catatan") + 1
+        except ValueError:
+            return False, "Kolom Bukti/Catatan hilang."
+
+        ws.update_cell(row_idx_gsheet, col_idx_gsheet, final_note)
         
-        # 4. Save kembali seluruh tabel (Paling aman untuk data kecil)
-        return save_checklist(sheet_name, df), "Berhasil update bukti!"
+        return True, "Berhasil update bukti!"
         
     except Exception as e:
         return False, f"Error: {e}"
-
-# --- FUNGSI UPLOAD ---
-
-def upload_ke_dropbox(file_obj, nama_staf):
-    try:
-        file_data = file_obj.getvalue()
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        clean_name = "".join([c for c in file_obj.name if c.isalnum() or c in ('.','_')])
-        folder = "".join([c for c in nama_staf if c.isalnum() or c in (' ','_')]).replace(' ','_')
-        path = f"{FOLDER_DROPBOX}/{folder}/{ts}_{clean_name}"
-        dbx.files_upload(file_data, path, mode=dropbox.files.WriteMode.add)
-        settings = SharedLinkSettings(requested_visibility=RequestedVisibility.public)
-        try: link = dbx.sharing_create_shared_link_with_settings(path, settings=settings)
-        except ApiError as e: 
-            if e.error.is_shared_link_already_exists():
-                link = dbx.sharing_list_shared_links(path, direct_only=True).links[0]
-            else: return "-"
-        return link.url.replace("?dl=0", "?raw=1")
-    except: return "-"
 
 def simpan_laporan_harian(data_list, nama_staf):
     try:
@@ -341,13 +360,12 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
             
             st.progress(prog_team, text=f"Pencapaian Team: {int(prog_team*100)}%")
             
-            # FITUR BARU: BUKTI BISA DIEDIT TEXTNYA
             edited_team = st.data_editor(
                 df_team,
                 column_config={
                     "Status": st.column_config.CheckboxColumn("Done?", width="small"),
                     "Misi": st.column_config.TextColumn(disabled=True),
-                    "Bukti/Catatan": st.column_config.TextColumn("Bukti/Note (Edit Disini)", width="medium") # BISA DIEDIT
+                    "Bukti/Catatan": st.column_config.TextColumn("Bukti/Note (Edit Disini)", width="medium")
                 },
                 column_order=["Status", "Misi", "Bukti/Catatan"],
                 hide_index=True,
@@ -361,7 +379,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 st.cache_data.clear()
                 st.rerun()
                 
-            # FITUR BARU: UPLOAD BUKTI FOTO KHUSUS TEAM
+            # UPLOAD BUKTI TEAM
             with st.expander("📂 Upload Bukti Foto (Team)"):
                 list_misi_team = df_team["Misi"].tolist()
                 pilih_misi = st.selectbox("Pilih Misi Team:", list_misi_team)
@@ -370,7 +388,19 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 
                 if st.button("Kirim Bukti Team"):
                     with st.spinner("Mengupload..."):
-                        sukses, msg = update_evidence_row(SHEET_TARGET_TEAM, pilih_misi, note_misi, file_misi, "Team_Evidence")
+                        # Perbaikan: Menggunakan kategori "Target_Team"
+                        # User folder tetap sesuai user yang sedang login di sidebar (atau default)
+                        # Untuk team, kita pakai folder pelapor saja agar terlacak siapa yang upload.
+                        pelapor_team = get_daftar_staf_terbaru()[0] # Default ke "Saya" atau user pertama
+                        
+                        sukses, msg = update_evidence_row(
+                            SHEET_TARGET_TEAM, 
+                            pilih_misi, 
+                            note_misi, 
+                            file_misi, 
+                            user_folder_name=pelapor_team, 
+                            kategori_folder="Target_Team"
+                        )
                         if sukses:
                             st.success("Bukti Team Terupload!")
                             st.cache_data.clear()
@@ -401,7 +431,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     column_config={
                         "Status": st.column_config.CheckboxColumn("Done?", width="small"),
                         "Target": st.column_config.TextColumn(disabled=True),
-                        "Bukti/Catatan": st.column_config.TextColumn("Bukti/Note (Edit Disini)", width="medium") # BISA DIEDIT
+                        "Bukti/Catatan": st.column_config.TextColumn("Bukti/Note (Edit Disini)", width="medium")
                     },
                     column_order=["Status", "Target", "Bukti/Catatan"],
                     hide_index=True,
@@ -416,8 +446,9 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     st.cache_data.clear()
                     st.rerun()
 
-                # FITUR BARU: UPLOAD BUKTI FOTO KHUSUS INDIVIDU
+                # UPLOAD BUKTI INDIVIDU
                 with st.expander(f"📂 Upload Bukti Foto ({filter_nama})"):
+                    # Pastikan list target diambil dari DF USER yang difilter, bukan semua
                     list_target_user = df_indiv_user["Target"].tolist()
                     pilih_target = st.selectbox("Pilih Target Mingguan:", list_target_user)
                     note_target = st.text_input("Catatan Tambahan", key="note_indiv")
@@ -425,7 +456,15 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                     
                     if st.button("Kirim Bukti Pribadi"):
                          with st.spinner("Mengupload..."):
-                            sukses, msg = update_evidence_row(SHEET_TARGET_INDIVIDU, pilih_target, note_target, file_target, filter_nama)
+                            # Perbaikan: Menggunakan kategori "Target_Individu"
+                            sukses, msg = update_evidence_row(
+                                SHEET_TARGET_INDIVIDU, 
+                                pilih_target, 
+                                note_target, 
+                                file_target, 
+                                user_folder_name=filter_nama,
+                                kategori_folder="Target_Individu"
+                            )
                             if sukses:
                                 st.success("Bukti Pribadi Terupload!")
                                 st.cache_data.clear()
@@ -462,10 +501,20 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 if not deskripsi: st.error("Deskripsi wajib diisi!")
                 else:
                     with st.spinner("Proses..."):
-                        link_foto = "\n".join([upload_ke_dropbox(f, nama_pelapor) for f in fotos]) if fotos else "-"
+                        # Perbaikan: Menggunakan kategori "Laporan_Harian"
+                        # Loop jika foto lebih dari 1
+                        link_foto = "-"
+                        if fotos:
+                            links = []
+                            for f in fotos:
+                                url = upload_ke_dropbox(f, nama_pelapor, kategori="Laporan_Harian")
+                                links.append(url)
+                            link_foto = "\n".join(links)
+                        
                         link_sosmed = sosmed_link if sosmed_link else "-" if "Social Media Specialist" in nama_pelapor else ""
                         ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
                         row = [ts, nama_pelapor, lokasi, deskripsi, link_foto, link_sosmed]
+                        
                         if simpan_laporan_harian(row, nama_pelapor):
                             st.success("Tersimpan!")
                             st.cache_data.clear()
