@@ -58,19 +58,34 @@ try:
 except Exception as e:
     st.error(f"Dropbox Error: {e}")
 
-# --- FUNGSI HELPER CORE & FORMATTING ---
+# --- FUNGSI HELPER CORE & FORMATTING (DIPERBAIKI) ---
 
 def auto_format_sheet(worksheet):
     """
-    Fungsi Ajaib: Otomatis merapikan lebar kolom A-Z sesuai konten.
-    Dipanggil setiap kali ada data disimpan.
+    Fungsi Ajaib Revisi: Memaksa WRAP TEXT agar tidak terpotong.
     """
     try:
-        # Auto resize kolom ke-1 sampai ke-10 (A sampai J)
-        # Ini membuat kolom melebar jika teks panjang, dan menyempit jika pendek
-        worksheet.columns_auto_resize(0, 10)
-    except:
-        pass
+        # 1. Format Header (Tebal & Tengah)
+        worksheet.format("A1:Z1", {
+            "textFormat": {"bold": True},
+            "horizontalAlignment": "CENTER",
+            "verticalAlignment": "MIDDLE"
+        })
+        
+        # 2. Format Body (WRAP TEXT adalah kuncinya!)
+        # wrapStrategy: WRAP -> Teks turun ke bawah jika panjang
+        # verticalAlignment: TOP -> Agar rapi di atas
+        worksheet.format("A2:Z1000", {
+            "wrapStrategy": "WRAP", 
+            "verticalAlignment": "TOP"
+        })
+
+        # 3. Resize Lebar Kolom
+        # Kita resize kolom A-F (index 0-5) agar pas
+        worksheet.columns_auto_resize(0, 6)
+        
+    except Exception as e:
+        print(f"Format Error: {e}")
 
 @st.cache_resource(ttl=60)
 def get_or_create_worksheet(nama_worksheet):
@@ -79,8 +94,7 @@ def get_or_create_worksheet(nama_worksheet):
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=nama_worksheet, rows=1, cols=len(NAMA_KOLOM_STANDAR))
         ws.append_row(NAMA_KOLOM_STANDAR)
-        # Format Header agar Teks Wrap (Turun ke bawah jika kepanjangan)
-        ws.format("A1:Z1", {"wrapStrategy": "WRAP", "textFormat": {"bold": True}})
+        auto_format_sheet(ws) # Format saat buat baru
         return ws
     except: return None
 
@@ -106,11 +120,11 @@ def tambah_staf_baru(nama_baru):
         except: ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_NAMA, rows=100, cols=1)
         if nama_baru in ws.col_values(1): return False, "Nama sudah ada!"
         ws.append_row([nama_baru])
-        auto_format_sheet(ws) # RAPIKAN SHEET
+        auto_format_sheet(ws) 
         return True, "Berhasil tambah tim!"
     except Exception as e: return False, str(e)
 
-# --- FUNGSI UPLOAD DENGAN SUB-FOLDER ---
+# --- FUNGSI UPLOAD ---
 
 def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
     try:
@@ -134,7 +148,7 @@ def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
         print(f"Upload Error: {e}")
         return "-"
 
-# --- FUNGSI CHECKLIST & SAVING ---
+# --- FUNGSI CHECKLIST ---
 
 def clean_bulk_input(text_input):
     lines = text_input.split('\n')
@@ -171,7 +185,7 @@ def save_checklist(sheet_name, df):
             df_save[col_status] = df_save[col_status].apply(lambda x: "TRUE" if x else "FALSE")
             
         ws.update([df_save.columns.values.tolist()] + df_save.values.tolist())
-        auto_format_sheet(ws) # RAPIKAN SHEET SETELAH SAVE
+        auto_format_sheet(ws) # FORMAT ULANG SETELAH SAVE
         return True
     except: return False
 
@@ -190,7 +204,7 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
             rows_to_add.append(new_row)
             
         ws.append_rows(rows_to_add)
-        auto_format_sheet(ws) # RAPIKAN SHEET SETELAH NAMBAH DATA
+        auto_format_sheet(ws) # FORMAT ULANG SETELAH NAMBAH
         return True
     except: return False
 
@@ -231,7 +245,7 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
             return False, "Kolom Bukti/Catatan hilang."
 
         ws.update_cell(row_idx_gsheet, col_idx_gsheet, final_note)
-        auto_format_sheet(ws) # RAPIKAN SHEET SETELAH UPDATE BUKTI
+        auto_format_sheet(ws) # FORMAT ULANG SETELAH UPDATE BUKTI
         
         return True, "Berhasil update bukti!"
         
@@ -242,7 +256,7 @@ def simpan_laporan_harian(data_list, nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
         ws.append_row(data_list)
-        auto_format_sheet(ws) # RAPIKAN SHEET LAPORAN HARIAN
+        auto_format_sheet(ws) # FORMAT ULANG LAPORAN HARIAN
         return True
     except: return False
 
