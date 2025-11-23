@@ -58,14 +58,14 @@ try:
 except Exception as e:
     st.error(f"Dropbox Error: {e}")
 
-# --- FUNGSI HELPER CORE & SMART FORMATTING (UPDATED) ---
+# --- FUNGSI HELPER CORE & SMART FORMATTING (HYBRID DINAMIS) ---
 
 def auto_format_sheet(worksheet):
     """
-    Fungsi Formatting Pintar:
-    1. Mengatur lebar kolom.
-    2. Mengatur Wrap Text.
-    3. MEMAKSA Auto-Resize Tinggi Baris (ROWS) agar teks panjang terlihat semua.
+    Fungsi Formatting Hybrid:
+    1. Mengatur lebar kolom agar proporsional (tidak terlalu lebar/sempit).
+    2. Mengatur Wrap Text agar teks panjang turun ke bawah.
+    3. MEMAKSA Auto-Resize Tinggi Baris (ROWS) agar teks panjang terbaca full.
     """
     try:
         sheet_id = worksheet.id
@@ -78,35 +78,37 @@ def auto_format_sheet(worksheet):
             "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
         })
         
-        # 2. Logic Lebar Kolom
+        # 2. Logic Lebar Kolom (Pixel Perfect)
         headers = worksheet.row_values(1)
         for i, col_name in enumerate(headers):
             col_index = i
             letter = chr(65 + i)
             
-            if col_name in ["Misi", "Target", "Deskripsi"]:
-                worksheet.set_column_width(col_index, 500) # Lebar ekstra
-                # WRAP: Agar teks turun ke bawah
+            # -- LOGIKA: TEKS PANJANG (Misi, Target, Deskripsi) --
+            # Lebar diset 350px (Cukup luas tapi ga menuhi layar) + WRAP
+            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed"]:
+                worksheet.set_column_width(col_index, 350) 
                 worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
                 
+            # -- LOGIKA: TANGGAL (Biar menyamping full) --
+            # Lebar 120px + CLIP (Jangan Wrap)
             elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
                 worksheet.set_column_width(col_index, 120)
-                # CLIP: Agar tanggal tetap satu baris
                 worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "CLIP", "horizontalAlignment": "CENTER", "verticalAlignment": "TOP"})
                 
+            # -- LOGIKA: STATUS/CHECKBOX --
+            # Lebar 60px (Kecil)
             elif col_name in ["Status", "Done?"]:
                 worksheet.set_column_width(col_index, 60)
                 worksheet.format(f"{letter}2:{letter}1000", {"horizontalAlignment": "CENTER", "verticalAlignment": "TOP"})
                 
-            elif col_name in ["Bukti/Catatan", "Link Foto", "Link Sosmed"]:
-                worksheet.set_column_width(col_index, 200)
-                worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
-                
+            # -- LOGIKA: NAMA --
             elif col_name == "Nama":
                 worksheet.set_column_width(col_index, 150)
+                worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
 
-        # 3. PERINTAH KHUSUS: AUTO RESIZE ROWS (Agar tinggi baris menyesuaikan isi)
-        # Ini adalah perintah batch API langsung ke Google Sheets
+        # 3. PERINTAH KHUSUS: AUTO RESIZE ROWS (KUNCI AGAR DINAMIS KE BAWAH)
+        # Ini akan memaksa baris menjadi tinggi jika teksnya panjang
         body = {
             "requests": [
                 {
@@ -114,8 +116,8 @@ def auto_format_sheet(worksheet):
                         "dimensions": {
                             "sheetId": sheet_id,
                             "dimension": "ROWS",
-                            "startIndex": 1, # Mulai dari baris ke-2 (Index 1)
-                            "endIndex": 1000  # Sampai baris 1000
+                            "startIndex": 1,
+                            "endIndex": 1000 
                         }
                     }
                 }
