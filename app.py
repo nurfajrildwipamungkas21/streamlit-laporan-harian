@@ -290,13 +290,22 @@ def save_checklist(sheet_name, df):
              ws.resize(rows=rows_needed)
 
         df_save = df.copy()
+        
+        # Pastikan tidak ada NaN sebelum konversi string
+        df_save.fillna("", inplace=True)
+
         col_status = "Status"
         if col_status in df_save.columns:
             df_save[col_status] = df_save[col_status].apply(lambda x: "TRUE" if x else "FALSE")
             
+        # Konversi semua ke string
         df_save = df_save.astype(str)
-            
-        ws.update([df_save.columns.values.tolist()] + df_save.values.tolist(), value_input_option='USER_ENTERED')
+        
+        # FIX: Menggunakan parameter 'range_name' dan 'values' untuk kompatibilitas gspread terbaru
+        # Serta memastikan values adalah list of lists
+        data_to_save = [df_save.columns.values.tolist()] + df_save.values.tolist()
+        ws.update(range_name="A1", values=data_to_save, value_input_option='USER_ENTERED')
+        
         auto_format_sheet(ws) 
         return True
     except Exception as e:
@@ -373,7 +382,11 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
             return False, "Kolom Bukti/Catatan hilang."
 
         cell_address = gspread.utils.rowcol_to_a1(row_idx_gsheet, col_idx_gsheet)
-        ws.update(cell_address, final_note, value_input_option='USER_ENTERED')
+        
+        # FIX: Format 'values' harus list of lists (Nested List) [[data]] 
+        # gspread terbaru sangat ketat mengenai ini untuk update single cell sekalipun
+        ws.update(range_name=cell_address, values=[[final_note]], value_input_option='USER_ENTERED')
+        
         auto_format_sheet(ws)
         return True, "Berhasil update bukti!"
         
@@ -403,7 +416,6 @@ def load_all_reports(daftar_staf):
     return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
 # --- FUNGSI HYBRID TABLE RENDERER (CRASH-PROOF VERSION) ---
-# Fungsi ini dimodifikasi untuk menangani MarshallComponentException
 
 def render_hybrid_table(df_data, unique_key, main_text_col):
     """
@@ -418,7 +430,6 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
     if use_aggrid_attempt:
         try:
             # COPY dataframe untuk memastikan data bersih dan index tereset
-            # Ini seringkali memperbaiki masalah serialisasi
             df_grid = df_data.copy()
             df_grid.reset_index(drop=True, inplace=True)
 
@@ -453,19 +464,16 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
             
         except Exception as e:
             # JIKA AGGRID ERROR, JANGAN TAMPILKAN ERROR MERAH KE USER
-            # Cukup print ke console server untuk debugging, lalu switch ke Fallback
             print(f"AgGrid Error (Fallback triggered) for {unique_key}: {e}")
             use_aggrid_attempt = False # Trigger fallback below
 
     # -- MODE 2: NATIVE STREAMLIT (FALLBACK) --
-    # Dijalankan jika HAS_AGGRID False ATAU jika AgGrid diatas Error (Exception)
     if not use_aggrid_attempt:
         # Konfigurasi Native
         return st.data_editor(
             df_data,
             column_config={
                 "Status": st.column_config.CheckboxColumn("Done?", width="small"),
-                # Fallback menggunakan TextColumn dengan width large & tooltip
                 main_text_col: st.column_config.TextColumn(
                     main_text_col, 
                     disabled=True, 
@@ -651,8 +659,6 @@ if KONEKSI_GSHEET_BERHASIL:
                 st.progress(prog_indiv, text=f"Progress {filter_nama}: {int(prog_indiv*100)}% ({done_indiv}/{total_indiv})")
                 
                 # IMPLEMENTASI HYBRID RENDERER UNTUK INDIVIDU
-                # Kolom teks utama: "Target"
-                # Error sebelumnya terjadi di sini, sekarang sudah dihandle oleh try-except di dalam fungsi
                 edited_indiv = render_hybrid_table(df_indiv_user, f"indiv_table_{filter_nama}", "Target")
                 
                 if st.button(f"💾 Update Progress {filter_nama}", use_container_width=True):
