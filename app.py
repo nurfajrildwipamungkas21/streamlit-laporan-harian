@@ -601,7 +601,7 @@ if KONEKSI_GSHEET_BERHASIL:
 
             # --- BAGIAN BARU: REFLEKSI HARIAN ---
             st.divider()
-            st.markdown("#### 🏁Kesimpulan Harian")
+            st.markdown("#### 🏁 Kesimpulan Harian")
             st.caption("Bagian ini penting agar progress besok lebih terarah.")
             
             col_ref_1, col_ref_2 = st.columns(2)
@@ -653,8 +653,8 @@ if KONEKSI_GSHEET_BERHASIL:
 
     # --- MENU 2: DASHBOARD MANAGER ---
     elif menu_nav == "📊 Dashboard Manager":
-        st.header("📊 Dashboard Produktivitas (Split View)")
-        st.info("Dashboard ini memisahkan analisa antara Kunjungan Lapangan (Sales) dan Aktivitas Digital (Marketing).")
+        st.header("📊 Dashboard Produktivitas")
+        st.info("Dashboard ini memisahkan analisa antara Sales dan Marketing.")
         
         if st.button("🔄 Refresh Data"): st.cache_data.clear(); st.rerun()
 
@@ -677,7 +677,8 @@ if KONEKSI_GSHEET_BERHASIL:
             start_date = date.today() - timedelta(days=days)
             df_filt = df_log[df_log['Tanggal'] >= start_date]
 
-            tab_sales, tab_marketing, tab_galeri = st.tabs(["🚗 Sales (Lapangan)", "💻 Marketing (Digital)", "🖼️ Galeri Bukti"])
+            # TAB BARU: REVIEW HARIAN (CARD VIEW)
+            tab_sales, tab_marketing, tab_review, tab_galeri = st.tabs(["🚗 Sales (Lapangan)", "💻 Marketing (Digital)", "📝 Review Harian", "🖼️ Galeri Bukti"])
 
             with tab_sales:
                 df_sales = df_filt[df_filt['Kategori'] == "Kunjungan Lapangan"]
@@ -709,6 +710,52 @@ if KONEKSI_GSHEET_BERHASIL:
                     st.subheader("Jenis Tugas Digital")
                     st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
+
+            # --- FITUR BARU: REVIEW HARIAN CARD VIEW ---
+            with tab_review:
+                st.subheader("📝 Review Catatan Harian")
+                st.caption("Monitoring kendala dan rencana harian tim secara detail.")
+                
+                # Urutkan dari yang terbaru
+                df_review = df_filt.sort_values(by=COL_TIMESTAMP, ascending=False)
+                
+                if not df_review.empty:
+                    for index, row in df_review.iterrows():
+                        with st.container(border=True):
+                            # Header: Nama & Waktu
+                            c_head1, c_head2 = st.columns([3, 1])
+                            with c_head1:
+                                st.markdown(f"### 👤 {row[COL_NAMA]}")
+                                st.caption(f"📅 {row[COL_TIMESTAMP]} | 🏷️ {row['Kategori']}")
+                            
+                            # Isi Utama
+                            c_body, c_img = st.columns([3, 1])
+                            with c_body:
+                                st.markdown(f"**📍 Aktivitas/Lokasi:** {row[COL_TEMPAT]}")
+                                st.markdown(f"**📝 Deskripsi:** {row[COL_DESKRIPSI]}")
+                                
+                                st.divider()
+                                # Bagian Refleksi (Kolom 3 Sejajar)
+                                col_a, col_b, col_c = st.columns(3)
+                                with col_a: 
+                                    st.info(f"💡 **Hasil/Kesimpulan:**\n\n{row.get(COL_KESIMPULAN, '-')}")
+                                with col_b: 
+                                    st.warning(f"🚧 **Kendala:**\n\n{row.get(COL_KENDALA, '-')}")
+                                with col_c: 
+                                    st.error(f"📌 **Next Plan (Reminder):**\n\n{row.get(COL_PENDING, '-')}")
+
+                            # Sisi Kanan: Foto (Jika ada)
+                            with c_img:
+                                if "http" in str(row[COL_LINK_FOTO]):
+                                    url_asli = row[COL_LINK_FOTO]
+                                    direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                                    try:
+                                        st.image(direct_url, use_container_width=True)
+                                        st.caption("Bukti Foto")
+                                    except:
+                                        st.caption("Gagal load foto")
+                else:
+                    st.info("Belum ada data laporan pada rentang waktu ini.")
             
             with tab_galeri:
                 st.caption("Menampilkan bukti foto/dokumen terbaru")
@@ -723,15 +770,12 @@ if KONEKSI_GSHEET_BERHASIL:
                                 url_asli = row[COL_LINK_FOTO] 
                                 nama = row[COL_NAMA]
                                 tempat = row[COL_TEMPAT]
-                                deskripsi = row[COL_DESKRIPSI]
                                 direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
                                 
                                 try:
                                     st.image(direct_url, use_container_width=True)
                                     st.markdown(f"**{nama}**")
                                     st.caption(f"📍 {tempat}")
-                                    if deskripsi and deskripsi != "-":
-                                        st.info(f"📝 {deskripsi}")
                                 except:
                                     st.error("Gagal load gambar")
                                     st.link_button("Buka Link", url_asli)
