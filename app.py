@@ -9,6 +9,15 @@ from dropbox.exceptions import AuthError, ApiError
 from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 import re
 
+# --- HYBRID LIBRARY IMPORT (FALLBACK MECHANISM) ---
+# Mencoba import AgGrid untuk tampilan tabel advanced.
+# Jika tidak ada, variable HAS_AGGRID menjadi False dan aplikasi memakai tabel standar.
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+    HAS_AGGRID = True
+except ImportError:
+    HAS_AGGRID = False
+
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(
     page_title="Sales Action Center",
@@ -60,7 +69,6 @@ try:
         dbx.users_get_current_account()
         KONEKSI_DROPBOX_BERHASIL = True
     else:
-        # Tidak error, hanya warning karena aplikasi masih bisa jalan tanpa Dropbox
         pass
 except AuthError:
     st.error("Dropbox Error: Token Autentikasi tidak valid.")
@@ -70,110 +78,66 @@ except Exception as e:
 
 # --- FUNGSI HELPER CORE & SMART FORMATTING (ROBUST API) ---
 
-# FUNGSI INI TELAH DIPERBARUI TOTAL UNTUK PRESISI FORMATTING
 def auto_format_sheet(worksheet):
     """
-    Fungsi Formatting Robust (Full API Batch Update):
-    Memastikan teks panjang terbaca penuh dengan menerapkan WRAP dan Auto-Resize Row Height 
-    secara presisi dalam satu batch API call.
+    Fungsi Formatting Robust (Full API Batch Update)
     """
     try:
         sheet_id = worksheet.id
-        
-        # Fetch data dimensions dynamically
         all_values = worksheet.get_all_values()
-        if not all_values:
-            return # Sheet is empty
+        if not all_values: return 
 
         headers = all_values[0]
-        # 1. Tentukan jumlah baris data (termasuk header)
         data_row_count = len(all_values)
-        
-        # 2. Tentukan jumlah baris untuk formatting (mungkin lebih banyak jika ada baris kosong teralokasi)
         formatting_row_count = worksheet.row_count
-        if data_row_count > formatting_row_count:
-             formatting_row_count = data_row_count
+        if data_row_count > formatting_row_count: formatting_row_count = data_row_count
 
         requests = []
+        default_body_format = {"verticalAlignment": "TOP", "wrapStrategy": "CLIP"}
 
-        # 3. Set Default Body Format (Penting: Vertical TOP agar terbaca, Default CLIP)
-        default_body_format = {
-             "verticalAlignment": "TOP",
-             "wrapStrategy": "CLIP" 
-        }
-
-        # Apply default format ke seluruh body (menggunakan formatting_row_count)
         requests.append({
             "repeatCell": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": 1,
-                    "endRowIndex": formatting_row_count
-                },
+                "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": formatting_row_count},
                 "cell": {"userEnteredFormat": default_body_format},
                 "fields": "userEnteredFormat(verticalAlignment,wrapStrategy)"
             }
         })
 
-        # 4. Column-specific Overrides (WRAP) and Widths
         for i, col_name in enumerate(headers):
             col_index = i
-            
             cell_format_override = {}
             width = 100
 
-            # -- LOGIKA: TEKS PANJANG (Wajib WRAP) --
             if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed"]:
                 width = 350
                 cell_format_override["wrapStrategy"] = "WRAP"
-                
-            # -- LOGIKA: TANGGAL/WAKTU --
             elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
                 width = 150 if col_name == "Timestamp" else 120
-                # wrapStrategy CLIP sudah default
                 cell_format_override["horizontalAlignment"] = "CENTER"
-
-            # -- LOGIKA: STATUS --
             elif col_name in ["Status", "Done?"]:
                 width = 60
                 cell_format_override["horizontalAlignment"] = "CENTER"
-
-            # -- LOGIKA: NAMA --
             elif col_name == "Nama":
                 width = 150
                 cell_format_override["wrapStrategy"] = "WRAP"
 
-            # A. Apply Column Width
             requests.append({
                 "updateDimensionProperties": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "dimension": "COLUMNS",
-                        "startIndex": col_index,
-                        "endIndex": col_index + 1
-                    },
+                    "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": col_index, "endIndex": col_index + 1},
                     "properties": {"pixelSize": width},
                     "fields": "pixelSize"
                 }
             })
 
-            # B. Apply Cell Format Overrides (menggunakan formatting_row_count)
             if cell_format_override:
                 requests.append({
                     "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 1,
-                            "endRowIndex": formatting_row_count,
-                            "startColumnIndex": col_index,
-                            "endColumnIndex": col_index + 1
-                        },
+                        "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": formatting_row_count, "startColumnIndex": col_index, "endColumnIndex": col_index + 1},
                         "cell": {"userEnteredFormat": cell_format_override},
                         "fields": f"userEnteredFormat({','.join(cell_format_override.keys())})"
                     }
                 })
 
-        # 5. Format Header Row
         requests.append({
             "repeatCell": {
                 "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
@@ -188,40 +152,25 @@ def auto_format_sheet(worksheet):
             }
         })
         
-        # 6. Freeze Header Row
         requests.append({
             "updateSheetProperties": {
-                "properties": {
-                    "sheetId": sheet_id,
-                    "gridProperties": {"frozenRowCount": 1}
-                },
+                "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
                 "fields": "gridProperties.frozenRowCount"
             }
         })
 
-        # 7. LANGKAH KRITIS: Auto Resize ROWS
-        # Ini dilakukan SETELAH wrapStrategy di-set (di langkah 3 & 4) dalam BATCH YANG SAMA.
-        # Ini memaksa Google Sheet menghitung ulang tinggi baris berdasarkan konten yang sudah di-wrap.
-        # PENTING: Hanya resize baris yang memiliki data (menggunakan data_row_count).
         if data_row_count > 1: 
             requests.append({
                 "autoResizeDimensions": {
-                    "dimensions": {
-                        "sheetId": sheet_id,
-                        "dimension": "ROWS",
-                        "startIndex": 1, # Mulai dari baris setelah header
-                        "endIndex": data_row_count # Resize hanya sampai baris data terakhir
-                    }
+                    "dimensions": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": 1, "endIndex": data_row_count}
                 }
             })
 
-        # 8. Execute all requests in one batch
         if requests:
             body = {"requests": requests}
             worksheet.spreadsheet.batch_update(body)
 
     except Exception as e:
-        # Print error untuk debugging, jangan crash aplikasi
         print(f"Robust Format Error pada sheet '{worksheet.title}': {e}")
 
 
@@ -231,7 +180,6 @@ def get_or_create_worksheet(nama_worksheet):
         return spreadsheet.worksheet(nama_worksheet)
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=nama_worksheet, rows=100, cols=len(NAMA_KOLOM_STANDAR))
-        # Gunakan USER_ENTERED saat input data
         ws.append_row(NAMA_KOLOM_STANDAR, value_input_option='USER_ENTERED')
         auto_format_sheet(ws)
         return ws
@@ -275,7 +223,6 @@ def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
         
     try:
         file_data = file_obj.getvalue()
-        # Gunakan Timezone Jakarta untuk timestamp file
         ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime("%Y%m%d_%H%M%S")
         clean_filename = "".join([c for c in file_obj.name if c.isalnum() or c in ('.','_')])
         clean_user_folder = "".join([c for c in nama_staf if c.isalnum() or c in (' ','_')]).replace(' ','_')
@@ -318,7 +265,6 @@ def load_checklist(sheet_name, columns):
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
-        # Ensure all expected columns exist
         for col in columns:
             if col not in df.columns:
                 df[col] = False if col == "Status" else ""
@@ -336,7 +282,6 @@ def save_checklist(sheet_name, df):
         ws = spreadsheet.worksheet(sheet_name)
         ws.clear()
 
-        # Resize sheet if necessary
         rows_needed = len(df) + 1
         if ws.row_count < rows_needed:
              ws.resize(rows=rows_needed)
@@ -346,11 +291,10 @@ def save_checklist(sheet_name, df):
         if col_status in df_save.columns:
             df_save[col_status] = df_save[col_status].apply(lambda x: "TRUE" if x else "FALSE")
             
-        # Ensure all data is treated as string for GSheet input consistency
         df_save = df_save.astype(str)
             
         ws.update([df_save.columns.values.tolist()] + df_save.values.tolist(), value_input_option='USER_ENTERED')
-        auto_format_sheet(ws) # Terapkan formatting robust setelah simpan
+        auto_format_sheet(ws) 
         return True
     except Exception as e:
         print(f"Error saving checklist {sheet_name}: {e}")
@@ -365,13 +309,13 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
         for t in targets_list:
             new_row = base_row_data.copy()
             if sheet_name == SHEET_TARGET_TEAM:
-                new_row[0] = t # Misi column
+                new_row[0] = t 
             elif sheet_name == SHEET_TARGET_INDIVIDU:
-                new_row[1] = t # Target column
+                new_row[1] = t 
             rows_to_add.append(new_row)
             
         ws.append_rows(rows_to_add, value_input_option='USER_ENTERED')
-        auto_format_sheet(ws) # Terapkan formatting robust setelah menambah data
+        auto_format_sheet(ws)
         return True
     except Exception as e:
         print(f"Error adding bulk targets {sheet_name}: {e}")
@@ -380,7 +324,6 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
 def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_name, kategori_folder):
     try:
         ws = spreadsheet.worksheet(sheet_name)
-        # Reload data immediately before update
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
@@ -417,7 +360,6 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
             else:
                 update_text += f"[FOTO: {link_bukti}]"
         
-        # Gabungkan catatan lama dan baru dengan pemisah baris baru (\n)
         final_note = f"{catatan_lama}\n{update_text}" if catatan_lama.strip() else update_text
         if not final_note.strip(): final_note = "-"
         
@@ -427,12 +369,9 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
         except ValueError:
             return False, "Kolom Bukti/Catatan hilang."
 
-        # PENTING: Gunakan ws.update() untuk memastikan USER_ENTERED diterapkan pada update cell tunggal
         cell_address = gspread.utils.rowcol_to_a1(row_idx_gsheet, col_idx_gsheet)
         ws.update(cell_address, final_note, value_input_option='USER_ENTERED')
-        
-        auto_format_sheet(ws) # Format ulang untuk menyesuaikan tinggi baris baru
-        
+        auto_format_sheet(ws)
         return True, "Berhasil update bukti!"
         
     except Exception as e:
@@ -442,7 +381,7 @@ def simpan_laporan_harian(data_list, nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
         ws.append_row(data_list, value_input_option='USER_ENTERED')
-        auto_format_sheet(ws) # Terapkan formatting robust
+        auto_format_sheet(ws)
         return True
     except Exception as e:
         print(f"Error saving daily report for {nama_staf}: {e}")
@@ -459,6 +398,72 @@ def load_all_reports(daftar_staf):
                 if d: all_data.extend(d)
         except: pass
     return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+
+# --- FUNGSI HYBRID TABLE RENDERER ---
+# Fungsi baru untuk mengatur apakah pakai AgGrid (Pro) atau st.data_editor (Standard)
+
+def render_hybrid_table(df_data, unique_key, main_text_col):
+    """
+    Me-render tabel dengan mode hybrid.
+    Jika HAS_AGGRID = True, gunakan AgGrid (Text Wrap, Auto Height).
+    Jika HAS_AGGRID = False, gunakan st.data_editor (Standard, TextColumn).
+    """
+    # -- MODE 1: AG-GRID (PRO) --
+    if HAS_AGGRID:
+        # Konfigurasi AgGrid
+        gb = GridOptionsBuilder.from_dataframe(df_data)
+        
+        # Config Kolom Status
+        gb.configure_column("Status", editable=True, width=90)
+        
+        # Config Kolom Utama (Misi/Target) - Read Only tapi Wrap Text
+        gb.configure_column(main_text_col, wrapText=True, autoHeight=True, width=400, editable=False)
+        
+        # Config Kolom Bukti - Editable & Wrap Text
+        gb.configure_column("Bukti/Catatan", wrapText=True, autoHeight=True, editable=True, cellEditor="agLargeTextCellEditor", width=300)
+        
+        # Config Kolom Lain (Hidden/Readonly sesuai kebutuhan)
+        gb.configure_default_column(editable=False) # Default tidak bisa edit
+        
+        gridOptions = gb.build()
+        
+        grid_response = AgGrid(
+            df_data,
+            gridOptions=gridOptions,
+            update_mode=GridUpdateMode.MODEL_CHANGED,
+            fit_columns_on_grid_load=True,
+            height=400,
+            theme='streamlit',
+            key=f"aggrid_{unique_key}"
+        )
+        # Return dataframenya
+        return pd.DataFrame(grid_response['data'])
+
+    # -- MODE 2: NATIVE STREAMLIT (FALLBACK) --
+    else:
+        # Konfigurasi Native
+        return st.data_editor(
+            df_data,
+            column_config={
+                "Status": st.column_config.CheckboxColumn("Done?", width="small"),
+                # Fallback menggunakan TextColumn dengan width large & tooltip
+                main_text_col: st.column_config.TextColumn(
+                    main_text_col, 
+                    disabled=True, 
+                    width="large",
+                    help="Double click untuk membaca teks penuh"
+                ),
+                "Bukti/Catatan": st.column_config.TextColumn(
+                    "Bukti/Note (Edit Disini)", 
+                    width="medium",
+                    help="Double click untuk mengedit"
+                )
+            },
+            column_order=["Status", main_text_col, "Bukti/Catatan"],
+            hide_index=True,
+            key=f"editor_native_{unique_key}",
+            use_container_width=True
+        )
 
 # --- APLIKASI UTAMA ---
 
@@ -489,7 +494,6 @@ if KONEKSI_GSHEET_BERHASIL:
                 if st.form_submit_button("➕ Tambah"):
                     targets = clean_bulk_input(goal_team_text)
                     if targets:
-                        # Kolom: Misi, Tgl_Mulai, Tgl_Selesai, Status, Bukti/Catatan
                         base_row = ["", str(start_d), str(end_d), "FALSE", "-"]
                         with st.spinner("Menyimpan dan memformat database..."):
                             if add_bulk_targets(SHEET_TARGET_TEAM, base_row, targets):
@@ -515,7 +519,6 @@ if KONEKSI_GSHEET_BERHASIL:
                 if st.form_submit_button("➕ Tambah"):
                     targets = clean_bulk_input(goal_indiv_text)
                     if targets:
-                        # Kolom: Nama, Target, Tgl_Mulai, Tgl_Selesai, Status, Bukti/Catatan
                         base_row = [pilih_nama, "", str(start_i), str(end_i), "FALSE", "-"]
                         with st.spinner("Menyimpan dan memformat database..."):
                             if add_bulk_targets(SHEET_TARGET_INDIVIDU, base_row, targets):
@@ -570,19 +573,9 @@ if KONEKSI_GSHEET_BERHASIL:
             
             st.progress(prog_team, text=f"Pencapaian Team: {int(prog_team*100)}% ({done_team}/{total_team})")
             
-            edited_team = st.data_editor(
-                df_team,
-                column_config={
-                    "Status": st.column_config.CheckboxColumn("Done?", width="small"),
-                    # Gunakan TextAreaColumn agar teks panjang terbaca di aplikasi Streamlit
-                    "Misi": st.column_config.TextAreaColumn(disabled=True, width="large"),
-                    "Bukti/Catatan": st.column_config.TextAreaColumn("Bukti/Note (Edit Disini)", width="medium")
-                },
-                column_order=["Status", "Misi", "Bukti/Catatan"],
-                hide_index=True,
-                key="editor_dash_team",
-                use_container_width=True
-            )
+            # IMPLEMENTASI HYBRID RENDERER UNTUK TEAM
+            # Kolom teks utama: "Misi"
+            edited_team = render_hybrid_table(df_team, "team_table", "Misi")
             
             if st.button("💾 Update Progress Team", use_container_width=True):
                 with st.spinner("Menyimpan dan memformat ulang database..."):
@@ -604,7 +597,6 @@ if KONEKSI_GSHEET_BERHASIL:
                         st.warning("Harap isi catatan atau upload file.")
                     else:
                         with st.spinner("Mengupload dan memformat database..."):
-                            # Menggunakan staf pertama sebagai default pelapor team
                             pelapor_team = get_daftar_staf_terbaru()[0] if get_daftar_staf_terbaru() else "Admin"
                             sukses, msg = update_evidence_row(
                                 SHEET_TARGET_TEAM,
@@ -639,23 +631,12 @@ if KONEKSI_GSHEET_BERHASIL:
                 
                 st.progress(prog_indiv, text=f"Progress {filter_nama}: {int(prog_indiv*100)}% ({done_indiv}/{total_indiv})")
                 
-                edited_indiv = st.data_editor(
-                    df_indiv_user,
-                    column_config={
-                        "Status": st.column_config.CheckboxColumn("Done?", width="small"),
-                        # Gunakan TextAreaColumn
-                        "Target": st.column_config.TextAreaColumn(disabled=True, width="large"),
-                        "Bukti/Catatan": st.column_config.TextAreaColumn("Bukti/Note (Edit Disini)", width="medium")
-                    },
-                    column_order=["Status", "Target", "Bukti/Catatan"],
-                    hide_index=True,
-                    key=f"editor_dash_indiv_{filter_nama}",
-                    use_container_width=True
-                )
+                # IMPLEMENTASI HYBRID RENDERER UNTUK INDIVIDU
+                # Kolom teks utama: "Target"
+                edited_indiv = render_hybrid_table(df_indiv_user, f"indiv_table_{filter_nama}", "Target")
                 
                 if st.button(f"💾 Update Progress {filter_nama}", use_container_width=True):
                      with st.spinner("Menyimpan dan memformat ulang database..."):
-                        # Update dataframe global dengan perubahan dari user spesifik
                         df_indiv_all_updated = df_indiv_all.copy()
                         df_indiv_all_updated.update(edited_indiv)
                         
@@ -727,11 +708,10 @@ if KONEKSI_GSHEET_BERHASIL:
                             for f in fotos:
                                 url = upload_ke_dropbox(f, nama_pelapor, kategori="Laporan_Harian")
                                 links.append(url)
-                            link_foto = "\n".join(links) # Pisahkan link dengan baris baru
+                            link_foto = "\n".join(links) 
                         
                         link_sosmed = sosmed_link if sosmed_link else "-" if "Social Media Specialist" in nama_pelapor else ""
                         ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
-                        # Pastikan semua input adalah string
                         row = [str(ts), str(nama_pelapor), str(lokasi) if lokasi else "-", str(deskripsi), str(link_foto), str(link_sosmed)]
                         
                         if simpan_laporan_harian(row, nama_pelapor):
@@ -748,13 +728,10 @@ if KONEKSI_GSHEET_BERHASIL:
         df_log = load_all_reports(get_daftar_staf_terbaru())
         if not df_log.empty:
             df_display = df_log.copy()
-            # Sorting berdasarkan Timestamp
             try:
-                # Coba konversi ke datetime untuk sorting yang akurat
                 df_display[COL_TIMESTAMP] = pd.to_datetime(df_display[COL_TIMESTAMP], format='%d-%m-%Y %H:%M:%S', errors='coerce')
                 df_display = df_display.sort_values(by=COL_TIMESTAMP, ascending=False)
             except Exception:
-                # Fallback jika format tanggal tidak standar
                 df_display = df_display.sort_values(by=COL_TIMESTAMP, ascending=False)
                 
             st.dataframe(df_display, use_container_width=True, hide_index=True)
