@@ -265,6 +265,9 @@ def load_checklist(sheet_name, columns):
         data = ws.get_all_records()
         df = pd.DataFrame(data)
         
+        # Pembersihan Data Awal untuk mencegah error serialisasi
+        df.fillna("", inplace=True)
+        
         for col in columns:
             if col not in df.columns:
                 df[col] = False if col == "Status" else ""
@@ -399,48 +402,64 @@ def load_all_reports(daftar_staf):
         except: pass
     return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
-# --- FUNGSI HYBRID TABLE RENDERER ---
-# Fungsi baru untuk mengatur apakah pakai AgGrid (Pro) atau st.data_editor (Standard)
+# --- FUNGSI HYBRID TABLE RENDERER (CRASH-PROOF VERSION) ---
+# Fungsi ini dimodifikasi untuk menangani MarshallComponentException
 
 def render_hybrid_table(df_data, unique_key, main_text_col):
     """
     Me-render tabel dengan mode hybrid.
-    Jika HAS_AGGRID = True, gunakan AgGrid (Text Wrap, Auto Height).
-    Jika HAS_AGGRID = False, gunakan st.data_editor (Standard, TextColumn).
+    Mencoba menggunakan AgGrid, jika error (MarshallComponentException/Lainnya),
+    otomatis fallback ke st.data_editor biasa.
     """
-    # -- MODE 1: AG-GRID (PRO) --
-    if HAS_AGGRID:
-        # Konfigurasi AgGrid
-        gb = GridOptionsBuilder.from_dataframe(df_data)
-        
-        # Config Kolom Status
-        gb.configure_column("Status", editable=True, width=90)
-        
-        # Config Kolom Utama (Misi/Target) - Read Only tapi Wrap Text
-        gb.configure_column(main_text_col, wrapText=True, autoHeight=True, width=400, editable=False)
-        
-        # Config Kolom Bukti - Editable & Wrap Text
-        gb.configure_column("Bukti/Catatan", wrapText=True, autoHeight=True, editable=True, cellEditor="agLargeTextCellEditor", width=300)
-        
-        # Config Kolom Lain (Hidden/Readonly sesuai kebutuhan)
-        gb.configure_default_column(editable=False) # Default tidak bisa edit
-        
-        gridOptions = gb.build()
-        
-        grid_response = AgGrid(
-            df_data,
-            gridOptions=gridOptions,
-            update_mode=GridUpdateMode.MODEL_CHANGED,
-            fit_columns_on_grid_load=True,
-            height=400,
-            theme='streamlit',
-            key=f"aggrid_{unique_key}"
-        )
-        # Return dataframenya
-        return pd.DataFrame(grid_response['data'])
+    
+    use_aggrid_attempt = HAS_AGGRID
+
+    # -- MODE 1: ATTEMPT AG-GRID (PRO) --
+    if use_aggrid_attempt:
+        try:
+            # COPY dataframe untuk memastikan data bersih dan index tereset
+            # Ini seringkali memperbaiki masalah serialisasi
+            df_grid = df_data.copy()
+            df_grid.reset_index(drop=True, inplace=True)
+
+            # Konfigurasi AgGrid
+            gb = GridOptionsBuilder.from_dataframe(df_grid)
+            
+            # Config Kolom Status
+            gb.configure_column("Status", editable=True, width=90)
+            
+            # Config Kolom Utama (Misi/Target) - Read Only tapi Wrap Text
+            gb.configure_column(main_text_col, wrapText=True, autoHeight=True, width=400, editable=False)
+            
+            # Config Kolom Bukti - Editable & Wrap Text
+            gb.configure_column("Bukti/Catatan", wrapText=True, autoHeight=True, editable=True, cellEditor="agLargeTextCellEditor", width=300)
+            
+            # Config Kolom Lain (Hidden/Readonly sesuai kebutuhan)
+            gb.configure_default_column(editable=False) # Default tidak bisa edit
+            
+            gridOptions = gb.build()
+            
+            grid_response = AgGrid(
+                df_grid,
+                gridOptions=gridOptions,
+                update_mode=GridUpdateMode.MODEL_CHANGED,
+                fit_columns_on_grid_load=True,
+                height=400,
+                theme='streamlit',
+                key=f"aggrid_{unique_key}"
+            )
+            # Return dataframenya
+            return pd.DataFrame(grid_response['data'])
+            
+        except Exception as e:
+            # JIKA AGGRID ERROR, JANGAN TAMPILKAN ERROR MERAH KE USER
+            # Cukup print ke console server untuk debugging, lalu switch ke Fallback
+            print(f"AgGrid Error (Fallback triggered) for {unique_key}: {e}")
+            use_aggrid_attempt = False # Trigger fallback below
 
     # -- MODE 2: NATIVE STREAMLIT (FALLBACK) --
-    else:
+    # Dijalankan jika HAS_AGGRID False ATAU jika AgGrid diatas Error (Exception)
+    if not use_aggrid_attempt:
         # Konfigurasi Native
         return st.data_editor(
             df_data,
@@ -633,10 +652,11 @@ if KONEKSI_GSHEET_BERHASIL:
                 
                 # IMPLEMENTASI HYBRID RENDERER UNTUK INDIVIDU
                 # Kolom teks utama: "Target"
+                # Error sebelumnya terjadi di sini, sekarang sudah dihandle oleh try-except di dalam fungsi
                 edited_indiv = render_hybrid_table(df_indiv_user, f"indiv_table_{filter_nama}", "Target")
                 
                 if st.button(f"💾 Update Progress {filter_nama}", use_container_width=True):
-                     with st.spinner("Menyimpan dan memformat ulang database..."):
+                      with st.spinner("Menyimpan dan memformat ulang database..."):
                         df_indiv_all_updated = df_indiv_all.copy()
                         df_indiv_all_updated.update(edited_indiv)
                         
