@@ -74,12 +74,9 @@ except Exception as e:
     st.error(f"Dropbox Error: {e}")
 
 
-# --- FUNGSI HELPER CORE & SMART FORMATTING (ROBUST API) ---
+# --- FUNGSI HELPER CORE & SMART FORMATTING ---
 
 def auto_format_sheet(worksheet):
-    """
-    Fungsi Formatting Robust (Full API Batch Update)
-    """
     try:
         sheet_id = worksheet.id
         all_values = worksheet.get_all_values()
@@ -381,14 +378,9 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
     except Exception as e:
         return False, f"Error: {e}"
 
-# --- UPDATED: FUNGSI SIMPAN BATCH ---
 def simpan_laporan_harian_batch(list_of_rows, nama_staf):
-    """
-    Menyimpan banyak baris sekaligus (Batch Insert)
-    """
     try:
         ws = get_or_create_worksheet(nama_staf)
-        # Append multiple rows sekaligus
         ws.append_rows(list_of_rows, value_input_option='USER_ENTERED')
         auto_format_sheet(ws)
         return True
@@ -408,7 +400,6 @@ def load_all_reports(daftar_staf):
         except: pass
     return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
-# --- FUNGSI HYBRID TABLE RENDERER ---
 def render_hybrid_table(df_data, unique_key, main_text_col):
     use_aggrid_attempt = HAS_AGGRID
     if use_aggrid_attempt:
@@ -651,7 +642,7 @@ if KONEKSI_GSHEET_BERHASIL:
         else:
             st.info("Belum ada data target individu.")
 
-    # --- 2. INPUT HARIAN (UPDATE: 1 FOTO = 1 DESKRIPSI = 1 BARIS) ---
+    # --- 2. INPUT HARIAN (DINAMIS TANPA FORM) ---
     st.divider()
     with st.container(border=True):
         st.subheader("📝 Laporan Harian (Task List)")
@@ -659,93 +650,108 @@ if KONEKSI_GSHEET_BERHASIL:
         NAMA_STAF_MAIN = get_daftar_staf_terbaru()
         nama_pelapor = st.selectbox("Nama Pelapor", NAMA_STAF_MAIN, key="pelapor_main")
 
-        with st.form("input_harian_task", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                today_now = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
-                st.markdown(f"**Tanggal:** `{today_now.strftime('%d-%m-%Y')}`")
-                sosmed_link = ""
-                if "Social Media Specialist" in nama_pelapor:
-                    sosmed_link = st.text_input("Link Konten (Sosmed)")
-            with c2:
-                lokasi = st.text_input("Tempat / Klien")
-                # File Uploader
-                fotos = st.file_uploader("Upload Bukti Foto (Bisa Banyak)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
-            
-            # --- DYNAMIC DESCRIPTION LOGIC ---
-            deskripsi_map = {}
-            main_deskripsi = "" # Fallback jika tidak ada foto
+        # KITA HAPUS st.form DISINI AGAR UI BISA DINAMIS
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            today_now = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
+            st.markdown(f"**Tanggal:** `{today_now.strftime('%d-%m-%Y')}`")
+            sosmed_link = ""
+            if "Social Media Specialist" in nama_pelapor:
+                sosmed_link = st.text_input("Link Konten (Sosmed)")
+        with c2:
+            lokasi = st.text_input("Tempat / Klien")
+            # File Uploader (Di luar form agar bisa trigger rerun)
+            fotos = st.file_uploader("Upload Bukti Foto/Dokumen", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
+        
+        # --- DYNAMIC DESCRIPTION LOGIC ---
+        deskripsi_map = {}
+        main_deskripsi = "" # Fallback jika tidak ada foto
 
-            if fotos:
-                st.info("📸 **Detail Foto:** Silakan isi deskripsi untuk masing-masing foto di bawah ini:")
-                for i, f in enumerate(fotos):
-                    st.markdown(f"**Foto #{i+1}: {f.name}**")
-                    # Key harus unik agar tidak bentrok
-                    deskripsi_map[f.name] = st.text_area(
-                        f"Deskripsi untuk foto {i+1}...", 
-                        height=100, 
-                        key=f"desc_input_{i}"
-                    )
-                    st.divider()
-            else:
-                # Jika tidak upload foto, gunakan satu kolom deskripsi umum
-                main_deskripsi = st.text_area("Deskripsi Aktivitas (Tanpa Foto)")
+        if fotos:
+            st.info("📸 **Detail File:** Silakan isi deskripsi untuk masing-masing file di bawah ini:")
             
-            # --- SUBMIT BUTTON ---
-            if st.form_submit_button("✅ Submit Laporan"):
-                
-                # Validasi: Jika tanpa foto, deskripsi umum wajib isi. Jika ada foto, min 1 deskripsi.
-                valid = True
-                if not fotos and not main_deskripsi:
-                    st.error("Harap isi Deskripsi Aktivitas!")
-                    valid = False
-                
-                if valid:
-                    with st.spinner("Memproses laporan..."):
-                        rows_to_insert = []
-                        ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
-                        link_sosmed = sosmed_link if sosmed_link else "-" if "Social Media Specialist" in nama_pelapor else ""
-                        
-                        # CASE A: Ada Foto (1 Foto = 1 Baris)
-                        if fotos and KONEKSI_DROPBOX_BERHASIL:
-                            for f in fotos:
-                                # Upload Foto
-                                url_foto = upload_ke_dropbox(f, nama_pelapor, kategori="Laporan_Harian")
-                                if not url_foto: url_foto = "Gagal Upload"
-                                
-                                # Ambil deskripsi spesifik dari map
-                                desc_spesifik = deskripsi_map.get(f.name, "-")
-                                if not desc_spesifik: desc_spesifik = "-" # Default dash jika kosong
-
-                                # Buat Baris
-                                row = [
-                                    str(ts), 
-                                    str(nama_pelapor), 
-                                    str(lokasi) if lokasi else "-", 
-                                    str(desc_spesifik), 
-                                    str(url_foto), 
-                                    str(link_sosmed)
-                                ]
-                                rows_to_insert.append(row)
-                        
-                        # CASE B: Tidak Ada Foto (1 Baris Teks Saja)
+            for i, f in enumerate(fotos):
+                # Buat Container per foto agar rapi
+                with st.container(border=True):
+                    col_img, col_desc = st.columns([1, 3])
+                    with col_img:
+                        # Coba tampilkan preview jika gambar, jika PDF tampilkan icon/nama
+                        if f.type.startswith('image'):
+                            st.image(f, width=150)
                         else:
+                            st.markdown(f"📄 **{f.name}**")
+                            
+                    with col_desc:
+                        # Key harus unik agar tidak bentrok
+                        deskripsi_map[f.name] = st.text_area(
+                            f"Deskripsi untuk: {f.name}", 
+                            height=100, 
+                            key=f"desc_input_{i}",
+                            placeholder="Jelaskan aktivitas terkait file ini..."
+                        )
+        else:
+            # Jika tidak upload foto, gunakan satu kolom deskripsi umum
+            main_deskripsi = st.text_area("Deskripsi Aktivitas (Tanpa Foto)", placeholder="Jelaskan aktivitas yang dilakukan...")
+        
+        st.caption("Pastikan data di atas benar sebelum menekan tombol Submit.")
+        
+        # --- SUBMIT BUTTON (REGULAR BUTTON, BUKAN FORM SUBMIT) ---
+        if st.button("✅ Submit Laporan", type="primary"):
+            
+            # Validasi: Jika tanpa foto, deskripsi umum wajib isi. Jika ada foto, min 1 deskripsi.
+            valid = True
+            if not fotos and not main_deskripsi:
+                st.error("Harap isi Deskripsi Aktivitas!")
+                valid = False
+            
+            if valid:
+                with st.spinner("Memproses laporan..."):
+                    rows_to_insert = []
+                    ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
+                    link_sosmed = sosmed_link if sosmed_link else "-" if "Social Media Specialist" in nama_pelapor else ""
+                    
+                    # CASE A: Ada Foto (1 Foto = 1 Baris)
+                    if fotos and KONEKSI_DROPBOX_BERHASIL:
+                        for f in fotos:
+                            # Upload Foto
+                            url_foto = upload_ke_dropbox(f, nama_pelapor, kategori="Laporan_Harian")
+                            if not url_foto: url_foto = "Gagal Upload"
+                            
+                            # Ambil deskripsi spesifik dari map
+                            desc_spesifik = deskripsi_map.get(f.name, "-")
+                            if not desc_spesifik: desc_spesifik = "-" # Default dash jika kosong
+
+                            # Buat Baris
                             row = [
                                 str(ts), 
                                 str(nama_pelapor), 
                                 str(lokasi) if lokasi else "-", 
-                                str(main_deskripsi), 
-                                "-", # Link Foto Kosong
+                                str(desc_spesifik), 
+                                str(url_foto), 
                                 str(link_sosmed)
                             ]
                             rows_to_insert.append(row)
+                    
+                    # CASE B: Tidak Ada Foto (1 Baris Teks Saja)
+                    else:
+                        row = [
+                            str(ts), 
+                            str(nama_pelapor), 
+                            str(lokasi) if lokasi else "-", 
+                            str(main_deskripsi), 
+                            "-", # Link Foto Kosong
+                            str(link_sosmed)
+                        ]
+                        rows_to_insert.append(row)
 
-                        # SIMPAN SEMUA BARIS SEKALIGUS (BATCH)
-                        if simpan_laporan_harian_batch(rows_to_insert, nama_pelapor):
-                            st.success(f"Berhasil menyimpan {len(rows_to_insert)} aktivitas!")
-                            st.cache_data.clear()
-                        else:
-                            st.error("Gagal menyimpan laporan.")
+                    # SIMPAN SEMUA BARIS SEKALIGUS (BATCH)
+                    if simpan_laporan_harian_batch(rows_to_insert, nama_pelapor):
+                        st.success(f"Berhasil menyimpan {len(rows_to_insert)} aktivitas!")
+                        st.balloons()
+                        st.cache_data.clear()
+                    else:
+                        st.error("Gagal menyimpan laporan.")
 
     # --- 3. LOG AKTIVITAS ---
     with st.expander("📂 Riwayat Laporan (Log Aktivitas)", expanded=False):
