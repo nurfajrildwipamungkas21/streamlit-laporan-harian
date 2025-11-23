@@ -419,10 +419,10 @@ if KONEKSI_GSHEET_BERHASIL:
         st.divider()
 
         if not st.session_state["is_manager"]:
-            with st.expander("🔐 Akses Manager (Khusus Admin)"):
+            with st.expander("🔐 Akses Khusus Admin"):
                 pwd = st.text_input("Password:", type="password", key="input_pwd")
                 if st.button("Login Manager"):
-                    if pwd == st.secrets.get("password_manager", "admin123"): 
+                    if pwd == st.secrets.get("password_manager", "fayza123"): 
                         st.session_state["is_manager"] = True
                         st.rerun()
                     else:
