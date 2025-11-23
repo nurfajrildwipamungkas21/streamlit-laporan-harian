@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime, timedelta # <-- 1. DITAMBAHKAN 'timedelta'
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 import gspread
 from google.oauth2.service_account import Credentials
@@ -18,17 +18,18 @@ st.set_page_config(
 
 # --- KONFIGURASI GOOGLE API & DROPBOX ---
 NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
-# Folder di Dropbox tempat file akan disimpan (harus dimulai dengan /)
 FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
 
+# --- KONFIGURASI BARU: SHEET UNTUK MENYIMPAN DAFTAR NAMA ---
+SHEET_CONFIG_NAMA = "Config_Staf"
+
 # --- KONFIGURASI NAMA KOLOM (SUMBER KEBENARAN) ---
-# Ini akan jadi "source of truth" untuk header GSheet & filter DataFrame
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
 COL_TEMPAT = "Tempat Dikunjungi"
 COL_DESKRIPSI = "Deskripsi"
 COL_LINK_FOTO = "Link Foto"
-COL_LINK_SOSMED = "Link Sosmed" # Kolom baru ditambahkan
+COL_LINK_SOSMED = "Link Sosmed"
 
 # Daftar standar untuk pengecekan header
 NAMA_KOLOM_STANDAR = [
@@ -37,47 +38,36 @@ NAMA_KOLOM_STANDAR = [
     COL_TEMPAT, 
     COL_DESKRIPSI, 
     COL_LINK_FOTO, 
-    COL_LINK_SOSMED # Kolom baru ditambahkan
+    COL_LINK_SOSMED
 ]
-
 
 # --- Setup koneksi (MENGGUNAKAN st.secrets) ---
 KONEKSI_GSHEET_BERHASIL = False
 KONEKSI_DROPBOX_BERHASIL = False
 
 # Variabel global untuk koneksi
-spreadsheet = None # Akan menampung seluruh file Google Sheet (sebagai "lemari")
-dbx = None # Akan menampung koneksi Dropbox
+spreadsheet = None 
+dbx = None 
 
-# 1. Koneksi Google Sheets (Data Teks disimpan di sini)
+# 1. Koneksi Google Sheets
 try:
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/drive'
     ]
-    
-    # Menggunakan kredensial dari [gcp_service_account]
     creds_dict = st.secrets["gcp_service_account"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    
     gc = gspread.authorize(creds)
-    
-    # Buka seluruh file Spreadsheet (bukan cuma sheet1)
     spreadsheet = gc.open(NAMA_GOOGLE_SHEET)
-    
     KONEKSI_GSHEET_BERHASIL = True
-
 except Exception as e:
-    # Menampilkan error dan info penting jika gagal koneksi
     st.error(f"Koneksi ke Google Sheets Gagal: {e}")
-    st.info("PENTING: Pastikan Google Sheet sudah dibagikan ke email Service Account (lihat di secrets.toml bagian client_email) dan diberi akses 'Editor'.")
+    st.info("PENTING: Pastikan Google Sheet sudah dibagikan ke email Service Account.")
 
-# 2. Koneksi Dropbox (Foto disimpan di sini)
+# 2. Koneksi Dropbox
 try:
-    # Menggunakan kredensial dari [dropbox]
     DROPBOX_ACCESS_TOKEN = st.secrets["dropbox"]["access_token"]
     dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-    # Cek koneksi
     dbx.users_get_current_account()
     KONEKSI_DROPBOX_BERHASIL = True
 except AuthError:
@@ -87,99 +77,117 @@ except Exception as e:
 
 # --- FUNGSI HELPER ---
 
-@st.cache_resource(ttl=60) # Cache resource agar tidak buat worksheet berulang-ulang
+@st.cache_resource(ttl=60)
 def get_or_create_worksheet(nama_worksheet):
     """
     Dapatkan worksheet (tab) berdasarkan nama, atau buat baru jika tidak ada.
-    Fungsi ini "BERSIH" dari panggilan UI Streamlit agar aman di-cache.
     """
     try:
-        # Coba dapatkan worksheet (tab)
         worksheet = spreadsheet.worksheet(nama_worksheet)
         
         # Pengecekan header
-        # Cek apakah header di sheet sudah sesuai dengan standar terbaru
         headers_di_sheet = worksheet.row_values(1)
         if headers_di_sheet != NAMA_KOLOM_STANDAR:
-            # --- PERUBAHAN CACHE ---
-            # st.toast(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
-            
-            # Menyiapkan update batch
             cell_list = worksheet.range(1, 1, 1, len(NAMA_KOLOM_STANDAR))
             for i, header_val in enumerate(NAMA_KOLOM_STANDAR):
                 cell_list[i].value = header_val
-            # Update header dalam satu kali panggilan API
             worksheet.update_cells(cell_list)
         
-        # Atur Format Text Wrapping
-        worksheet.format("C:D", {
-            "wrapStrategy": "WRAP",
-            "verticalAlignment": "TOP"
-        })
-
-        # Atur Format untuk sisanya (Hanya Top Align)
-        # Kolom A, B, dan E, F (sesuai NAMA_KOLOM_STANDAR Anda)
+        # Formatting
+        worksheet.format("C:D", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
         worksheet.format("A:B", {"verticalAlignment": "TOP"})
         worksheet.format("E:F", {"verticalAlignment": "TOP"})
             
         return worksheet
     
     except gspread.WorksheetNotFound:
-        # Jika tidak ada, buat baru
-        # --- PERUBAHAN CACHE ---
-        # st.toast(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
         worksheet = spreadsheet.add_worksheet(title=nama_worksheet, rows=1, cols=len(NAMA_KOLOM_STANDAR))
-        # Otomatis buat header di worksheet baru
         worksheet.append_row(NAMA_KOLOM_STANDAR)
         
-        # Atur Format Text Wrapping (untuk sheet BARU)
-        worksheet.format("C:D", {
-            "wrapStrategy": "WRAP",
-            "verticalAlignment": "TOP"
-        })
-
-        # Atur Format untuk sisanya (Hanya Top Align)
+        worksheet.format("C:D", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
         worksheet.format("A:B", {"verticalAlignment": "TOP"})
         worksheet.format("E:F", {"verticalAlignment": "TOP"})
-        
         return worksheet
     
     except Exception as e:
-        # --- PERUBAHAN CACHE ---
-        # st.error(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
-        # Sebaliknya, lempar error ini agar fungsi pemanggil bisa menanganinya
-        print(f"Error di get_or_create_worksheet: {e}") # Log ke konsol
-        raise e # Lempar lagi error-nya
+        print(f"Error di get_or_create_worksheet: {e}")
+        raise e
 
-def upload_ke_dropbox(file_obj, nama_staf):
+# --- FUNGSI BARU UNTUK UPDATE NAMA KARYAWAN ---
+
+@st.cache_data(ttl=60)
+def get_daftar_staf_terbaru():
     """
-    Upload file ke subfolder Dropbox berdasarkan nama_staf.
-    (Fungsi ini aman, tidak di-cache, st.error boleh ada di sini)
+    Mengambil daftar nama staf dari sheet khusus 'Config_Staf'.
+    Jika sheet belum ada, akan dibuatkan defaultnya.
+    """
+    default_staf = ["Saya", "Social Media Specialist", "Deal Maker"]
+    
+    try:
+        # Coba buka worksheet config
+        try:
+            ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
+        except gspread.WorksheetNotFound:
+            # Jika tidak ada, buat baru dan isi default
+            ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_NAMA, rows=100, cols=2)
+            ws.append_row(["Daftar Nama Staf"]) # Header
+            for nama in default_staf:
+                ws.append_row([nama])
+            return default_staf
+
+        # Jika sheet ada, ambil semua nilai di kolom 1
+        nama_dari_sheet = ws.col_values(1)
+        
+        # Hapus header "Daftar Nama Staf" (baris pertama) jika ada
+        if len(nama_dari_sheet) > 0 and nama_dari_sheet[0] == "Daftar Nama Staf":
+            nama_dari_sheet.pop(0)
+            
+        # Jika kosong, kembalikan default
+        if not nama_dari_sheet:
+            return default_staf
+            
+        return nama_dari_sheet
+
+    except Exception as e:
+        print(f"Error loading staf config: {e}")
+        return default_staf 
+
+def tambah_staf_baru_ke_sheet(nama_baru):
+    """
+    Menambahkan nama staf baru ke sheet config
     """
     try:
-        # Dapatkan bytes dari file
+        try:
+            ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
+        except:
+            ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_NAMA, rows=100, cols=1)
+            ws.append_row(["Daftar Nama Staf"])
+            
+        # Cek duplikasi
+        existing_names = ws.col_values(1)
+        # Case insensitive check
+        if any(nama_baru.lower() == existing.lower() for existing in existing_names):
+            return False, "Nama sudah ada di daftar!"
+            
+        ws.append_row([nama_baru])
+        return True, f"Berhasil menambahkan '{nama_baru}'."
+    except Exception as e:
+        return False, f"Gagal menyimpan: {e}"
+
+# --- END FUNGSI BARU ---
+
+def upload_ke_dropbox(file_obj, nama_staf):
+    try:
         file_data = file_obj.getvalue()
-        
-        # Buat nama file unik menggunakan timestamp untuk menghindari tumpang tindih
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Sanitasi nama file asli
         nama_file_asli = "".join([c for c in file_obj.name if c.isalnum() or c in ('.', '_', '-')])
-        
-        # Buat subfolder berdasarkan nama staf
         nama_folder_staf = "".join([c for c in nama_staf if c.isalnum() or c in (' ', '_', '-')]).replace(' ', '_')
-        
         nama_file_unik = f"{timestamp}_{nama_file_asli}"
-        
-        # Path baru kini menyertakan subfolder nama_folder_staf
         path_dropbox = f"{FOLDER_DROPBOX}/{nama_folder_staf}/{nama_file_unik}"
 
-        # 1. Upload file
         dbx.files_upload(file_data, path_dropbox, mode=dropbox.files.WriteMode.add)
         
-        # 2. Buat shared link publik
         settings = SharedLinkSettings(requested_visibility=RequestedVisibility.public)
-        
         try:
             link = dbx.sharing_create_shared_link_with_settings(path_dropbox, settings=settings)
         except ApiError as e:
@@ -188,123 +196,107 @@ def upload_ke_dropbox(file_obj, nama_staf):
                 if links.links:
                     link = links.links[0]
                 else:
-                    raise Exception("Gagal mendapatkan link Dropbox yang sudah ada.")
+                    raise Exception("Gagal mendapatkan link Dropbox.")
             else:
                 raise e
-        
-        # 3. Dapatkan URL langsung
         return link.url.replace("?dl=0", "?raw=1")
-
     except Exception as e:
-        st.error(f"Error tidak terduga saat upload ke Dropbox: {e}")
+        st.error(f"Error Dropbox: {e}")
         return None
 
 def simpan_ke_sheet(data_list, nama_staf):
-    """
-    Menyimpan satu baris data ke worksheet (tab) yang sesuai.
-    (Fungsi ini tidak di-cache, jadi aman untuk menampilkan st.error)
-    """
     try:
-        # Dapatkan "laci" (worksheet) yang benar berdasarkan nama
-        # --- PERUBAHAN CACHE ---
-        # Ini sekarang bisa melempar error dari get_or_create_worksheet
         worksheet = get_or_create_worksheet(nama_staf) 
         if worksheet:
             worksheet.append_row(data_list)
             return True
         return False
     except Exception as e:
-        # TANGKAP errornya DI SINI dan tampilkan ke UI
-        st.error(f"Error saat mencoba mengakses Sheet '{nama_staf}': {e}")
+        st.error(f"Error Sheet '{nama_staf}': {e}")
         return False
 
-# Fungsi untuk memuat data dengan caching (meningkatkan performa)
-@st.cache_data(ttl=60) # Cache data selama 60 detik
+@st.cache_data(ttl=60)
 def load_data(daftar_staf):
-    """
-    Memuat data dari SEMUA worksheet staf dan menggabungkannya
-    agar bisa ditampilkan di dasbor. "BERSIH" dari panggilan UI.
-    """
     try:
         all_data = []
         for nama_staf in daftar_staf:
-            # --- PERUBAHAN CACHE: Tambahkan try..except di dalam loop ---
-            # Agar jika satu sheet gagal, aplikasi tidak crash total
             try:
-                # Dapatkan "laci" (worksheet) untuk staf ini
                 worksheet = get_or_create_worksheet(nama_staf)
                 if worksheet:
-                    # get_all_records() akan membaca header dan mengambil semua data
                     data = worksheet.get_all_records()  
                     if data:
-                        all_data.extend(data) # Gabungkan data
+                        all_data.extend(data) 
             except Exception as e:
-                # Jika 1 sheet gagal, jangan hentikan semua.
-                # Cukup log ke konsol (BUKAN UI st.error)
-                print(f"PERINGATAN: Gagal memuat data untuk '{nama_staf}'. Error: {e}")
-                pass # Lanjut ke staf berikutnya
+                print(f"Warning load '{nama_staf}': {e}")
+                pass 
         
         if not all_data:
-            return pd.DataFrame(columns=NAMA_KOLOM_STANDAR) # Kembalikan DF kosong jika tidak ada data
+            return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
-        # Membuat DataFrame.
         return pd.DataFrame(all_data)
-    
     except Exception as e:
-        # --- PERUBAHAN CACHE ---
-        # st.error(...)  <-- DIHAPUS (Tidak boleh ada UI di fungsi cache)
-        print(f"Error fatal saat load_data: {e}") # Log ke konsol
-        # Lempar error agar bisa ditangani DI LUAR fungsi cache
+        print(f"Error fatal load_data: {e}")
         raise e 
 
-# --- JUDUL APLIKASI ---
+# --- APLIKASI UTAMA ---
 st.title("✅ Aplikasi Laporan Kegiatan Harian")
 st.write("Silakan masukkan kegiatan yang telah Anda lakukan hari ini.")
 
-# Hanya tampilkan form jika kedua koneksi berhasil
 if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
 
-    # --- DAFTAR NAMA STAF ---
-    NAMA_STAF = [
-        "Saya",
-        "Social Media Specialist",
-        "Deal Maker"
-    ]
+    # --- FITUR ADMIN: TAMBAH KARYAWAN VIA SIDEBAR ---
+    with st.sidebar:
+        st.header("⚙️ Pengaturan Karyawan")
+        st.info("Gunakan menu ini untuk menambahkan nama karyawan/jabatan baru ke dalam sistem.")
+        
+        with st.form("form_tambah_staf", clear_on_submit=True):
+            input_nama_baru = st.text_input("Nama/Jabatan Baru")
+            tombol_tambah = st.form_submit_button("Tambahkan")
+            
+            if tombol_tambah:
+                if input_nama_baru:
+                    with st.spinner("Menyimpan konfigurasi..."):
+                        sukses, pesan = tambah_staf_baru_ke_sheet(input_nama_baru)
+                        if sukses:
+                            st.success(pesan)
+                            # Hapus cache agar dropdown langsung update
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(pesan)
+                else:
+                    st.warning("Nama tidak boleh kosong.")
+
+    # --- LOAD NAMA STAF DARI GOOGLE SHEET ---
+    # Fungsi ini akan membaca sheet "Config_Staf"
+    NAMA_STAF = get_daftar_staf_terbaru()
 
     # --- 1. FORM INPUT KEGIATAN ---
     st.header("📝 Input Kegiatan Baru")
 
-    # 'nama' dipindahkan ke LUAR form.
+    # Dropdown sekarang berisi data dinamis
     nama = st.selectbox(
-        "Pilih Job Desc Anda", 
+        "Pilih Nama / Job Desc Anda", 
         NAMA_STAF, 
         key="nama_job_desc_selector" 
     )
 
     with st.form(key="form_kegiatan", clear_on_submit=True):
-        
         col1, col2 = st.columns(2)
         
         with col1:
-            # --- 2. PERUBAHAN: MENCEGAH KECURANGAN TANGGAL ---
-            # Dapatkan tanggal HARI INI sesuai zona waktu WIB
             today_wib = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
-            # Hitung tanggal KEMARIN (toleransi 1 hari)
             yesterday_wib = today_wib - timedelta(days=1)
 
             tanggal = st.date_input(
                 "Tanggal Kegiatan", 
                 value=today_wib, 
-                min_value=yesterday_wib, # <-- Boleh input H-1 (Kemarin)
-                max_value=today_wib,     # <-- Paling mentok hari ini
+                min_value=yesterday_wib,
+                max_value=today_wib,
                 key="tanggal"
             )
-            # --- AKHIR PERUBAHAN 2 ---
             
-            # Inisialisasi variabel input
             link_sosmed_input = "" 
-            
-            # Input kondisional
             if nama == "Social Media Specialist":
                 link_sosmed_input = st.text_input(
                     "Link Sosmed", 
@@ -315,14 +307,12 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         with col2:
             tempat_dikunjungi = st.text_input("Tempat yang Dikunjungin", placeholder="Contoh: Klien A, Kantor Cabang", key="tempat")
             
-            # --- Fitur Multi-File Upload (Sudah Ada) ---
             list_foto_bukti = st.file_uploader(
-                "Upload Foto Bukti (Bisa lebih dari 1)",  # Label diubah
+                "Upload Foto Bukti (Bisa lebih dari 1)",
                 type=['jpg', 'jpeg', 'png'],
-                accept_multiple_files=True, # Ini kuncinya
+                accept_multiple_files=True,
                 key="foto"
             )
-            # --- Akhir Fitur Multi-File Upload ---
 
         deskripsi = st.text_area(
             "Deskripsi Lengkap Kegiatan",  
@@ -332,178 +322,123 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         
         submitted = st.form_submit_button("Submit Laporan")
 
-    # --- 2. LOGIKA SETELAH TOMBOL SUBMIT DITEKAN ---
+    # --- 2. PROSES SUBMIT ---
     if submitted:
-        
         if not deskripsi:
             st.error("Deskripsi kegiatan wajib diisi!")
         else:
             with st.spinner("Sedang menyimpan laporan Anda..."):
+                list_link_hasil_upload = []
                 
-                # --- Logika Multi-Upload (Sudah Ada) ---
-                list_link_hasil_upload = [] # Buat list kosong untuk menampung link
-                
-                # Cek apakah list_foto_bukti ada isinya (tidak kosong)
                 if list_foto_bukti:
-                    # Loop setiap file yang di-upload
                     for foto in list_foto_bukti:
-                        st.info(f"Meng-upload {foto.name}...") # Kasih info ke user
+                        st.info(f"Meng-upload {foto.name}...")
                         link = upload_ke_dropbox(foto, nama)
-                        
                         if link:
                             list_link_hasil_upload.append(link)
                         else:
-                            # Jika salah satu foto gagal, batalkan semua
                             st.error(f"Gagal meng-upload foto {foto.name}. Laporan dibatalkan.")
                             st.stop()
                 
-                # Gabungkan semua link dalam list menjadi satu teks, dipisah baris baru (\n)
                 if list_link_hasil_upload:
                     link_foto_final = "\n".join(list_link_hasil_upload)
                 else:
-                    link_foto_final = "-" # Default jika tidak ada foto
-                # --- Akhir Logika Multi-Upload ---
+                    link_foto_final = "-"
 
-                # --- Logika Timestamp WIB (Sudah Ada) ---
                 zona_waktu_wib = ZoneInfo("Asia/Jakarta")
                 timestamp_sekarang = datetime.now(tz=zona_waktu_wib).strftime('%d-%m-%Y %H:%M:%S')
-                # --- Akhir Logika Timestamp WIB ---
 
-                # Ambil nilai link_sosmed secara eksplisit
                 if nama == "Social Media Specialist":
-                    link_sosmed_final = link_sosmed_input if link_sosmed_input else "-" # Jika Socmed, tapi kosong, beri strip
+                    link_sosmed_final = link_sosmed_input if link_sosmed_input else "-"
                 else:
-                    link_sosmed_final = "" # Jika bukan Socmed, KOSONGKAN
+                    link_sosmed_final = ""
 
-                # Siapkan data untuk Google Sheets
                 data_row = [
                     timestamp_sekarang,
                     nama,
                     tempat_dikunjungi,
                     deskripsi,
-                    link_foto_final, # Gunakan variabel baru
+                    link_foto_final,
                     link_sosmed_final
                 ]
                 
-                # --- PERUBAHAN CACHE ---
-                # Fungsi ini sekarang akan menampilkan st.error jika gagal
                 if simpan_ke_sheet(data_row, nama): 
                     st.success(f"Laporan untuk {nama} berhasil disimpan!")
-                    st.cache_data.clear() # Hapus cache data agar dasbor update
-                # else: Pesan error sudah ditangani DI DALAM fungsi simpan_ke_sheet()
+                    st.cache_data.clear()
 
-
-    # --- 3. DASBOR (TABEL LAPORAN) ---
+    # --- 3. DASBOR ---
     st.header("📊 Dasbor Laporan Kegiatan")
     
-    # Tombol refresh manual
     if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
-        st.cache_resource.clear() # Hapus juga cache resource
+        st.cache_resource.clear()
         st.rerun()
 
-    # --- PERUBAHAN CACHE: Bungkus pemanggilan load_data dengan try...except ---
     try:
-        # Kirim 'NAMA_STAF' ke load_data
+        # Load data menggunakan daftar nama yang terbaru
         df = load_data(NAMA_STAF)
-    
     except Exception as e:
-        # Tampilkan error ke UI DI SINI (di luar fungsi cache)
-        st.error(f"Gagal memuat data dari Google Sheet. Error: {e}")
-        # Buat DataFrame kosong agar sisa skrip tidak crash
+        st.error(f"Gagal memuat data. Error: {e}")
         df = pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
         
-        
     if df.empty:
-        st.info("Belum ada data laporan yang masuk atau gagal memuat data.")
+        st.info("Belum ada data laporan yang masuk.")
     else:   
-        # Tampilkan filter
         st.subheader("Filter Data")
         col_filter1, col_filter2 = st.columns(2)
         
         if COL_NAMA not in df.columns or COL_TEMPAT not in df.columns:
-            st.error(f"Struktur kolom di Google Sheet tidak sesuai. Pastikan ada kolom '{COL_NAMA}' dan '{COL_TEMPAT}'.")
-            st.dataframe(df, use_container_width=True)
+            st.error("Struktur kolom tidak sesuai.")
             st.stop()
 
         with col_filter1:
-            # Filter Nama
             nama_unik = df[COL_NAMA].unique()
-            filter_nama = st.multiselect("Filter berdasarkan Nama", options=nama_unik, default=list(nama_unik))
+            filter_nama = st.multiselect("Filter Nama", options=nama_unik, default=list(nama_unik))
         
         with col_filter2:
-            # Filter berdasarkan 'Tempat Dikunjungi'
             tempat_unik = df[COL_TEMPAT].fillna("").unique()
-            filter_tempat = st.multiselect("Filter berdasarkan Tempat", options=tempat_unik, default=list(tempat_unik))
+            filter_tempat = st.multiselect("Filter Tempat", options=tempat_unik, default=list(tempat_unik))
         
-        # Terapkan filter secara dinamis
-        df_filtered = df.copy() # Mulai dengan semua data
+        df_filtered = df.copy()
 
         if filter_nama:
             df_filtered = df_filtered[df_filtered[COL_NAMA].isin(filter_nama)]
-
         if filter_tempat:
             df_filtered = df_filtered[df_filtered[COL_TEMPAT].fillna("").isin(filter_tempat)]
 
-        # Urutkan data dari yang terbaru
         if not df_filtered.empty:
             try:
                 df_filtered['sort_dt'] = pd.to_datetime(df_filtered[COL_TIMESTAMP], format='%d-%m-%Y %H:%M:%S', errors='coerce')
                 df_filtered = df_filtered.sort_values(by='sort_dt', ascending=False).drop(columns=['sort_dt'])
-            except Exception as e:
-                st.warning(f"Gagal mengurutkan data berdasarkan tanggal. Pastikan format tanggal benar. Error: {e}")
+            except:
+                pass
 
-        # Tampilkan data dalam "folder" (expander) per nama
         st.subheader("Hasil Laporan Terfilter")
-
-        # Dapatkan nama unik dari data yang SUDAH difilter
         nama_unik_terfilter = df_filtered[COL_NAMA].unique()
 
         if not nama_unik_terfilter.any():
-            st.info("Tidak ada data yang sesuai dengan filter Anda.")
+            st.info("Tidak ada data yang sesuai filter.")
         else:
-            # Buat expander untuk setiap nama
             for nama_staf in nama_unik_terfilter:
-                
-                # Ambil data HANYA untuk staf ini dari dataframe yang sudah difilter
                 data_staf = df_filtered[df_filtered[COL_NAMA] == nama_staf]
-                
-                # Hitung jumlah laporan untuk staf ini
                 jumlah_laporan = len(data_staf)
                 
-                # Tampilkan expander (seperti "folder")
                 with st.expander(f"📁 {nama_staf}     ({jumlah_laporan} Laporan)", expanded=True):
-                    
-                    # Membuat column_config dinamis untuk link
                     column_config = {}
-                    
-                    # --- Tampilan Multi-Link (Sudah Ada) ---
-                    # Blok 'if COL_LINK_FOTO' dihapus agar st.data_editor
-                    # menampilkan teks link apa adanya (termasuk multi-baris).
-                    # --- Akhir Tampilan Multi-Link ---
-                    
                     if COL_LINK_SOSMED in data_staf.columns:
                         column_config[COL_LINK_SOSMED] = st.column_config.LinkColumn(
                             COL_LINK_SOSMED, display_text="Buka Link"
                         )
-
-                    # --- PERUBAHAN: Ganti st.dataframe + styler dengan st.data_editor ---
-                    
-                    # st.data_editor secara otomatis akan wrap teks di kolom Deskripsi
-                    # dan akan mematuhi column_config untuk Link Foto/Sosmed.
                     
                     st.data_editor(
                         data_staf,
                         use_container_width=True,
                         column_config=column_config,
-                        disabled=True, # <-- PENTING: Membuat tabel jadi read-only
-                        key=f"editor_{nama_staf}" # <-- PENTING: Key unik di dalam loop
+                        disabled=True,
+                        key=f"editor_{nama_staf}"
                     )
-                    # --- PERUBAHAN SELESAI ---
 
-
-# Tampilkan pesan jika koneksi gagal
 elif not KONEKSI_GSHEET_BERHASIL:
-    st.warning("Aplikasi tidak dapat berjalan karena koneksi Google Sheets gagal.")
+    st.warning("Koneksi Google Sheets gagal.")
 elif not KONEKSI_DROPBOX_BERHASIL:
-    st.warning("Aplikasi tidak dapat menerima upload foto karena koneksi Dropbox gagal.")
+    st.warning("Koneksi Dropbox gagal.")
