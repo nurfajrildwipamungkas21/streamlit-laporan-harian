@@ -548,7 +548,7 @@ if KONEKSI_GSHEET_BERHASIL:
     # MAIN PAGE
     # ==========================================
     
-    st.title("🚀 Sales Action Center")
+    st.title("🚀 Sales & Marketing Action Center")
     st.caption(f"Update Realtime: {datetime.now(tz=ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y %H:%M:%S')}")
 
     # --- 1. MONITORING TARGET ---
