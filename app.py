@@ -20,7 +20,7 @@ except ImportError:
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(
-    page_title="Sales Action Center",
+    page_title="Sales & Marketing Action Center",
     page_icon="🚀",
     layout="wide"
 )
