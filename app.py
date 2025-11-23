@@ -504,7 +504,7 @@ if KONEKSI_GSHEET_BERHASIL:
             # 2. Kategori Aktivitas (Fitur Fairness dari Code 1)
             kategori_aktivitas = st.radio(
                 "Jenis Aktivitas:", 
-                ["Sales", "💻 Digital Marketing / Konten / Ads", "📞 Telesales / Follow Up", "Lainnya"],
+                ["🚗 Kunjungan Lapangan (Sales)", "💻 Digital Marketing / Konten / Ads", "📞 Telesales / Follow Up", "🏢 Admin / Lainnya"],
                 horizontal=True
             )
 
