@@ -91,7 +91,7 @@ except Exception as e:
 
 def auto_format_sheet(worksheet):
     """
-    Fungsi pemformatan canggih dari Code 2:
+    Fungsi pemformatan canggih:
     Mengatur lebar kolom pixel-perfect, warna header, frozen row, dan wrap text.
     """
     try:
@@ -122,7 +122,7 @@ def auto_format_sheet(worksheet):
             cell_format_override = {}
             width = 100
 
-            # Definisi lebar kolom berdasarkan nama header (Gabungan Code 1 & 2)
+            # Definisi lebar kolom berdasarkan nama header
             if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed", "Tempat Dikunjungi"]:
                 width = 350
                 cell_format_override["wrapStrategy"] = "WRAP"
@@ -387,12 +387,48 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 if KONEKSI_GSHEET_BERHASIL:
     if not KONEKSI_DROPBOX_BERHASIL: st.warning("⚠️ Dropbox non-aktif. Fitur foto dimatikan.")
 
-    # SIDEBAR
+    # --- SIDEBAR (LOGIKA LOGIN MANAGER) ---
     with st.sidebar:
         st.header("Navigasi")
-        menu_nav = st.radio("Pilih Menu:", ["📝 Laporan & Target", "📊 Dashboard Manager"])
+        
+        # 1. Inisialisasi Status Login Manager di Session State
+        if "is_manager" not in st.session_state:
+            st.session_state["is_manager"] = False
+
+        # 2. Tentukan Opsi Menu Berdasarkan Status Login
+        opsi_menu = ["📝 Laporan & Target"]
+        
+        # Jika sudah login sebagai manager, tambahkan menu Dashboard
+        if st.session_state["is_manager"]:
+            opsi_menu.append("📊 Dashboard Manager")
+        
+        menu_nav = st.radio("Pilih Menu:", opsi_menu)
+        st.divider()
+
+        # 3. Area Login Tersembunyi (Expander)
+        # Jika belum login, tampilkan form password
+        if not st.session_state["is_manager"]:
+            with st.expander("🔐 Akses Manager (Khusus Admin)"):
+                pwd = st.text_input("Password:", type="password", key="input_pwd")
+                if st.button("Login Manager"):
+                    # --- INFO: GANTI PASSWORD DISINI ---
+                    # Gunakan st.secrets["password_admin"] untuk lebih aman
+                    if pwd == "admin123": 
+                        st.session_state["is_manager"] = True
+                        st.rerun() # Refresh halaman agar menu muncul
+                    else:
+                        st.error("Password salah!")
+        
+        # Jika sudah login, tampilkan tombol Logout
+        else:
+            if st.button("🔓 Logout Manager"):
+                st.session_state["is_manager"] = False
+                st.rerun()
+
         st.divider()
         st.header("🎯 Manajemen Target")
+        
+        # TABS TARGET (LOGIKA ASLI TETAP DISINI)
         tab_team, tab_individu, tab_admin = st.tabs(["Team", "Pribadi", "Admin"])
 
         with tab_team:
