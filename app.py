@@ -154,6 +154,60 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
         return True
     except: return False
 
+# --- FUNGSI UPDATE BUKTI SPESIFIK (NEW) ---
+def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_name, col_target_name="Target"):
+    """
+    Update catatan dan upload foto untuk target spesifik tanpa menimpa data lain
+    """
+    try:
+        ws = spreadsheet.worksheet(sheet_name)
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        
+        # Cari index baris yang sesuai dengan target name
+        # Note: GSheet index starts at 2 (1 for header)
+        # DF index starts at 0
+        
+        # Kolom target name berbeda di team vs individu
+        # Team -> "Misi", Individu -> "Target"
+        
+        row_idx = -1
+        col_misi = "Misi" if sheet_name == SHEET_TARGET_TEAM else "Target"
+        
+        # Cari baris yang cocok
+        found = df[df[col_misi] == target_name]
+        
+        if found.empty:
+            return False, "Target tidak ditemukan."
+            
+        row_idx = found.index[0]
+        
+        # 1. Upload Foto jika ada
+        link_bukti = ""
+        if file_obj:
+            link_bukti = upload_ke_dropbox(file_obj, user_folder_name)
+        
+        # 2. Gabungkan Catatan Lama + Baru
+        catatan_lama = df.at[row_idx, "Bukti/Catatan"]
+        catatan_lama = str(catatan_lama) if catatan_lama else "-"
+        if catatan_lama == "-": catatan_lama = ""
+        
+        update_text = ""
+        if note: update_text += f"{note}. "
+        if link_bukti and link_bukti != "-": update_text += f"[FOTO: {link_bukti}]"
+        
+        final_note = f"{catatan_lama} | {update_text}" if catatan_lama else update_text
+        if not final_note: final_note = "-" # Balik ke dash jika kosong
+        
+        # 3. Update DF
+        df.at[row_idx, "Bukti/Catatan"] = final_note
+        
+        # 4. Save kembali seluruh tabel (Paling aman untuk data kecil)
+        return save_checklist(sheet_name, df), "Berhasil update bukti!"
+        
+    except Exception as e:
+        return False, f"Error: {e}"
+
 # --- FUNGSI UPLOAD ---
 
 def upload_ke_dropbox(file_obj, nama_staf):
@@ -265,12 +319,11 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     st.title("🚀 Sales Action Center")
     st.caption(f"Hari ini: {datetime.now(tz=ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y')}")
 
-    # --- 1. MONITORING TARGET (DIPERBAIKI) ---
+    # --- 1. MONITORING TARGET ---
     st.subheader("📊 Monitoring & Checklist Target")
     
     col_dash_1, col_dash_2 = st.columns(2)
     
-    # Load Data
     cols_team = ["Misi", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan"]
     df_team = load_checklist(SHEET_TARGET_TEAM, cols_team)
     
@@ -282,20 +335,19 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         st.markdown("#### 🏆 Target Team")
         
         if not df_team.empty:
-            # Hitung Progress Bar Team
             total_team = len(df_team)
             done_team = len(df_team[df_team['Status'] == True])
             prog_team = done_team / total_team if total_team > 0 else 0
             
             st.progress(prog_team, text=f"Pencapaian Team: {int(prog_team*100)}%")
             
-            # Tampilkan Editor Agar Bisa Dicetang
+            # FITUR BARU: BUKTI BISA DIEDIT TEXTNYA
             edited_team = st.data_editor(
                 df_team,
                 column_config={
                     "Status": st.column_config.CheckboxColumn("Done?", width="small"),
                     "Misi": st.column_config.TextColumn(disabled=True),
-                    "Bukti/Catatan": st.column_config.TextColumn(width="medium")
+                    "Bukti/Catatan": st.column_config.TextColumn("Bukti/Note (Edit Disini)", width="medium") # BISA DIEDIT
                 },
                 column_order=["Status", "Misi", "Bukti/Catatan"],
                 hide_index=True,
@@ -303,12 +355,27 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
                 use_container_width=True
             )
             
-            # Tombol Simpan Team
             if st.button("💾 Update Progress Team", use_container_width=True):
                 save_checklist(SHEET_TARGET_TEAM, edited_team)
                 st.toast("Progress Team Berhasil Disimpan!", icon="✅")
                 st.cache_data.clear()
                 st.rerun()
+                
+            # FITUR BARU: UPLOAD BUKTI FOTO KHUSUS TEAM
+            with st.expander("📂 Upload Bukti Foto (Team)"):
+                list_misi_team = df_team["Misi"].tolist()
+                pilih_misi = st.selectbox("Pilih Misi Team:", list_misi_team)
+                note_misi = st.text_input("Catatan Tambahan")
+                file_misi = st.file_uploader("Upload Foto Bukti Team", key="up_team")
+                
+                if st.button("Kirim Bukti Team"):
+                    with st.spinner("Mengupload..."):
+                        sukses, msg = update_evidence_row(SHEET_TARGET_TEAM, pilih_misi, note_misi, file_misi, "Team_Evidence")
+                        if sukses:
+                            st.success("Bukti Team Terupload!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else: st.error(msg)
         else:
             st.info("Belum ada target team.")
 
@@ -316,58 +383,63 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
     with col_dash_2:
         st.markdown("#### ⚡ Target Individu")
         
-        # Filter Nama Agar Progress Bar Akurat Per Orang
-        # Gunakan list nama dari config
         list_staff_filter = get_daftar_staf_terbaru()
-        
-        # Coba auto-select "Saya" atau nama pertama
         filter_nama = st.selectbox("Lihat Progress Siapa?", list_staff_filter, index=0)
         
         if not df_indiv_all.empty:
-            # Filter Dataframe berdasarkan nama yg dipilih
             df_indiv_user = df_indiv_all[df_indiv_all["Nama"] == filter_nama]
             
             if not df_indiv_user.empty:
-                # Hitung Progress Bar Individu
                 total_indiv = len(df_indiv_user)
                 done_indiv = len(df_indiv_user[df_indiv_user['Status'] == True])
                 prog_indiv = done_indiv / total_indiv if total_indiv > 0 else 0
                 
-                # Tampilkan Progress Bar
                 st.progress(prog_indiv, text=f"Progress {filter_nama}: {int(prog_indiv*100)}%")
                 
-                # Tampilkan Editor
                 edited_indiv = st.data_editor(
                     df_indiv_user,
                     column_config={
                         "Status": st.column_config.CheckboxColumn("Done?", width="small"),
                         "Target": st.column_config.TextColumn(disabled=True),
-                        "Bukti/Catatan": st.column_config.TextColumn(width="medium")
+                        "Bukti/Catatan": st.column_config.TextColumn("Bukti/Note (Edit Disini)", width="medium") # BISA DIEDIT
                     },
                     column_order=["Status", "Target", "Bukti/Catatan"],
                     hide_index=True,
-                    key=f"editor_dash_indiv_{filter_nama}", # Key unik biar gak crash ganti nama
+                    key=f"editor_dash_indiv_{filter_nama}",
                     use_container_width=True
                 )
                 
-                # Tombol Simpan Individu
                 if st.button(f"💾 Update Progress {filter_nama}", use_container_width=True):
-                    # Logic simpan: Update baris yang sesuai di DF Utama
-                    # Kita pakai index dari edited_indiv untuk update df_indiv_all
                     df_indiv_all.update(edited_indiv)
                     save_checklist(SHEET_TARGET_INDIVIDU, df_indiv_all)
                     st.toast(f"Progress {filter_nama} Disimpan!", icon="✅")
                     st.cache_data.clear()
                     st.rerun()
+
+                # FITUR BARU: UPLOAD BUKTI FOTO KHUSUS INDIVIDU
+                with st.expander(f"📂 Upload Bukti Foto ({filter_nama})"):
+                    list_target_user = df_indiv_user["Target"].tolist()
+                    pilih_target = st.selectbox("Pilih Target Mingguan:", list_target_user)
+                    note_target = st.text_input("Catatan Tambahan", key="note_indiv")
+                    file_target = st.file_uploader("Upload Foto Bukti Pribadi", key="up_indiv")
+                    
+                    if st.button("Kirim Bukti Pribadi"):
+                         with st.spinner("Mengupload..."):
+                            sukses, msg = update_evidence_row(SHEET_TARGET_INDIVIDU, pilih_target, note_target, file_target, filter_nama)
+                            if sukses:
+                                st.success("Bukti Pribadi Terupload!")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else: st.error(msg)
             else:
                 st.info(f"{filter_nama} belum memiliki target aktif.")
         else:
-            st.info("Belum ada data target individu sama sekali.")
+            st.info("Belum ada data target individu.")
 
     # --- 2. INPUT HARIAN ---
     st.divider()
     with st.container(border=True):
-        st.subheader("📝 Laporan Harian (Bukti Kerja)")
+        st.subheader("📝 Laporan Harian (Task List)")
         
         NAMA_STAF_MAIN = get_daftar_staf_terbaru()
         nama_pelapor = st.selectbox("Nama Pelapor", NAMA_STAF_MAIN, key="pelapor_main")
