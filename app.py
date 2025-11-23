@@ -10,12 +10,14 @@ from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 import re
 
 # --- HYBRID LIBRARY IMPORT (FALLBACK MECHANISM) ---
+# 1. AgGrid (Tabel Canggih)
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
     HAS_AGGRID = True
 except ImportError:
     HAS_AGGRID = False
 
+# 2. Plotly (Grafik Canggih)
 try:
     import plotly.express as px
     HAS_PLOTLY = True
@@ -33,6 +35,7 @@ st.set_page_config(
 NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
 FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
 
+# Sheet Names
 SHEET_CONFIG_NAMA = "Config_Staf"
 SHEET_TARGET_TEAM = "Target_Team_Checklist"
 SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
@@ -76,8 +79,10 @@ try:
         dbx = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
         dbx.users_get_current_account()
         KONEKSI_DROPBOX_BERHASIL = True
+    else:
+        pass
 except AuthError:
-    st.error("Dropbox Error: Token tidak valid.")
+    st.error("Dropbox Error: Token Autentikasi tidak valid.")
 except Exception as e:
     st.error(f"Dropbox Error: {e}")
 
@@ -300,6 +305,7 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 if KONEKSI_GSHEET_BERHASIL:
     if not KONEKSI_DROPBOX_BERHASIL: st.warning("⚠️ Dropbox non-aktif. Fitur foto dimatikan.")
 
+    # SIDEBAR
     with st.sidebar:
         st.header("Navigasi")
         menu_nav = st.radio("Pilih Menu:", ["📝 Laporan & Target", "📊 Dashboard Manager"])
@@ -358,6 +364,7 @@ if KONEKSI_GSHEET_BERHASIL:
         st.subheader("📊 Checklist Target (Result KPI)")
         col_dash_1, col_dash_2 = st.columns(2)
         
+        # Load Data
         df_team = load_checklist(SHEET_TARGET_TEAM, ["Misi", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan"])
         df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, ["Nama", "Target", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan"])
 
@@ -404,12 +411,15 @@ if KONEKSI_GSHEET_BERHASIL:
                 else: st.info("Belum ada target.")
             else: st.info("Data kosong.")
 
+        # --- INPUT HARIAN (DYNAMIC + FAIRNESS LOGIC) ---
         st.divider()
         with st.container(border=True):
             st.subheader("📝 Input Laporan Harian (Activity)")
             
+            # 1. Identitas
             nama_pelapor = st.selectbox("Nama Pelapor", get_daftar_staf_terbaru(), key="pelapor_main")
             
+            # 2. Kategori Aktivitas (Fitur Fairness)
             kategori_aktivitas = st.radio(
                 "Jenis Aktivitas:", 
                 ["🚗 Kunjungan Lapangan (Sales)", "💻 Digital Marketing / Konten / Ads", "📞 Telesales / Follow Up", "🏢 Admin / Lainnya"],
@@ -420,39 +430,47 @@ if KONEKSI_GSHEET_BERHASIL:
             with c1:
                 today_now = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
                 st.markdown(f"**Tanggal:** `{today_now.strftime('%d-%m-%Y')}`")
+                
+                # Logic: Tampilkan input link sosmed hanya jika Digital Marketing
                 sosmed_link = ""
                 if "Digital Marketing" in kategori_aktivitas:
                     sosmed_link = st.text_input("Link Konten / Ads / Drive (Wajib jika ada)")
             
             with c2:
+                # Logic: Kolom 'Lokasi' berubah fungsi tergantung kategori
                 lokasi_input = ""
                 if "Kunjungan" in kategori_aktivitas:
                     lokasi_input = st.text_input("📍 Nama Klien / Lokasi Kunjungan (Wajib)")
                 else:
+                    # Jika Digital, lokasi otomatis diisi kategori agar grafik rapi
                     lokasi_input = st.text_input("Jenis Tugas (Otomatis)", value=kategori_aktivitas.split(' ')[1], disabled=True)
                 
+                # DYNAMIC INPUT: File Uploader di luar form (Fitur User)
                 fotos = st.file_uploader("Upload Bukti (Foto/Screenshot/Dokumen)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
 
+            # Logic Deskripsi (Dynamic 1 Foto = 1 Desc)
             deskripsi_map = {}
             main_deskripsi = ""
 
             if fotos:
                 st.info("📸 **Detail Bukti:** Berikan keterangan untuk setiap file:")
+                # Loop ini memastikan setiap foto punya deskripsi sendiri
                 for i, f in enumerate(fotos):
                     with st.container(border=True):
                         col_img, col_desc = st.columns([1, 3])
                         with col_img:
-                            if f.type.startswith('image'):
-                                st.image(f, width=100)
-                            else:
-                                st.markdown(f"📄 **{f.name}**")
+                            # Preview Gambar
+                            if f.type.startswith('image'): st.image(f, width=100)
+                            else: st.markdown(f"📄 **{f.name}**")
                         with col_desc:
+                            # Input Deskripsi per file
                             deskripsi_map[f.name] = st.text_area(f"Ket. File {i+1}", height=70, key=f"desc_{i}", placeholder="Jelaskan aktivitas terkait file ini...")
             else:
                 placeholder_text = "Jelaskan hasil kunjungan..." if "Kunjungan" in kategori_aktivitas else "Jelaskan konten/ads/calls yang dikerjakan..."
                 main_deskripsi = st.text_area("Deskripsi Aktivitas", placeholder=placeholder_text)
 
             if st.button("✅ Submit Laporan", type="primary"):
+                # Validasi
                 valid = True
                 if "Kunjungan" in kategori_aktivitas and not lokasi_input:
                     st.error("Untuk Kunjungan, Lokasi Wajib Diisi!"); valid = False
@@ -465,6 +483,7 @@ if KONEKSI_GSHEET_BERHASIL:
                         ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
                         final_lokasi = lokasi_input if lokasi_input else kategori_aktivitas
                         
+                        # Simpan per foto (Granular)
                         if fotos and KONEKSI_DROPBOX_BERHASIL:
                             for f in fotos:
                                 url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
@@ -477,13 +496,14 @@ if KONEKSI_GSHEET_BERHASIL:
                             st.success(f"Laporan '{kategori_aktivitas}' Tersimpan!"); st.balloons(); st.cache_data.clear()
                         else: st.error("Gagal simpan.")
         
+        # Log Aktivitas
         with st.expander("📂 Log Data Mentah"):
             if st.button("🔄 Refresh"): st.cache_data.clear(); st.rerun()
             df_log = load_all_reports(get_daftar_staf_terbaru())
             if not df_log.empty: st.dataframe(df_log, use_container_width=True, hide_index=True)
             else: st.info("Kosong")
 
-    # --- MENU 2: DASHBOARD MANAGER (FIXED CRASH) ---
+    # --- MENU 2: DASHBOARD MANAGER (FITUR BARU) ---
     elif menu_nav == "📊 Dashboard Manager":
         st.header("📊 Dashboard Produktivitas (Split View)")
         st.info("Dashboard ini memisahkan analisa antara Kunjungan Lapangan (Sales) dan Aktivitas Digital (Marketing) agar penilaian adil.")
@@ -497,6 +517,7 @@ if KONEKSI_GSHEET_BERHASIL:
                 df_log['Tanggal'] = df_log[COL_TIMESTAMP].dt.date
             except: df_log['Tanggal'] = datetime.now().date()
             
+            # Categorization Logic
             keywords_digital = ["Digital", "Marketing", "Konten", "Ads", "Telesales", "Admin", "Follow"]
             def get_category(val):
                 val_str = str(val)
@@ -505,6 +526,7 @@ if KONEKSI_GSHEET_BERHASIL:
             
             df_log['Kategori'] = df_log[COL_TEMPAT].apply(get_category)
 
+            # Filter Waktu
             days = st.selectbox("Rentang Waktu:", [7, 14, 30], index=0)
             start_date = date.today() - timedelta(days=days)
             df_filt = df_log[df_log['Tanggal'] >= start_date]
@@ -532,6 +554,7 @@ if KONEKSI_GSHEET_BERHASIL:
                 
                 if not df_mkt.empty:
                     st.subheader("Produktivitas Tim Digital")
+                    # Fallback jika Plotly tidak ada
                     if HAS_PLOTLY:
                         fig = px.pie(df_mkt, names=COL_NAMA, title="Distribusi Beban Kerja Digital")
                         st.plotly_chart(fig, use_container_width=True)
@@ -543,25 +566,25 @@ if KONEKSI_GSHEET_BERHASIL:
                     st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
             
-            # --- FIXED GALERI (DICT BASED) ---
+            # --- FIX GALERI BUKTI (PDF PERFECT VIEW & DESCRIPTION ADDED) ---
             with tab_galeri:
-                st.caption("Menampilkan bukti foto/dokumen terbaru (Klik tombol untuk melihat dokumen full)")
+                st.caption("Menampilkan bukti foto/dokumen terbaru")
                 
-                # Filter data valid
+                # Filter link yang valid
                 df_foto = df_filt[df_filt[COL_LINK_FOTO].str.contains("http", na=False, case=False)].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
                 
                 if not df_foto.empty:
-                    # Konversi ke Dictionary agar aman dari rename attribute itertuples
+                    # Konversi ke Dictionary
                     data_dict = df_foto.to_dict('records')
                     
                     cols = st.columns(4)
                     for idx, row in enumerate(data_dict):
                         with cols[idx % 4]:
                             with st.container(border=True):
-                                # Akses menggunakan Key Dictionary (Nama Kolom Asli)
                                 url = row[COL_LINK_FOTO] 
                                 nama = row[COL_NAMA]
                                 tempat = row[COL_TEMPAT]
+                                deskripsi = row[COL_DESKRIPSI] # Ambil Deskripsi
                                 
                                 url_lower = url.lower()
                                 is_image = any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.webp'])
@@ -569,18 +592,35 @@ if KONEKSI_GSHEET_BERHASIL:
                                 
                                 try:
                                     if is_image:
+                                        # GAMBAR
                                         st.image(url, use_container_width=True)
-                                    elif is_pdf:
-                                        pdf_viewer_url = f"https://docs.google.com/viewer?url={url}&embedded=true"
-                                        st.markdown(f'<iframe src="{pdf_viewer_url}" width="100%" height="200" frameborder="0"></iframe>', unsafe_allow_html=True)
-                                        st.link_button("📄 Buka PDF", url)
-                                    else:
-                                        st.markdown(f"📂 **Dokumen**")
-                                        st.link_button("Download", url)
                                         
-                                    st.caption(f"**{nama}**")
+                                    elif is_pdf:
+                                        # PDF (FIX: Ubah link dropbox jadi Direct Link agar tampil sempurna)
+                                        # Mengubah 'www.dropbox.com' menjadi 'dl.dropboxusercontent.com'
+                                        direct_url = url.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                                        
+                                        pdf_viewer_url = f"https://docs.google.com/viewer?url={direct_url}&embedded=true"
+                                        
+                                        # Tampilkan PDF
+                                        st.markdown(
+                                            f'<iframe src="{pdf_viewer_url}" width="100%" height="200" frameborder="0" scrolling="no"></iframe>',
+                                            unsafe_allow_html=True
+                                        )
+                                        st.link_button("📄 Buka PDF Full", url)
+                                        
+                                    else:
+                                        # DOKUMEN LAIN
+                                        st.markdown(f"📂 **Dokumen**")
+                                        st.link_button("Download File", url)
+                                    
+                                    # --- INFORMASI LENGKAP ---
+                                    st.markdown(f"**{nama}**")
                                     st.caption(f"📍 {tempat}")
-                                except:
+                                    # Menampilkan Deskripsi
+                                    st.info(f"📝 {deskripsi}")
+                                    
+                                except Exception as e:
                                     st.error("Gagal memuat file")
                 else: 
                     st.info("Belum ada bukti yang terupload.")
