@@ -1,8 +1,7 @@
-streamlit==1.30.0
+streamlit
 pandas
 gspread
 google-auth
-google-auth-oauthlib
 dropbox
-streamlit-aggrid
-tzdata
+st-aggrid
+plotly
