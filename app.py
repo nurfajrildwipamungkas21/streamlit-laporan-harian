@@ -58,34 +58,59 @@ try:
 except Exception as e:
     st.error(f"Dropbox Error: {e}")
 
-# --- FUNGSI HELPER CORE & FORMATTING (DIPERBAIKI) ---
+# --- FUNGSI HELPER CORE & SMART FORMATTING ---
 
 def auto_format_sheet(worksheet):
     """
-    Fungsi Ajaib Revisi: Memaksa WRAP TEXT agar tidak terpotong.
+    Fungsi Formatting Pintar:
+    Mengatur lebar kolom pixel secara spesifik agar Tanggal tidak turun ke bawah.
     """
     try:
-        # 1. Format Header (Tebal & Tengah)
+        # 1. Format Header (Bold, Center, Background Abu)
         worksheet.format("A1:Z1", {
             "textFormat": {"bold": True},
             "horizontalAlignment": "CENTER",
-            "verticalAlignment": "MIDDLE"
+            "verticalAlignment": "MIDDLE",
+            "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
         })
         
-        # 2. Format Body (WRAP TEXT adalah kuncinya!)
-        # wrapStrategy: WRAP -> Teks turun ke bawah jika panjang
-        # verticalAlignment: TOP -> Agar rapi di atas
-        worksheet.format("A2:Z1000", {
-            "wrapStrategy": "WRAP", 
-            "verticalAlignment": "TOP"
-        })
-
-        # 3. Resize Lebar Kolom
-        # Kita resize kolom A-F (index 0-5) agar pas
-        worksheet.columns_auto_resize(0, 6)
+        # 2. Logika Lebar Kolom Berdasarkan Header
+        # Kita baca header dulu untuk tahu urutan kolom
+        headers = worksheet.row_values(1)
         
+        requests = []
+        
+        for i, col_name in enumerate(headers):
+            col_index = i  # 0-based index for set_column_width (some libraries use 1, gspread uses 0-based in batch usually but wrapper methods vary. We use simple calls here).
+            
+            # Logic Lebar Kolom (Approximation in Pixels)
+            if col_name in ["Misi", "Target", "Deskripsi"]:
+                worksheet.set_column_width(col_index, 400) # Lebar untuk teks panjang
+                # Force Wrap Text untuk kolom ini
+                letter = chr(65 + i) # Konversi 0->A, 1->B
+                worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
+                
+            elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
+                worksheet.set_column_width(col_index, 120) # Pas untuk tanggal
+                # Force CLIP/OVERFLOW (Jangan turun ke bawah) & Center
+                letter = chr(65 + i)
+                worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "CLIP", "horizontalAlignment": "CENTER", "verticalAlignment": "TOP"})
+                
+            elif col_name in ["Status", "Done?"]:
+                worksheet.set_column_width(col_index, 60)
+                letter = chr(65 + i)
+                worksheet.format(f"{letter}2:{letter}1000", {"horizontalAlignment": "CENTER", "verticalAlignment": "TOP"})
+                
+            elif col_name in ["Bukti/Catatan", "Link Foto", "Link Sosmed"]:
+                worksheet.set_column_width(col_index, 200)
+                letter = chr(65 + i)
+                worksheet.format(f"{letter}2:{letter}1000", {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"})
+                
+            elif col_name == "Nama":
+                worksheet.set_column_width(col_index, 150)
+                
     except Exception as e:
-        print(f"Format Error: {e}")
+        print(f"Smart Format Error: {e}")
 
 @st.cache_resource(ttl=60)
 def get_or_create_worksheet(nama_worksheet):
@@ -94,7 +119,7 @@ def get_or_create_worksheet(nama_worksheet):
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=nama_worksheet, rows=1, cols=len(NAMA_KOLOM_STANDAR))
         ws.append_row(NAMA_KOLOM_STANDAR)
-        auto_format_sheet(ws) # Format saat buat baru
+        auto_format_sheet(ws)
         return ws
     except: return None
 
@@ -185,7 +210,7 @@ def save_checklist(sheet_name, df):
             df_save[col_status] = df_save[col_status].apply(lambda x: "TRUE" if x else "FALSE")
             
         ws.update([df_save.columns.values.tolist()] + df_save.values.tolist())
-        auto_format_sheet(ws) # FORMAT ULANG SETELAH SAVE
+        auto_format_sheet(ws) 
         return True
     except: return False
 
@@ -204,7 +229,7 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
             rows_to_add.append(new_row)
             
         ws.append_rows(rows_to_add)
-        auto_format_sheet(ws) # FORMAT ULANG SETELAH NAMBAH
+        auto_format_sheet(ws) 
         return True
     except: return False
 
@@ -245,7 +270,7 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
             return False, "Kolom Bukti/Catatan hilang."
 
         ws.update_cell(row_idx_gsheet, col_idx_gsheet, final_note)
-        auto_format_sheet(ws) # FORMAT ULANG SETELAH UPDATE BUKTI
+        auto_format_sheet(ws) 
         
         return True, "Berhasil update bukti!"
         
@@ -256,7 +281,7 @@ def simpan_laporan_harian(data_list, nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
         ws.append_row(data_list)
-        auto_format_sheet(ws) # FORMAT ULANG LAPORAN HARIAN
+        auto_format_sheet(ws) 
         return True
     except: return False
 
@@ -286,6 +311,7 @@ if KONEKSI_GSHEET_BERHASIL and KONEKSI_DROPBOX_BERHASIL:
         # 1. TARGET TEAM
         with tab_team:
             st.caption("Input Target Team (Bulk Input)")
+            st.info("ℹ️ Tips: 1 Baris = 1 Target. Jika teks panjang, jangan tekan Enter di tengah kalimat.")
             with st.form("add_team_goal", clear_on_submit=True):
                 goal_team_text = st.text_area("Target Team (Satu per baris)", height=100)
                 c1, c2 = st.columns(2)
