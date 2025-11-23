@@ -8,14 +8,21 @@ import dropbox
 from dropbox.exceptions import AuthError, ApiError
 from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 import re
-import plotly.express as px # Library grafik
 
 # --- HYBRID LIBRARY IMPORT (FALLBACK MECHANISM) ---
+# 1. AgGrid (Tabel Canggih)
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
     HAS_AGGRID = True
 except ImportError:
     HAS_AGGRID = False
+
+# 2. Plotly (Grafik Canggih) -> FIX ERROR DISINI
+try:
+    import plotly.express as px
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(
@@ -542,8 +549,14 @@ if KONEKSI_GSHEET_BERHASIL:
                 
                 if not df_mkt.empty:
                     st.subheader("Produktivitas Tim Digital")
-                    fig = px.pie(df_mkt, names=COL_NAMA, title="Distribusi Beban Kerja Digital")
-                    st.plotly_chart(fig, use_container_width=True)
+                    # Fallback jika Plotly tidak ada
+                    if HAS_PLOTLY:
+                        fig = px.pie(df_mkt, names=COL_NAMA, title="Distribusi Beban Kerja Digital")
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning("Install 'plotly' untuk grafik interaktif.")
+                        st.bar_chart(df_mkt[COL_NAMA].value_counts())
+                        
                     st.subheader("Jenis Tugas Digital")
                     st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
