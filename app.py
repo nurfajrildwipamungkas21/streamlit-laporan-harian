@@ -413,7 +413,7 @@ if KONEKSI_GSHEET_BERHASIL:
                 if st.button("Login Manager"):
                     # --- INFO: GANTI PASSWORD DISINI ---
                     # Gunakan st.secrets["password_admin"] untuk lebih aman
-                    if pwd == "admin123": 
+                    if pwd == "fayza123": 
                         st.session_state["is_manager"] = True
                         st.rerun() # Refresh halaman agar menu muncul
                     else:
