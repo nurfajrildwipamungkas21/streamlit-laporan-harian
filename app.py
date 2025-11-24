@@ -55,7 +55,7 @@ SHEET_CONFIG_NAMA = "Config_Staf"
 SHEET_TARGET_TEAM = "Target_Team_Checklist"
 SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 
-# --- KOLOM LAPORAN HARIAN (UPDATED WITH REFLECTION) ---
+# --- KOLOM LAPORAN HARIAN (UPDATED WITH FEEDBACK) ---
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
 COL_TEMPAT = "Tempat Dikunjungi"
@@ -66,11 +66,14 @@ COL_LINK_SOSMED = "Link Sosmed"
 COL_KESIMPULAN = "Kesimpulan"
 COL_KENDALA = "Kendala"
 COL_PENDING = "Next Plan (Pending)"
+# === UPDATE FITUR FEEDBACK ===
+COL_FEEDBACK = "Feedback Lead"
 
 NAMA_KOLOM_STANDAR = [
     COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI, 
     COL_LINK_FOTO, COL_LINK_SOSMED, 
-    COL_KESIMPULAN, COL_KENDALA, COL_PENDING
+    COL_KESIMPULAN, COL_KENDALA, COL_PENDING,
+    COL_FEEDBACK # Menambahkan kolom Feedback ke standar
 ]
 
 # --- KONEKSI ---
@@ -141,7 +144,7 @@ def auto_format_sheet(worksheet):
             cell_format_override = {}
             width = 100
 
-            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed", "Tempat Dikunjungi", "Kesimpulan", "Kendala", "Next Plan (Pending)"]:
+            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed", "Tempat Dikunjungi", "Kesimpulan", "Kendala", "Next Plan (Pending)", "Feedback Lead"]:
                 width = 300
                 cell_format_override["wrapStrategy"] = "WRAP"
             elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
@@ -348,6 +351,32 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
         auto_format_sheet(ws)
         return True, "Berhasil update!"
     except Exception as e: return False, f"Error: {e}"
+
+# --- FUNGSI BARU: KIRIM FEEDBACK KE USER ---
+def kirim_feedback_admin(nama_staf, timestamp_key, isi_feedback):
+    try:
+        ws = spreadsheet.worksheet(nama_staf)
+        
+        # Cek apakah kolom Feedback sudah ada, jika belum, tambahkan header
+        headers = ws.row_values(1)
+        if COL_FEEDBACK not in headers:
+            ws.update_cell(1, len(headers) + 1, COL_FEEDBACK)
+            headers.append(COL_FEEDBACK) 
+            auto_format_sheet(ws)
+            
+        # Cari baris berdasarkan Timestamp
+        cell = ws.find(timestamp_key)
+        if not cell:
+            return False, "Timestamp data tidak ditemukan (Mungkin data berubah)"
+            
+        # Cari index kolom Feedback
+        col_idx = headers.index(COL_FEEDBACK) + 1
+        
+        # Update cell
+        ws.update_cell(cell.row, col_idx, isi_feedback)
+        return True, "Feedback terkirim!"
+    except Exception as e:
+        return False, f"Error: {e}"
 
 def simpan_laporan_harian_batch(list_of_rows, nama_staf):
     try:
@@ -560,6 +589,19 @@ if KONEKSI_GSHEET_BERHASIL:
             with c_nama:
                 nama_pelapor = st.selectbox("Nama Pelapor", get_daftar_staf_terbaru(), key="pelapor_main")
             
+            # === FITUR BARU: CEK FEEDBACK DARI LEAD ===
+            try:
+                # Load khusus data user ini untuk cek apakah ada feedback
+                df_user_only = load_all_reports([nama_pelapor])
+                if not df_user_only.empty and COL_FEEDBACK in df_user_only.columns:
+                    # Ambil baris yg kolom feedbacknya tidak kosong/NaN
+                    df_with_feed = df_user_only[df_user_only[COL_FEEDBACK].astype(str).str.strip() != ""]
+                    if not df_with_feed.empty:
+                        last_feed = df_with_feed.iloc[-1]
+                        st.info(f"💌 **Pesan Terbaru Team Lead (Laporan {last_feed[COL_TIMESTAMP]}):**\n\n\"{last_feed[COL_FEEDBACK]}\"")
+            except Exception as e: pass
+            # ==========================================
+
             # >>> LOGIKA REMINDER DISINI <<<
             with c_reminder:
                 pending_msg = get_reminder_pending(nama_pelapor)
@@ -647,15 +689,16 @@ if KONEKSI_GSHEET_BERHASIL:
                         val_kesimpulan = input_kesimpulan if input_kesimpulan else "-"
                         val_kendala = input_kendala if input_kendala else "-"
                         val_pending = input_pending if input_pending else "-"
+                        val_feedback = "" # Kosong saat inisialisasi awal
 
                         if fotos and KONEKSI_DROPBOX_BERHASIL:
                             for f in fotos:
                                 url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
                                 desc = deskripsi_map.get(f.name, "-")
                                 # Append kolom baru di sini
-                                rows.append([ts, nama_pelapor, final_lokasi, desc, url, sosmed_link if sosmed_link else "-", val_kesimpulan, val_kendala, val_pending])
+                                rows.append([ts, nama_pelapor, final_lokasi, desc, url, sosmed_link if sosmed_link else "-", val_kesimpulan, val_kendala, val_pending, val_feedback])
                         else:
-                            rows.append([ts, nama_pelapor, final_lokasi, main_deskripsi, "-", sosmed_link if sosmed_link else "-", val_kesimpulan, val_kendala, val_pending])
+                            rows.append([ts, nama_pelapor, final_lokasi, main_deskripsi, "-", sosmed_link if sosmed_link else "-", val_kesimpulan, val_kendala, val_pending, val_feedback])
                         
                         if simpan_laporan_harian_batch(rows, nama_pelapor):
                             st.success(f"Laporan Tersimpan! Reminder besok: {val_pending}"); st.balloons(); st.cache_data.clear()
@@ -694,7 +737,7 @@ if KONEKSI_GSHEET_BERHASIL:
             df_filt = df_log[df_log['Tanggal'] >= start_date]
 
             # TAB BARU: REVIEW HARIAN (CARD VIEW)
-            tab_sales, tab_marketing, tab_review, tab_galeri = st.tabs(["🚗 Sales (Lapangan)", "💻 Marketing (Digital)", "📝 Review Harian", "🖼️ Galeri Bukti"])
+            tab_sales, tab_marketing, tab_review, tab_galeri = st.tabs(["🚗 Sales (Lapangan)", "💻 Marketing (Digital)", "📝 Review & Feedback", "🖼️ Galeri Bukti"])
 
             with tab_sales:
                 df_sales = df_filt[df_filt['Kategori'] == "Kunjungan Lapangan"]
@@ -727,10 +770,10 @@ if KONEKSI_GSHEET_BERHASIL:
                     st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
 
-            # --- FITUR BARU: REVIEW HARIAN CARD VIEW ---
+            # --- FITUR UPDATE: REVIEW HARIAN CARD VIEW DENGAN FEEDBACK ---
             with tab_review:
-                st.subheader("📝 Review Catatan Harian")
-                st.caption("Monitoring kendala dan rencana harian tim secara detail.")
+                st.subheader("📝 Review Catatan Harian & Feedback")
+                st.caption("Monitoring kendala dan memberikan feedback langsung per individu.")
                 
                 # Urutkan dari yang terbaru
                 df_review = df_filt.sort_values(by=COL_TIMESTAMP, ascending=False)
@@ -760,6 +803,23 @@ if KONEKSI_GSHEET_BERHASIL:
                                 with col_c: 
                                     st.error(f"📌 **Next Plan (Reminder):**\n\n{row.get(COL_PENDING, '-')}")
 
+                                # === BAGIAN INPUT FEEDBACK ADMIN ===
+                                st.divider()
+                                # Ambil feedback lama jika ada
+                                existing_feed = row.get(COL_FEEDBACK, "")
+                                if pd.isna(existing_feed): existing_feed = ""
+                                
+                                with st.expander(f"💬 Beri Feedback untuk {row[COL_NAMA]}", expanded=False):
+                                    unique_key = f"feed_{row[COL_NAMA]}_{row[COL_TIMESTAMP]}"
+                                    input_feed = st.text_area("Tulis Masukan/Arahan:", value=str(existing_feed), key=unique_key)
+                                    if st.button("Kirim Feedback 🚀", key=f"btn_{unique_key}"):
+                                        if input_feed:
+                                            res, msg = kirim_feedback_admin(row[COL_NAMA], str(row[COL_TIMESTAMP]), input_feed)
+                                            if res: 
+                                                st.toast(f"Feedback terkirim ke {row[COL_NAMA]}!", icon="✅")
+                                                # Optional: st.rerun()
+                                            else: st.error(msg)
+                            
                             # Sisi Kanan: Foto (Jika ada)
                             with c_img:
                                 if "http" in str(row[COL_LINK_FOTO]):
