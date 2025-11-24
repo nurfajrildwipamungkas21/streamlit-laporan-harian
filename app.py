@@ -31,6 +31,21 @@ st.set_page_config(
     layout="wide"
 )
 
+# ==========================================
+# --- BAGIAN BARU: HIDE STREAMLIT STYLE ---
+# Code ini menyembunyikan Header (termasuk tombol GitHub), Footer, dan MainMenu
+# ==========================================
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
+# ==========================================
+
+
 # --- KONFIGURASI ---
 NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
 FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
@@ -421,7 +436,8 @@ if KONEKSI_GSHEET_BERHASIL:
         if not st.session_state["is_manager"]:
             with st.expander("🔐 Akses Khusus Admin"):
                 pwd = st.text_input("Password:", type="password", key="input_pwd")
-                if st.button("Login Manager"):
+                if st.button("Login Admin"):
+                    # NOTE: Password default "fayza123" jika secrets belum di-set
                     if pwd == st.secrets.get("password_manager", "fayza123"): 
                         st.session_state["is_manager"] = True
                         st.rerun()
