@@ -17,7 +17,7 @@ try:
 except ImportError:
     HAS_AGGRID = False
 
-# 2. Plotly (Grafik Canggih - Wajib untuk Peta Sebaran Baru)
+# 2. Plotly (Grafik Canggih)
 try:
     import plotly.express as px
     HAS_PLOTLY = True
@@ -32,7 +32,8 @@ st.set_page_config(
 )
 
 # ==========================================
-# --- HIDE STREAMLIT STYLE ---
+# --- BAGIAN BARU: HIDE STREAMLIT STYLE ---
+# Code ini menyembunyikan Header (termasuk tombol GitHub), Footer, dan MainMenu
 # ==========================================
 hide_st_style = """
             <style>
@@ -42,6 +43,7 @@ hide_st_style = """
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
+# ==========================================
 
 
 # --- KONFIGURASI ---
@@ -53,22 +55,20 @@ SHEET_CONFIG_NAMA = "Config_Staf"
 SHEET_TARGET_TEAM = "Target_Team_Checklist"
 SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 
-# --- KOLOM LAPORAN HARIAN (UPDATED: DYNAMIC LOCATION) ---
-# Struktur Kolom Baru untuk Peta Sebaran
+# --- KOLOM LAPORAN HARIAN (UPDATED WITH REFLECTION) ---
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
-COL_KOTA = "Kota/Area"           # <--- [BARU] Grouping Wilayah
-COL_TEMPAT = "Lokasi Spesifik"     # <--- [BARU] Detail Tempat
+COL_TEMPAT = "Tempat Dikunjungi"
 COL_DESKRIPSI = "Deskripsi"
 COL_LINK_FOTO = "Link Foto"
 COL_LINK_SOSMED = "Link Sosmed"
-# Fitur Refleksi & Reminder
+# Fitur Baru: Refleksi & Reminder
 COL_KESIMPULAN = "Kesimpulan"
 COL_KENDALA = "Kendala"
 COL_PENDING = "Next Plan (Pending)"
 
 NAMA_KOLOM_STANDAR = [
-    COL_TIMESTAMP, COL_NAMA, COL_KOTA, COL_TEMPAT, COL_DESKRIPSI, 
+    COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI, 
     COL_LINK_FOTO, COL_LINK_SOSMED, 
     COL_KESIMPULAN, COL_KENDALA, COL_PENDING
 ]
@@ -141,7 +141,7 @@ def auto_format_sheet(worksheet):
             cell_format_override = {}
             width = 100
 
-            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed", "Lokasi Spesifik", "Kesimpulan", "Kendala", "Next Plan (Pending)"]:
+            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed", "Tempat Dikunjungi", "Kesimpulan", "Kendala", "Next Plan (Pending)"]:
                 width = 300
                 cell_format_override["wrapStrategy"] = "WRAP"
             elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
@@ -150,7 +150,7 @@ def auto_format_sheet(worksheet):
             elif col_name in ["Status", "Done?"]:
                 width = 60
                 cell_format_override["horizontalAlignment"] = "CENTER"
-            elif col_name == "Nama" or col_name == "Kota/Area":
+            elif col_name == "Nama":
                 width = 150
 
             requests.append({
@@ -246,10 +246,7 @@ def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
         clean_filename = "".join([c for c in file_obj.name if c.isalnum() or c in ('.','_')])
         clean_user_folder = "".join([c for c in nama_staf if c.isalnum() or c in (' ','_')]).replace(' ','_')
         clean_kategori = "".join([c for c in kategori if c.isalnum() or c in (' ','_')]).replace(' ','_')
-        
-        # LOGIKA FOLDER BARU: /Nama_User/Nama_Kota/file.jpg
         path = f"{FOLDER_DROPBOX}/{clean_user_folder}/{clean_kategori}/{ts}_{clean_filename}"
-        
         dbx.files_upload(file_data, path, mode=dropbox.files.WriteMode.add)
         settings = SharedLinkSettings(requested_visibility=RequestedVisibility.public)
         try: link = dbx.sharing_create_shared_link_with_settings(path, settings=settings)
@@ -357,8 +354,7 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         ws = get_or_create_worksheet(nama_staf)
         # Pastikan header update jika ada kolom baru
         current_header = ws.row_values(1)
-        # Jika jumlah kolom berbeda (karena kita nambah kolom Kota), resize
-        if len(current_header) != len(NAMA_KOLOM_STANDAR):
+        if len(current_header) < len(NAMA_KOLOM_STANDAR):
             ws.resize(cols=len(NAMA_KOLOM_STANDAR))
             ws.update(range_name="A1", values=[NAMA_KOLOM_STANDAR], value_input_option='USER_ENTERED')
             
@@ -369,15 +365,21 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         print(f"Error saving daily report batch: {e}")
         return False
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=30) # Cache sebentar biar responsif
 def get_reminder_pending(nama_staf):
+    """
+    Fungsi untuk mengambil 'Next Plan (Pending)' dari entri terakhir user.
+    """
     try:
         ws = get_or_create_worksheet(nama_staf)
         if not ws: return None
         all_vals = ws.get_all_records()
         if not all_vals: return None
+        
+        # Ambil baris terakhir
         last_row = all_vals[-1]
         pending_task = last_row.get(COL_PENDING, "")
+        
         if pending_task and str(pending_task).strip() != "-" and str(pending_task).strip() != "":
             return pending_task
         return None
@@ -548,82 +550,117 @@ if KONEKSI_GSHEET_BERHASIL:
                 else: st.info("Belum ada target.")
             else: st.info("Data kosong.")
 
-        # --- INPUT HARIAN (DYNAMIC LOCATION + AUTO FOLDER) ---
+        # --- INPUT HARIAN (DYNAMIC + REFLECTION + REMINDER) ---
         st.divider()
         with st.container(border=True):
-            st.subheader("📝 Input Aktivitas & Lokasi")
+            st.subheader("📝 Input Laporan Harian (Activity)")
             
-            # 1. Identitas
+            # 1. Identitas & REMINDER CHECK
             c_nama, c_reminder = st.columns([1, 2])
             with c_nama:
                 nama_pelapor = st.selectbox("Nama Pelapor", get_daftar_staf_terbaru(), key="pelapor_main")
+            
+            # >>> LOGIKA REMINDER DISINI <<<
             with c_reminder:
                 pending_msg = get_reminder_pending(nama_pelapor)
-                if pending_msg: st.warning(f"🔔 Reminder: '{pending_msg}'")
-                else: st.caption("✅ Tidak ada pendingan.")
-
-            # 2. INPUT DINAMIS LOKASI (2 Kata Kunci)
-            st.markdown("#### 📍 Dimana Posisi Anda?")
-            col_loc1, col_loc2 = st.columns(2)
-            
-            with col_loc1:
-                # KATA KUNCI 1: Kota/Area (Untuk Visualisasi Grouping)
-                input_kota = st.text_input("Kota / Kabupaten / Area", placeholder="Cth: Yogyakarta, Jaksel, Surabaya")
-            
-            with col_loc2:
-                # KATA KUNCI 2: Tempat Spesifik
-                input_tempat = st.text_input("Lokasi Spesifik / Nama Klien", placeholder="Cth: Universitas Islam Indonesia, PT Maju Jaya")
-
-            # 3. Kategori & Deskripsi
-            kategori_aktivitas = st.radio("Divisi:", ["🚗 Sales", "💻 Marketing", "📞 Admin/CS", "🏢 Lainnya"], horizontal=True)
-            
-            main_deskripsi = st.text_area("📝 Dalam Rangka Apa? (Deskripsi)", placeholder="Cth: Meeting dengan Kaprodi bahas kerjasama, atau Follow up penawaran bulan lalu.")
-
-            # 4. Upload Foto (Folder Otomatis by Kota)
-            st.markdown("---")
-            fotos = st.file_uploader("📸 Upload Bukti Kunjungan", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
-            sosmed_link = st.text_input("Link Sosmed (Jika ada)")
-
-            # Refleksi
-            c_ref1, c_ref2 = st.columns(2)
-            with c_ref1: input_kesimpulan = st.text_area("💡 Hasil/Kesimpulan")
-            with c_ref2: input_kendala = st.text_area("🚧 Kendala")
-            input_pending = st.text_input("📌 Next Plan")
-
-            if st.button("✅ Submit", type="primary"):
-                if not input_kota or not input_tempat:
-                    st.error("⚠️ Kota dan Lokasi Spesifik wajib diisi untuk data visualisasi!")
-                elif not main_deskripsi:
-                    st.error("⚠️ Deskripsi aktivitas wajib diisi!")
+                if pending_msg:
+                    st.warning(f"🔔 **Reminder:** Kamu punya pendingan kemarin: '{pending_msg}'")
                 else:
-                    with st.spinner("Mengirim data ke Cloud..."):
+                    st.caption("Tidak ada pendingan dari laporan terakhir.")
+
+            # 2. Kategori Aktivitas
+            kategori_aktivitas = st.radio(
+                "Jenis Aktivitas:", 
+                ["🚗 Sales", "💻 Digital Marketing / Konten / Ads", "📞 Telesales / Follow Up", "🏢 Lainnya"],
+                horizontal=True
+            )
+
+            c1, c2 = st.columns(2)
+            with c1:
+                today_now = datetime.now(tz=ZoneInfo("Asia/Jakarta")).date()
+                st.markdown(f"**Tanggal:** `{today_now.strftime('%d-%m-%Y')}`")
+                sosmed_link = ""
+                if "Digital Marketing" in kategori_aktivitas:
+                    sosmed_link = st.text_input("Link Konten / Ads / Drive (Wajib jika ada)")
+            
+            with c2:
+                lokasi_input = ""
+                if "Kunjungan" in kategori_aktivitas:
+                    lokasi_input = st.text_input("📍 Nama Klien / Lokasi Kunjungan (Wajib)")
+                else:
+                    lokasi_input = st.text_input("Jenis Tugas (Otomatis)", value=kategori_aktivitas.split(' ')[1], disabled=True)
+                
+                fotos = st.file_uploader("Upload Bukti (Foto/Screenshot/Dokumen)", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
+
+            # Deskripsi & Detail Foto
+            deskripsi_map = {}
+            main_deskripsi = ""
+
+            if fotos:
+                st.info("📸 **Detail Bukti:** Berikan keterangan spesifik untuk setiap file:")
+                for i, f in enumerate(fotos):
+                    with st.container(border=True):
+                        col_img, col_desc = st.columns([1, 3])
+                        with col_img:
+                            if f.type.startswith('image'): st.image(f, width=150)
+                            else: st.markdown(f"📄 **{f.name}**")
+                        with col_desc:
+                            deskripsi_map[f.name] = st.text_area(
+                                f"Ket. File: {f.name}", 
+                                height=70, 
+                                key=f"desc_{i}", 
+                                placeholder="Jelaskan aktivitas terkait file ini..."
+                            )
+            else:
+                placeholder_text = "Jelaskan hasil kunjungan..." if "Kunjungan" in kategori_aktivitas else "Jelaskan konten/ads/calls yang dikerjakan..."
+                main_deskripsi = st.text_area("Deskripsi Aktivitas", placeholder=placeholder_text)
+
+            # --- BAGIAN BARU: REFLEKSI HARIAN ---
+            st.divider()
+            st.markdown("#### 🏁 Kesimpulan Harian")
+            st.caption("Bagian ini penting agar progress besok lebih terarah.")
+            
+            col_ref_1, col_ref_2 = st.columns(2)
+            with col_ref_1:
+                input_kesimpulan = st.text_area("💡 Kesimpulan / Apa yang dicapai hari ini?", height=100, placeholder="Contoh: Klien setuju, tapi minta diskon. / Konten sudah jadi 3 feeds.")
+            
+            with col_ref_2:
+                input_kendala = st.text_area("🚧 Kendala / Masalah?", height=100, placeholder="Contoh: Hujan deras jadi telat. / Laptop agak lemot render video.")
+
+            input_pending = st.text_input("📌 Next Plan / Pending Item (Akan jadi Reminder Besok)", placeholder="Contoh: Follow up Bu Susi jam 10 pagi. / Revisi desain banner.")
+
+            # BUTTON SUBMIT
+            if st.button("✅ Submit Laporan", type="primary"):
+                valid = True
+                if "Kunjungan" in kategori_aktivitas and not lokasi_input:
+                    st.error("Untuk Kunjungan, Lokasi Wajib Diisi!"); valid = False
+                if not fotos and not main_deskripsi:
+                    st.error("Deskripsi Wajib Diisi!"); valid = False
+                
+                if valid:
+                    with st.spinner("Menyimpan dan memformat database..."):
                         rows = []
                         ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
+                        final_lokasi = lokasi_input if lokasi_input else kategori_aktivitas
                         
-                        # LOGIKA DROPBOX BARU: Folder berdasarkan Kota
-                        folder_kategori = input_kota.replace("/", "_").strip() # Bersihkan nama kota biar jadi folder valid
-                        
-                        url_foto = "-"
+                        # Siapkan data tambahan (Refleksi)
+                        val_kesimpulan = input_kesimpulan if input_kesimpulan else "-"
+                        val_kendala = input_kendala if input_kendala else "-"
+                        val_pending = input_pending if input_pending else "-"
+
                         if fotos and KONEKSI_DROPBOX_BERHASIL:
-                            # Ambil foto pertama saja untuk link di sheet agar rapi, tapi semua diupload
-                            for idx, f in enumerate(fotos):
-                                temp_url = upload_ke_dropbox(f, nama_pelapor, kategori=folder_kategori)
-                                if idx == 0: url_foto = temp_url 
-                        
-                        # Susun Data (Sesuai NAMA_KOLOM_STANDAR)
-                        rows.append([
-                            ts, nama_pelapor, input_kota.upper(), input_tempat, main_deskripsi, 
-                            url_foto, sosmed_link, 
-                            input_kesimpulan if input_kesimpulan else "-", 
-                            input_kendala if input_kendala else "-", 
-                            input_pending if input_pending else "-"
-                        ])
+                            for f in fotos:
+                                url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
+                                desc = deskripsi_map.get(f.name, "-")
+                                # Append kolom baru di sini
+                                rows.append([ts, nama_pelapor, final_lokasi, desc, url, sosmed_link if sosmed_link else "-", val_kesimpulan, val_kendala, val_pending])
+                        else:
+                            rows.append([ts, nama_pelapor, final_lokasi, main_deskripsi, "-", sosmed_link if sosmed_link else "-", val_kesimpulan, val_kendala, val_pending])
                         
                         if simpan_laporan_harian_batch(rows, nama_pelapor):
-                            st.success(f"Berhasil! Foto tersimpan di folder Dropbox: /{nama_pelapor}/{folder_kategori}/")
-                            st.balloons(); st.cache_data.clear()
-                        else: st.error("Gagal simpan ke Database.")
-       
+                            st.success(f"Laporan Tersimpan! Reminder besok: {val_pending}"); st.balloons(); st.cache_data.clear()
+                        else: st.error("Gagal simpan.")
+        
         with st.expander("📂 Log Data Mentah"):
             if st.button("🔄 Refresh"): st.cache_data.clear(); st.rerun()
             df_log = load_all_reports(get_daftar_staf_terbaru())
@@ -650,15 +687,14 @@ if KONEKSI_GSHEET_BERHASIL:
                 if any(k in val_str for k in keywords_digital): return "Digital/Internal"
                 return "Kunjungan Lapangan"
             
-            # Gunakan Lokasi Spesifik untuk penentuan kategori
             df_log['Kategori'] = df_log[COL_TEMPAT].apply(get_category)
 
             days = st.selectbox("Rentang Waktu:", [7, 14, 30], index=0)
             start_date = date.today() - timedelta(days=days)
             df_filt = df_log[df_log['Tanggal'] >= start_date]
 
-            # TABS UPDATE: Ada tab baru Peta Area
-            tab_sales, tab_marketing, tab_sebaran, tab_review = st.tabs(["🚗 Sales", "💻 Marketing", "🗺️ Peta Area", "📝 Review"])
+            # TAB BARU: REVIEW HARIAN (CARD VIEW)
+            tab_sales, tab_marketing, tab_review, tab_galeri = st.tabs(["🚗 Sales (Lapangan)", "💻 Marketing (Digital)", "📝 Review Harian", "🖼️ Galeri Bukti"])
 
             with tab_sales:
                 df_sales = df_filt[df_filt['Kategori'] == "Kunjungan Lapangan"]
@@ -691,73 +727,75 @@ if KONEKSI_GSHEET_BERHASIL:
                     st.bar_chart(df_mkt[COL_TEMPAT].value_counts(), color="#00CC96")
                 else: st.info("Tidak ada data aktivitas digital.")
 
-            # --- TAB VISUALISASI SEBARAN (TREEMAP) ---
-            with tab_sebaran:
-                st.subheader("🗺️ Visualisasi Sebaran Aktivitas")
-                st.info("Grafik ini otomatis terbentuk dari input 'Kota' dan 'Lokasi Spesifik'.")
-                
-                if not df_filt.empty and COL_KOTA in df_filt.columns and COL_TEMPAT in df_filt.columns:
-                    
-                    # Hitung frekuensi kunjungan
-                    df_sebaran = df_filt.groupby([COL_KOTA, COL_TEMPAT]).size().reset_index(name='Jumlah Kunjungan')
-                    
-                    if HAS_PLOTLY:
-                        # TREEMAP: Visualisasi Kotak dalam Kotak
-                        # Kotak Besar = Kota, Kotak Kecil = Lokasi Spesifik
-                        fig_tree = px.treemap(
-                            df_sebaran, 
-                            path=[COL_KOTA, COL_TEMPAT], 
-                            values='Jumlah Kunjungan',
-                            color=COL_KOTA,
-                            title="Hierarki Kunjungan: Area > Lokasi Spesifik"
-                        )
-                        fig_tree.update_layout(margin = dict(t=50, l=25, r=25, b=25))
-                        st.plotly_chart(fig_tree, use_container_width=True)
-                    else:
-                        st.warning("Library Plotly tidak ditemukan. Menampilkan tabel data.")
-                        st.dataframe(df_sebaran)
-                    
-                    # Statistik Teks
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.write("🏙️ **Top Kota/Area:**")
-                        st.bar_chart(df_filt[COL_KOTA].value_counts())
-                    with c2:
-                        st.write("📍 **Top Lokasi Spesifik:**")
-                        st.dataframe(df_filt[COL_TEMPAT].value_counts().head(10), use_container_width=True)
-
-                else:
-                    st.warning("Data belum cukup untuk visualisasi.")
-
+            # --- FITUR BARU: REVIEW HARIAN CARD VIEW ---
             with tab_review:
                 st.subheader("📝 Review Catatan Harian")
+                st.caption("Monitoring kendala dan rencana harian tim secara detail.")
+                
+                # Urutkan dari yang terbaru
                 df_review = df_filt.sort_values(by=COL_TIMESTAMP, ascending=False)
                 
                 if not df_review.empty:
                     for index, row in df_review.iterrows():
                         with st.container(border=True):
+                            # Header: Nama & Waktu
                             c_head1, c_head2 = st.columns([3, 1])
                             with c_head1:
                                 st.markdown(f"### 👤 {row[COL_NAMA]}")
                                 st.caption(f"📅 {row[COL_TIMESTAMP]} | 🏷️ {row['Kategori']}")
                             
+                            # Isi Utama
                             c_body, c_img = st.columns([3, 1])
                             with c_body:
-                                # Menampilkan Kota dan Lokasi
-                                st.markdown(f"**📍 {row.get(COL_KOTA, '-')} > {row[COL_TEMPAT]}**")
+                                st.markdown(f"**📍 Aktivitas/Lokasi:** {row[COL_TEMPAT]}")
                                 st.markdown(f"**📝 Deskripsi:** {row[COL_DESKRIPSI]}")
+                                
                                 st.divider()
+                                # Bagian Refleksi (Kolom 3 Sejajar)
                                 col_a, col_b, col_c = st.columns(3)
-                                with col_a: st.info(f"💡 **Hasil:**\n\n{row.get(COL_KESIMPULAN, '-')}")
-                                with col_b: st.warning(f"🚧 **Kendala:**\n\n{row.get(COL_KENDALA, '-')}")
-                                with col_c: st.error(f"📌 **Pending:**\n\n{row.get(COL_PENDING, '-')}")
+                                with col_a: 
+                                    st.info(f"💡 **Hasil/Kesimpulan:**\n\n{row.get(COL_KESIMPULAN, '-')}")
+                                with col_b: 
+                                    st.warning(f"🚧 **Kendala:**\n\n{row.get(COL_KENDALA, '-')}")
+                                with col_c: 
+                                    st.error(f"📌 **Next Plan (Reminder):**\n\n{row.get(COL_PENDING, '-')}")
+
+                            # Sisi Kanan: Foto (Jika ada)
                             with c_img:
                                 if "http" in str(row[COL_LINK_FOTO]):
                                     url_asli = row[COL_LINK_FOTO]
                                     direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
-                                    st.image(direct_url, use_container_width=True)
-                                    st.link_button("Zoom", url_asli)
+                                    try:
+                                        st.image(direct_url, use_container_width=True)
+                                        st.caption("Bukti Foto")
+                                    except:
+                                        st.caption("Gagal load foto")
                 else:
-                    st.info("Belum ada data laporan.")
+                    st.info("Belum ada data laporan pada rentang waktu ini.")
+            
+            with tab_galeri:
+                st.caption("Menampilkan bukti foto/dokumen terbaru")
+                df_foto = df_filt[df_filt[COL_LINK_FOTO].str.contains("http", na=False, case=False)].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
+                
+                if not df_foto.empty:
+                    data_dict = df_foto.to_dict('records')
+                    cols = st.columns(4)
+                    for idx, row in enumerate(data_dict):
+                        with cols[idx % 4]:
+                            with st.container(border=True):
+                                url_asli = row[COL_LINK_FOTO] 
+                                nama = row[COL_NAMA]
+                                tempat = row[COL_TEMPAT]
+                                direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                                
+                                try:
+                                    st.image(direct_url, use_container_width=True)
+                                    st.markdown(f"**{nama}**")
+                                    st.caption(f"📍 {tempat}")
+                                except:
+                                    st.error("Gagal load gambar")
+                                    st.link_button("Buka Link", url_asli)
+                else: 
+                    st.info("Belum ada bukti yang terupload.")
 
 else: st.error("Database Error.")
