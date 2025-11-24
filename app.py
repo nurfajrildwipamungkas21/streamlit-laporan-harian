@@ -352,35 +352,43 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
         return True, "Berhasil update!"
     except Exception as e: return False, f"Error: {e}"
 
-# --- FUNGSI BARU: KIRIM FEEDBACK KE USER (SUDAH DIPERBAIKI) ---
+# --- FUNGSI BARU: KIRIM FEEDBACK KE USER (SMART SEARCH & RESIZE) ---
 def kirim_feedback_admin(nama_staf, timestamp_key, isi_feedback):
     try:
         ws = spreadsheet.worksheet(nama_staf)
         
-        # === FIX: AUTO-RESIZE SHEET ===
-        # Google Sheet menolak tulis di kolom J jika limit cuma I (9 kolom).
-        # Kita paksa resize jadi minimal 12 kolom agar aman.
-        if ws.col_count < 12:
-            ws.resize(cols=12)
-        # ==============================
+        # 1. RESIZE GUARD: Pastikan Sheet cukup lebar
+        if ws.col_count < 12: ws.resize(cols=12)
 
-        # Cek apakah kolom Feedback sudah ada, jika belum, tambahkan header
+        # 2. HEADER CHECK
         headers = ws.row_values(1)
         if COL_FEEDBACK not in headers:
             ws.update_cell(1, len(headers) + 1, COL_FEEDBACK)
             headers.append(COL_FEEDBACK) 
             auto_format_sheet(ws)
             
-        # Cari baris berdasarkan Timestamp
-        cell = ws.find(timestamp_key)
-        if not cell:
-            return False, "Timestamp data tidak ditemukan (Mungkin data berubah)"
-            
-        # Cari index kolom Feedback
-        col_idx = headers.index(COL_FEEDBACK) + 1
+        # 3. SMART SEARCH (Mengatasi Beda Spasi vs Strip)
+        # Ambil semua data Timestamp dari kolom 1
+        all_timestamps = ws.col_values(1)
         
-        # Update cell
-        ws.update_cell(cell.row, col_idx, isi_feedback)
+        # Fungsi kecil untuk buang semua simbol, sisakan angka saja
+        def clean_ts(text): return "".join(filter(str.isdigit, str(text)))
+        
+        target_clean = clean_ts(timestamp_key)
+        found_row = None
+        
+        for idx, val in enumerate(all_timestamps):
+            # Bandingkan angka-nya saja (contoh: 24112025132225 == 24112025132225)
+            if clean_ts(val) == target_clean:
+                found_row = idx + 1 # Google Sheet mulai dari baris 1
+                break
+        
+        if not found_row:
+            return False, f"Data tidak ditemukan. Target: {timestamp_key} vs Sheet: {all_timestamps[1] if len(all_timestamps)>1 else 'Kosong'}"
+            
+        # 4. UPDATE CELL
+        col_idx = headers.index(COL_FEEDBACK) + 1
+        ws.update_cell(found_row, col_idx, isi_feedback)
         return True, "Feedback terkirim!"
     except Exception as e:
         return False, f"Error: {e}"
@@ -821,7 +829,9 @@ if KONEKSI_GSHEET_BERHASIL:
                                     input_feed = st.text_area("Tulis Masukan/Arahan:", value=str(existing_feed), key=unique_key)
                                     if st.button("Kirim Feedback 🚀", key=f"btn_{unique_key}"):
                                         if input_feed:
-                                            res, msg = kirim_feedback_admin(row[COL_NAMA], str(row[COL_TIMESTAMP]), input_feed)
+                                            # === FIX: FORCE DATE FORMAT STRING ===
+                                            ts_str = row[COL_TIMESTAMP].strftime('%d-%m-%Y %H:%M:%S')
+                                            res, msg = kirim_feedback_admin(row[COL_NAMA], ts_str, input_feed)
                                             if res: 
                                                 st.toast(f"Feedback terkirim ke {row[COL_NAMA]}!", icon="✅")
                                                 # Optional: st.rerun()
