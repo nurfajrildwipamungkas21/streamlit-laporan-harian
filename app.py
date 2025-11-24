@@ -424,11 +424,11 @@ if KONEKSI_GSHEET_BERHASIL:
         st.header("Navigasi")
         
         if "is_manager" not in st.session_state:
-            st.session_state["is_manager"] = False
+            st.session_state["is_admin"] = False
 
         opsi_menu = ["📝 Laporan & Target"]
-        if st.session_state["is_manager"]:
-            opsi_menu.append("📊 Dashboard Manager")
+        if st.session_state["is_admin"]:
+            opsi_menu.append("📊 Dashboard Admin")
         
         menu_nav = st.radio("Pilih Menu:", opsi_menu)
         st.divider()
@@ -667,8 +667,8 @@ if KONEKSI_GSHEET_BERHASIL:
             if not df_log.empty: st.dataframe(df_log, use_container_width=True, hide_index=True)
             else: st.info("Kosong")
 
-    # --- MENU 2: DASHBOARD MANAGER ---
-    elif menu_nav == "📊 Dashboard Manager":
+    # --- MENU 2: DASHBOARD ADMIN ---
+    elif menu_nav == "📊 Dashboard Admin":
         st.header("📊 Dashboard Produktivitas")
         st.info("Dashboard ini memisahkan analisa antara Sales dan Marketing.")
         
