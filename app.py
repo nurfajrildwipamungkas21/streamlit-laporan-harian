@@ -419,11 +419,11 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 if KONEKSI_GSHEET_BERHASIL:
     if not KONEKSI_DROPBOX_BERHASIL: st.warning("⚠️ Dropbox non-aktif. Fitur foto dimatikan.")
 
-    # --- SIDEBAR (LOGIKA LOGIN MANAGER) ---
+    # --- SIDEBAR (LOGIKA LOGIN ADMIN) ---
     with st.sidebar:
         st.header("Navigasi")
         
-        if "is_manager" not in st.session_state:
+        if "is_admin" not in st.session_state:
             st.session_state["is_admin"] = False
 
         opsi_menu = ["📝 Laporan & Target"]
@@ -433,19 +433,19 @@ if KONEKSI_GSHEET_BERHASIL:
         menu_nav = st.radio("Pilih Menu:", opsi_menu)
         st.divider()
 
-        if not st.session_state["is_manager"]:
+        if not st.session_state["is_admin"]:
             with st.expander("🔐 Akses Khusus Admin"):
                 pwd = st.text_input("Password:", type="password", key="input_pwd")
                 if st.button("Login Admin"):
                     # NOTE: Password default "fayza123" jika secrets belum di-set
-                    if pwd == st.secrets.get("password_manager", "fayza123"): 
-                        st.session_state["is_manager"] = True
+                    if pwd == st.secrets.get("password_admin", "fayza123"): 
+                        st.session_state["is_admin"] = True
                         st.rerun()
                     else:
                         st.error("Password salah!")
         else:
-            if st.button("🔓 Logout Manager"):
-                st.session_state["is_manager"] = False
+            if st.button("🔓 Logout Admin"):
+                st.session_state["is_admin"] = False
                 st.rerun()
 
         st.divider()
