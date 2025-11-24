@@ -46,7 +46,7 @@ SHEET_CONFIG_NAMA = "Config_Staf"
 SHEET_TARGET_TEAM = "Target_Team_Checklist"
 SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 
-# --- KOLOM LAPORAN ---
+# --- KOLOM LAPORAN (UPDATED: Feedback Admin) ---
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
 COL_KOTA = "Kota/Area"           
@@ -57,11 +57,12 @@ COL_LINK_SOSMED = "Link Sosmed"
 COL_KESIMPULAN = "Kesimpulan"
 COL_KENDALA = "Kendala"
 COL_PENDING = "Next Plan (Pending)"
+COL_FEEDBACK = "Feedback Admin" # <--- KOLOM BARU UNTUK KOMEN
 
 NAMA_KOLOM_STANDAR = [
     COL_TIMESTAMP, COL_NAMA, COL_KOTA, COL_TEMPAT, COL_DESKRIPSI, 
     COL_LINK_FOTO, COL_LINK_SOSMED, 
-    COL_KESIMPULAN, COL_KENDALA, COL_PENDING
+    COL_KESIMPULAN, COL_KENDALA, COL_PENDING, COL_FEEDBACK
 ]
 
 # --- KONEKSI ---
@@ -125,7 +126,7 @@ def auto_format_sheet(worksheet):
             cell_format_override = {}
             width = 100
 
-            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed", "Lokasi Spesifik", "Kesimpulan", "Kendala", "Next Plan (Pending)"]:
+            if col_name in ["Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed", "Lokasi Spesifik", "Kesimpulan", "Kendala", "Next Plan (Pending)", "Feedback Admin"]:
                 width = 300
                 cell_format_override["wrapStrategy"] = "WRAP"
             elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
@@ -362,6 +363,53 @@ def get_reminder_pending(nama_staf):
         return None
     except: return None
 
+# --- FUNGSI BARU UNTUK FEEDBACK ADMIN ---
+def update_feedback_admin(nama_staf, timestamp_row, feedback_text):
+    """
+    Fungsi untuk Admin menyimpan feedback ke baris tertentu berdasarkan timestamp
+    """
+    try:
+        ws = spreadsheet.worksheet(nama_staf)
+        # Cari baris berdasarkan Timestamp
+        cell = ws.find(timestamp_row)
+        if cell:
+            row_idx = cell.row
+            # Cari kolom Feedback
+            headers = ws.row_values(1)
+            try: col_idx = headers.index(COL_FEEDBACK) + 1
+            except: 
+                # Jika kolom belum ada, buat dulu di header
+                ws.update(range_name=gspread.utils.rowcol_to_a1(1, len(headers)+1), values=[[COL_FEEDBACK]])
+                col_idx = len(headers) + 1
+            
+            # Update Feedback
+            ws.update(range_name=gspread.utils.rowcol_to_a1(row_idx, col_idx), values=[[feedback_text]], value_input_option='USER_ENTERED')
+            return True, "Feedback terkirim!"
+        else:
+            return False, "Data tidak ditemukan."
+    except Exception as e: return False, f"Error: {e}"
+
+@st.cache_data(ttl=10) # Cache sangat sebentar agar notif real-time
+def get_unread_feedback(nama_staf):
+    """
+    Mengambil feedback terbaru dari Admin untuk Staf
+    """
+    try:
+        ws = get_or_create_worksheet(nama_staf)
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        
+        if COL_FEEDBACK not in df.columns: return []
+        
+        # Ambil 5 data terakhir yang punya Feedback
+        df_feed = df[df[COL_FEEDBACK].astype(str).str.strip() != ""]
+        if df_feed.empty: return []
+        
+        # Ambil 3 feedback terakhir
+        latest_feeds = df_feed.tail(3).to_dict('records')
+        return latest_feeds
+    except: return []
+
 @st.cache_data(ttl=60)
 def load_all_reports(daftar_staf):
     all_data = []
@@ -397,7 +445,7 @@ if KONEKSI_GSHEET_BERHASIL:
     if not KONEKSI_DROPBOX_BERHASIL: st.warning("⚠️ Dropbox non-aktif. Fitur foto dimatikan.")
 
     # ===============================================
-    # SIDEBAR: SEKARANG MEMILIKI STRUKTUR YANG JELAS
+    # SIDEBAR
     # ===============================================
     with st.sidebar:
         st.header("Navigasi Utama")
@@ -405,9 +453,6 @@ if KONEKSI_GSHEET_BERHASIL:
         # LOGIKA LOGIN ADMIN
         if "is_admin" not in st.session_state: st.session_state["is_admin"] = False
 
-        # --- MENU UTAMA (DIPISAH SESUAI PERMINTAAN) ---
-        # 1. Check-in Lokasi (Fitur Khusus Pelacakan)
-        # 2. Laporan Harian (Rekap & Target)
         opsi_menu = ["📍 Check-in Lokasi", "📝 Laporan & Target"]
         
         if st.session_state["is_admin"]:
@@ -434,7 +479,6 @@ if KONEKSI_GSHEET_BERHASIL:
         st.caption("Manajemen Target (Bulk Input)")
         tab_team, tab_individu, tab_admin = st.tabs(["Team", "Pribadi", "Admin"])
 
-        # (TAB ADMIN SIDEBAR TETAP ADA UNTUK INPUT TARGET CEPAT)
         with tab_team:
             with st.form("add_team_goal", clear_on_submit=True):
                 goal_team_text = st.text_area("Target Team", height=70)
@@ -471,11 +515,21 @@ if KONEKSI_GSHEET_BERHASIL:
     st.caption(f"Realtime: {datetime.now(tz=ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y %H:%M:%S')}")
 
     # =======================================================
-    # MENU 1: 📍 CHECK-IN LOKASI (FITUR SPESIAL TERPISAH)
+    # FUNGSI NOTIFIKASI USER (DIPANGGIL DI MENU CHECKIN/LAPORAN)
+    # =======================================================
+    def show_user_notifications(nama_user):
+        feedbacks = get_unread_feedback(nama_user)
+        if feedbacks:
+            with st.container(border=True):
+                st.markdown(f"### 📩 Pesan Baru dari Admin untuk {nama_user}")
+                for feed in reversed(feedbacks): # Tampilkan yg paling baru diatas
+                    st.info(f"**[{feed[COL_TIMESTAMP]}]** Terkait aktivitas di *{feed[COL_TEMPAT]}*:\n\n💬 **Admin:** \"{feed[COL_FEEDBACK]}\"")
+
+    # =======================================================
+    # MENU 1: 📍 CHECK-IN LOKASI
     # =======================================================
     if menu_nav == "📍 Check-in Lokasi":
         st.markdown("### 📍 Live Location Tracking (Real-time)")
-        st.info("Gunakan menu ini setiap kali Anda tiba di lokasi baru atau memulai aktivitas lapangan.")
         
         with st.container(border=True):
             # 1. Identitas
@@ -485,6 +539,10 @@ if KONEKSI_GSHEET_BERHASIL:
             with c2:
                 # 2. Input Lokasi & Divisi
                 kategori_aktivitas = st.radio("Divisi/Tugas:", ["🚗 Sales", "💻 Marketing", "📞 Admin", "🏢 Lainnya"], horizontal=True)
+
+            # --- CEK NOTIFIKASI DISINI ---
+            show_user_notifications(nama_pelapor)
+            # -----------------------------
 
             st.divider()
             col_loc1, col_loc2 = st.columns(2)
@@ -512,10 +570,10 @@ if KONEKSI_GSHEET_BERHASIL:
                                 temp_url = upload_ke_dropbox(f, nama_pelapor, kategori=folder_kategori)
                                 if idx == 0: url_foto = temp_url 
                         
-                        # Simpan Data (Bagian Refleksi dikosongkan "-")
+                        # Simpan Data (Feedback kosong di awal)
                         rows.append([
                             ts, nama_pelapor, input_kota.upper(), input_tempat, main_deskripsi, 
-                            url_foto, "-", "-", "-", "-" 
+                            url_foto, "-", "-", "-", "-", "-" 
                         ])
                         
                         if simpan_laporan_harian_batch(rows, nama_pelapor):
@@ -527,8 +585,7 @@ if KONEKSI_GSHEET_BERHASIL:
     # =======================================================
     elif menu_nav == "📝 Laporan & Target":
         st.subheader("📊 Laporan & Evaluasi Harian")
-        st.caption("Gunakan menu ini di akhir hari untuk update target dan refleksi.")
-
+        
         col_dash_1, col_dash_2 = st.columns(2)
         df_team = load_checklist(SHEET_TARGET_TEAM, ["Misi", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan"])
         df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, ["Nama", "Target", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan"])
@@ -554,6 +611,11 @@ if KONEKSI_GSHEET_BERHASIL:
         with col_dash_2:
             st.markdown("#### ⚡ Target Pribadi")
             filter_nama = st.selectbox("Filter:", get_daftar_staf_terbaru(), index=0)
+            
+            # --- CEK NOTIFIKASI DISINI JUGA ---
+            show_user_notifications(filter_nama)
+            # ----------------------------------
+
             if not df_indiv_all.empty:
                 df_user = df_indiv_all[df_indiv_all["Nama"] == filter_nama]
                 if not df_user.empty:
@@ -595,13 +657,14 @@ if KONEKSI_GSHEET_BERHASIL:
                  with st.spinner("Menyimpan rekap..."):
                     rows = []
                     ts = datetime.now(tz=ZoneInfo("Asia/Jakarta")).strftime('%d-%m-%Y %H:%M:%S')
-                    # Simpan Data (Bagian Lokasi diisi "Daily Report")
+                    # Simpan Data
                     rows.append([
                         ts, nama_pelapor, "REKAP HARIAN", "Kantor/Remote", "Laporan Akhir Hari", 
                         "-", "-", 
                         input_kesimpulan if input_kesimpulan else "-", 
                         input_kendala if input_kendala else "-", 
-                        input_pending if input_pending else "-"
+                        input_pending if input_pending else "-",
+                        "-" # Feedback kosong
                     ])
                     if simpan_laporan_harian_batch(rows, nama_pelapor):
                         st.success("Rekap tersimpan!"); st.cache_data.clear()
@@ -612,7 +675,7 @@ if KONEKSI_GSHEET_BERHASIL:
             if not df_log.empty: st.dataframe(df_log, use_container_width=True, hide_index=True)
 
     # =======================================================
-    # MENU 3: 📊 DASHBOARD ADMIN
+    # MENU 3: 📊 DASHBOARD ADMIN (DENGAN FITUR KOMENTAR)
     # =======================================================
     elif menu_nav == "📊 Dashboard Admin":
         st.header("📊 Dashboard Produktivitas")
@@ -635,7 +698,7 @@ if KONEKSI_GSHEET_BERHASIL:
             days = st.selectbox("Rentang Waktu:", [7, 14, 30], index=0)
             df_filt = df_log[df_log['Tanggal'] >= (date.today() - timedelta(days=days))]
 
-            tab_sales, tab_marketing, tab_sebaran, tab_review = st.tabs(["🚗 Sales", "💻 Marketing", "🗺️ Peta Area", "📝 Review"])
+            tab_sales, tab_marketing, tab_sebaran, tab_review = st.tabs(["🚗 Sales", "💻 Marketing", "🗺️ Peta Area", "📝 Review & Feedback"])
 
             with tab_sales:
                 df_sales = df_filt[df_filt['Kategori'] == "Kunjungan Lapangan"]
@@ -657,7 +720,7 @@ if KONEKSI_GSHEET_BERHASIL:
             with tab_sebaran:
                 st.subheader("🗺️ Visualisasi Sebaran Aktivitas")
                 if not df_filt.empty and COL_KOTA in df_filt.columns and COL_TEMPAT in df_filt.columns:
-                    # Filter Out Rekap Harian agar peta bersih
+                    # Filter Out Rekap Harian
                     df_map = df_filt[df_filt[COL_KOTA] != "REKAP HARIAN"]
                     df_sebaran = df_map.groupby([COL_KOTA, COL_TEMPAT]).size().reset_index(name='Jumlah Kunjungan')
                     
@@ -669,7 +732,9 @@ if KONEKSI_GSHEET_BERHASIL:
                         st.plotly_chart(fig_tree, use_container_width=True)
                     else: st.dataframe(df_sebaran)
 
+            # --- TAB REVIEW DENGAN FITUR KOMENTAR ---
             with tab_review:
+                st.info("💡 Anda bisa memberikan komentar langsung pada setiap kartu aktivitas. Komentar akan muncul sebagai notifikasi saat staf membuka aplikasi.")
                 df_review = df_filt.sort_values(by=COL_TIMESTAMP, ascending=False)
                 if not df_review.empty:
                     for index, row in df_review.iterrows():
@@ -686,6 +751,23 @@ if KONEKSI_GSHEET_BERHASIL:
                                 col_a, col_b = st.columns(2)
                                 with col_a: st.info(f"💡 {row.get(COL_KESIMPULAN, '-')}")
                                 with col_b: st.error(f"📌 {row.get(COL_PENDING, '-')}")
+                                
+                                # --- FITUR KIRIM FEEDBACK ---
+                                st.markdown("---")
+                                existing_feedback = row.get(COL_FEEDBACK, "")
+                                if existing_feedback and str(existing_feedback).strip() != "":
+                                    st.caption(f"✅ Feedback Terkirim: {existing_feedback}")
+                                
+                                with st.expander("💬 Beri Komentar / Feedback"):
+                                    feed_key = f"feed_{index}_{row[COL_TIMESTAMP]}"
+                                    feedback_text = st.text_area("Pesan untuk staf:", key=feed_key)
+                                    if st.button("Kirim Note", key=f"btn_{feed_key}"):
+                                        if feedback_text:
+                                            res, msg = update_feedback_admin(row[COL_NAMA], str(row[COL_TIMESTAMP]), feedback_text)
+                                            if res: st.success("Terkirim!"); st.cache_data.clear()
+                                            else: st.error(msg)
+                                # ----------------------------
+
                             with c_img:
                                 if "http" in str(row[COL_LINK_FOTO]):
                                     url = row[COL_LINK_FOTO].replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
