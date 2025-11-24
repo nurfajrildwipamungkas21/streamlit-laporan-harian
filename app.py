@@ -352,11 +352,18 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
         return True, "Berhasil update!"
     except Exception as e: return False, f"Error: {e}"
 
-# --- FUNGSI BARU: KIRIM FEEDBACK KE USER ---
+# --- FUNGSI BARU: KIRIM FEEDBACK KE USER (SUDAH DIPERBAIKI) ---
 def kirim_feedback_admin(nama_staf, timestamp_key, isi_feedback):
     try:
         ws = spreadsheet.worksheet(nama_staf)
         
+        # === FIX: AUTO-RESIZE SHEET ===
+        # Google Sheet menolak tulis di kolom J jika limit cuma I (9 kolom).
+        # Kita paksa resize jadi minimal 12 kolom agar aman.
+        if ws.col_count < 12:
+            ws.resize(cols=12)
+        # ==============================
+
         # Cek apakah kolom Feedback sudah ada, jika belum, tambahkan header
         headers = ws.row_values(1)
         if COL_FEEDBACK not in headers:
