@@ -481,8 +481,8 @@ if KONEKSI_GSHEET_BERHASIL:
             with st.expander("🔐 Akses Khusus Admin"):
                 pwd = st.text_input("Password:", type="password", key="input_pwd")
                 if st.button("Login Admin"):
-                    # NOTE: Password default "fayza123" jika secrets belum di-set
-                    if pwd == st.secrets.get("password_admin", "fayza123"): 
+                    # NOTE: Password default "fajril123" jika secrets belum di-set
+                    if pwd == st.secrets.get("password_admin", "fajril123"): 
                         st.session_state["is_admin"] = True
                         st.rerun()
                     else:
