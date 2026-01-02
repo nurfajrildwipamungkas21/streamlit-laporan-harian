@@ -143,17 +143,6 @@ def _default_pos_aliases() -> Dict[str, str]:
     }
 
 
-def get_pos_aliases() -> Dict[str, str]:
-    user_alias = APP_CFG.get("position_aliases", {}) or {}
-    merged = _default_pos_aliases()
-    for k, v in dict(user_alias).items():
-        kk = normalize_posisi(str(k))
-        vv = normalize_posisi(str(v))
-        if kk and vv:
-            merged[kk] = vv
-    return merged
-
-
 def normalize_posisi(text: str) -> str:
     t = str(text or "").strip().lower()
     if not t:
@@ -163,6 +152,17 @@ def normalize_posisi(text: str) -> str:
     t = re.sub(r"[^a-z0-9\s]+", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     return t
+
+
+def get_pos_aliases() -> Dict[str, str]:
+    user_alias = APP_CFG.get("position_aliases", {}) or {}
+    merged = _default_pos_aliases()
+    for k, v in dict(user_alias).items():
+        kk = normalize_posisi(str(k))
+        vv = normalize_posisi(str(v))
+        if kk and vv:
+            merged[kk] = vv
+    return merged
 
 
 def canonicalize_posisi(raw_pos: str, known_canon: Optional[List[str]] = None) -> str:
@@ -207,8 +207,25 @@ def ts_to_datekey(ts: str) -> str:
 
 
 def parse_ts(ts: str) -> Optional[datetime]:
+    """
+    Lebih robust:
+    - Mendukung "03-01-2026 00:53:20"
+    - Mendukung "03-01-2026 0:53:20" (kadang muncul dari tampilan/hasil konversi)
+    """
+    s = str(ts or "").strip()
+    if not s:
+        return None
+
+    # Normalisasi jam 1 digit -> 2 digit
+    # contoh: "03-01-2026 0:53:20" -> "03-01-2026 00:53:20"
+    m = re.match(r"^(\d{2}-\d{2}-\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$", s)
+    if m:
+        date_part, hh, mm, ss = m.groups()
+        hh2 = hh.zfill(2)
+        s = f"{date_part} {hh2}:{mm}:{ss}"
+
     try:
-        return datetime.strptime(str(ts).strip(), "%d-%m-%Y %H:%M:%S")
+        return datetime.strptime(s, "%d-%m-%Y %H:%M:%S")
     except Exception:
         return None
 
@@ -469,10 +486,13 @@ def get_today_data_and_rekap() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any
 
 def build_absensi_excel_bytes(hadir_today: List[Dict[str, Any]], today_key: str) -> bytes:
     """
-    Export Excel (.xlsx) yang rapi:
-    - Timestamp format
-    - No HP TEXT (tidak scientific)
-    - Bukti Foto hyperlink label (bukan URL panjang)
+    Export Excel (.xlsx) yang benar-benar rapi untuk HRD:
+    - Header bold + background
+    - Freeze header + auto filter
+    - Timestamp jadi datetime (format dd-mm-yyyy hh:mm:ss)
+    - No HP sebagai TEXT (anti scientific, leading zero aman)
+    - Bukti foto berupa hyperlink dengan label (bukan URL panjang)
+    - Lebar kolom nyaman dibaca
     """
     wb = Workbook()
     ws = wb.active
@@ -495,18 +515,20 @@ def build_absensi_excel_bytes(hadir_today: List[Dict[str, Any]], today_key: str)
     # Freeze header
     ws.freeze_panes = "A2"
 
-    # Column widths (biar tidak #####)
+    # Column widths
     widths = {
         1: 20,  # Timestamp
-        2: 22,  # Nama
-        3: 16,  # No HP
+        2: 24,  # Nama
+        3: 18,  # No HP
         4: 18,  # Posisi
-        5: 38,  # Bukti Foto
+        5: 32,  # Bukti Foto
     }
     for c, w in widths.items():
         ws.column_dimensions[get_column_letter(c)].width = w
 
-    body_align = Alignment(vertical="center", wrap_text=False)
+    # Alignment body
+    align_center = Alignment(horizontal="center", vertical="center", wrap_text=False)
+    align_left = Alignment(horizontal="left", vertical="center", wrap_text=False)
 
     row_num = 2
     for r in hadir_today:
@@ -516,31 +538,32 @@ def build_absensi_excel_bytes(hadir_today: List[Dict[str, Any]], today_key: str)
         posisi = str(r.get("Posisi", "")).strip()
         selfie_url = str(r.get("Selfie URL", "")).strip()
 
-        # Timestamp: simpan sebagai datetime jika bisa, biar format bener
+        # Timestamp
         dt_obj = parse_ts(ts_str)
+        c_ts = ws.cell(row=row_num, column=1, value=dt_obj if dt_obj else ts_str)
         if dt_obj:
-            ws.cell(row=row_num, column=1, value=dt_obj)
-            ws.cell(row=row_num, column=1).number_format = "dd-mm-yyyy hh:mm:ss"
-        else:
-            ws.cell(row=row_num, column=1, value=ts_str)
+            c_ts.number_format = "dd-mm-yyyy hh:mm:ss"
+        c_ts.alignment = align_center
 
-        ws.cell(row=row_num, column=2, value=nama)
+        # Nama
+        c_nama = ws.cell(row=row_num, column=2, value=nama)
+        c_nama.alignment = align_left
 
-        # No HP WA sebagai TEXT (anti scientific + leading zero aman)
+        # No HP sebagai TEXT
         c_hp = ws.cell(row=row_num, column=3, value=hp)
         c_hp.number_format = "@"
+        c_hp.alignment = align_center
 
-        ws.cell(row=row_num, column=4, value=posisi)
+        # Posisi
+        c_pos = ws.cell(row=row_num, column=4, value=posisi)
+        c_pos.alignment = align_left
 
-        # Bukti foto sebagai hyperlink label
+        # Link bukti foto (label)
         c_link = ws.cell(row=row_num, column=5, value="Bukti Foto" if selfie_url else "-")
+        c_link.alignment = align_center
         if selfie_url:
             c_link.hyperlink = selfie_url
-            c_link.font = Font(color="0563C1", underline="single")  # gaya hyperlink excel
-
-        # Alignment body
-        for col_idx in range(1, 6):
-            ws.cell(row=row_num, column=col_idx).alignment = body_align
+            c_link.font = Font(color="0563C1", underline="single")
 
         row_num += 1
 
@@ -775,10 +798,10 @@ try:
                 hide_index=True
             )
 
-        # ✅ HANYA 1 TOMBOL DOWNLOAD (lebih jelas untuk HRD)
+        # ✅ HANYA 1 TOMBOL DOWNLOAD (XLSX SAJA, PALING RAPI)
         excel_bytes = build_absensi_excel_bytes(hadir_today, today_key2)
         st.download_button(
-            "⬇️ Download Data Absensi Hari Ini (Excel)",
+            "⬇️ Download Data Hadir Hari Ini (Excel .xlsx)",
             data=excel_bytes,
             file_name=f"absensi_harian_{today_key2}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
