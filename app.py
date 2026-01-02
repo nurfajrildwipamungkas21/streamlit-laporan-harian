@@ -6,6 +6,7 @@ import io
 import difflib
 from collections import Counter
 from typing import Optional, Tuple, List, Dict, Any
+import csv
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -58,6 +59,7 @@ SHEET_COLUMNS = [
 # HELPERS
 # =========================
 def get_mode() -> str:
+    """Baca query param ?mode=absen/admin dgn fallback ke API lama."""
     try:
         return str(st.query_params.get("mode", "")).strip().lower()
     except Exception:
@@ -66,6 +68,7 @@ def get_mode() -> str:
 
 
 def get_token_from_url() -> str:
+    """Ambil token dari query param ?token=..."""
     try:
         return str(st.query_params.get("token", "")).strip()
     except Exception:
@@ -74,6 +77,7 @@ def get_token_from_url() -> str:
 
 
 def sanitize_name(text: str) -> str:
+    """Bersihkan nama dari karakter aneh + spasi berlebih."""
     text = str(text).strip()
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"[^A-Za-z0-9 _.-]", "", text)
@@ -81,17 +85,20 @@ def sanitize_name(text: str) -> str:
 
 
 def sanitize_phone(text: str) -> str:
+    """Ambil hanya digit (dan + di depan bila ada)."""
     text = str(text).strip()
     if text.startswith("+"):
         return "+" + re.sub(r"\D", "", text[1:])
     return re.sub(r"\D", "", text)
 
 
-def now_local():
+def now_local() -> datetime:
+    """Waktu lokal sesuai TZ_NAME."""
     return datetime.now(tz=ZoneInfo(TZ_NAME))
 
 
 def build_qr_png(url: str) -> bytes:
+    """Generate QR code PNG dari URL."""
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -107,6 +114,7 @@ def build_qr_png(url: str) -> bytes:
 
 
 def make_hyperlink(url: str, label: str = "Bukti Foto") -> str:
+    """Formula HYPERLINK untuk Google Sheet."""
     if not url or url == "-":
         return "-"
     safe = url.replace('"', '""')
@@ -155,6 +163,7 @@ def normalize_posisi(text: str) -> str:
 
 
 def get_pos_aliases() -> Dict[str, str]:
+    """Gabung alias default + alias custom (dari secrets)."""
     user_alias = APP_CFG.get("position_aliases", {}) or {}
     merged = _default_pos_aliases()
     for k, v in dict(user_alias).items():
@@ -166,6 +175,7 @@ def get_pos_aliases() -> Dict[str, str]:
 
 
 def canonicalize_posisi(raw_pos: str, known_canon: Optional[List[str]] = None) -> str:
+    """Normalisasi + mapping ke posisi kanonik."""
     base = normalize_posisi(raw_pos)
     if not base:
         return ""
@@ -174,15 +184,17 @@ def canonicalize_posisi(raw_pos: str, known_canon: Optional[List[str]] = None) -
     if base in aliases:
         return aliases[base]
 
-    candidates = []
+    candidates: List[str] = []
     if known_canon:
         candidates.extend([c for c in known_canon if c])
 
     candidates.extend(list(set(aliases.values())))
+    # Buang duplikat tapi jaga urutan
     candidates = list(dict.fromkeys(candidates))
 
     if candidates:
-        best = difflib.get_close_matches(base, candidates, n=1, cutoff=0.92)  # ketat, anti salah merge
+        # cutoff tinggi supaya tidak nyasar
+        best = difflib.get_close_matches(base, candidates, n=1, cutoff=0.92)
         if best:
             return best[0]
 
@@ -190,12 +202,14 @@ def canonicalize_posisi(raw_pos: str, known_canon: Optional[List[str]] = None) -
 
 
 def display_posisi(norm: str) -> str:
+    """Posisi untuk display (kapital tiap kata)."""
     if not norm:
         return "-"
     return " ".join([w.capitalize() for w in norm.split(" ")])
 
 
 def ts_to_datekey(ts: str) -> str:
+    """Ambil bagian tanggal dari timestamp string (dd-mm-YYYY)."""
     s = str(ts or "").strip()
     if len(s) >= 10 and s[2:3] == "-" and s[5:6] == "-":
         return s[:10]
@@ -210,14 +224,13 @@ def parse_ts(ts: str) -> Optional[datetime]:
     """
     Lebih robust:
     - Mendukung "03-01-2026 00:53:20"
-    - Mendukung "03-01-2026 0:53:20" (kadang muncul dari tampilan/hasil konversi)
+    - Mendukung "03-01-2026 0:53:20" (jam 1 digit)
     """
     s = str(ts or "").strip()
     if not s:
         return None
 
     # Normalisasi jam 1 digit -> 2 digit
-    # contoh: "03-01-2026 0:53:20" -> "03-01-2026 00:53:20"
     m = re.match(r"^(\d{2}-\d{2}-\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$", s)
     if m:
         date_part, hh, mm, ss = m.groups()
@@ -230,7 +243,8 @@ def parse_ts(ts: str) -> Optional[datetime]:
         return None
 
 
-def auto_format_absensi_sheet(ws):
+def auto_format_absensi_sheet(ws) -> None:
+    """Format sheet Google agar rapi (sekali saja, dipanggil saat init/update header)."""
     try:
         sheet_id = ws.id
         all_values = ws.get_all_values()
@@ -243,7 +257,12 @@ def auto_format_absensi_sheet(ws):
         for i, w in enumerate(col_widths):
             requests.append({
                 "updateDimensionProperties": {
-                    "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": i, "endIndex": i + 1},
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": i,
+                        "endIndex": i + 1
+                    },
                     "properties": {"pixelSize": w},
                     "fields": "pixelSize"
                 }
@@ -252,7 +271,11 @@ def auto_format_absensi_sheet(ws):
         # Header style
         requests.append({
             "repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1
+                },
                 "cell": {"userEnteredFormat": {
                     "textFormat": {"bold": True},
                     "horizontalAlignment": "CENTER",
@@ -267,7 +290,10 @@ def auto_format_absensi_sheet(ws):
         # Freeze header
         requests.append({
             "updateSheetProperties": {
-                "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
+                "properties": {
+                    "sheetId": sheet_id,
+                    "gridProperties": {"frozenRowCount": 1}
+                },
                 "fields": "gridProperties.frozenRowCount"
             }
         })
@@ -275,8 +301,15 @@ def auto_format_absensi_sheet(ws):
         # Body default format
         requests.append({
             "repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": row_count},
-                "cell": {"userEnteredFormat": {"verticalAlignment": "MIDDLE", "wrapStrategy": "CLIP"}},
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "endRowIndex": row_count
+                },
+                "cell": {"userEnteredFormat": {
+                    "verticalAlignment": "MIDDLE",
+                    "wrapStrategy": "CLIP"
+                }},
                 "fields": "userEnteredFormat(verticalAlignment,wrapStrategy)"
             }
         })
@@ -284,15 +317,31 @@ def auto_format_absensi_sheet(ws):
         # Center: Timestamp (A) & No HP (C)
         requests.append({
             "repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": row_count, "startColumnIndex": 0, "endColumnIndex": 1},
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "endRowIndex": row_count,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": 1
+                },
+                "cell": {"userEnteredFormat": {
+                    "horizontalAlignment": "CENTER"
+                }},
                 "fields": "userEnteredFormat(horizontalAlignment)"
             }
         })
         requests.append({
             "repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": row_count, "startColumnIndex": 2, "endColumnIndex": 3},
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER"}},
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "endRowIndex": row_count,
+                    "startColumnIndex": 2,
+                    "endColumnIndex": 3
+                },
+                "cell": {"userEnteredFormat": {
+                    "horizontalAlignment": "CENTER"
+                }},
                 "fields": "userEnteredFormat(horizontalAlignment)"
             }
         })
@@ -300,14 +349,26 @@ def auto_format_absensi_sheet(ws):
         # Wrap Dropbox Path (F) & Selfie Raw (H)
         requests.append({
             "repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": row_count, "startColumnIndex": 5, "endColumnIndex": 6},
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "endRowIndex": row_count,
+                    "startColumnIndex": 5,
+                    "endColumnIndex": 6
+                },
                 "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP"}},
                 "fields": "userEnteredFormat(wrapStrategy)"
             }
         })
         requests.append({
             "repeatCell": {
-                "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": row_count, "startColumnIndex": 7, "endColumnIndex": 8},
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "endRowIndex": row_count,
+                    "startColumnIndex": 7,
+                    "endColumnIndex": 8
+                },
                 "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP"}},
                 "fields": "userEnteredFormat(wrapStrategy)"
             }
@@ -322,6 +383,7 @@ def auto_format_absensi_sheet(ws):
 
 @st.cache_resource
 def connect_gsheet():
+    """Koneksi ke Google Sheet utama."""
     if "gcp_service_account" not in st.secrets:
         raise RuntimeError("GSheet secrets tidak ditemukan: gcp_service_account")
 
@@ -331,6 +393,7 @@ def connect_gsheet():
     ]
     creds_dict = dict(st.secrets["gcp_service_account"])
     if "private_key" in creds_dict:
+        # private_key di secrets biasanya escape '\n'
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
@@ -339,10 +402,15 @@ def connect_gsheet():
 
 
 def get_or_create_ws(spreadsheet):
+    """Ambil worksheet log; buat + set header bila belum ada."""
     try:
         ws = spreadsheet.worksheet(WORKSHEET_NAME)
     except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=WORKSHEET_NAME, rows=5000, cols=len(SHEET_COLUMNS))
+        ws = spreadsheet.add_worksheet(
+            title=WORKSHEET_NAME,
+            rows=5000,
+            cols=len(SHEET_COLUMNS)
+        )
         ws.append_row(SHEET_COLUMNS, value_input_option="USER_ENTERED")
         auto_format_absensi_sheet(ws)
         return ws
@@ -358,6 +426,7 @@ def get_or_create_ws(spreadsheet):
 
 @st.cache_resource
 def connect_dropbox():
+    """Koneksi ke Dropbox untuk simpan selfie."""
     if "dropbox" not in st.secrets or "access_token" not in st.secrets["dropbox"]:
         raise RuntimeError("Dropbox secrets tidak ditemukan: dropbox.access_token")
 
@@ -373,6 +442,7 @@ def upload_selfie_to_dropbox(
     ts_file: str,
     ext: str
 ) -> Tuple[str, str]:
+    """Upload selfie ke Dropbox, return (public_raw_url, path)."""
     clean_name = sanitize_name(nama).replace(" ", "_") or "Unknown"
     filename = f"{ts_file}_selfie{ext}"
     path = f"{DROPBOX_ROOT}/{clean_name}/{filename}"
@@ -398,6 +468,7 @@ def upload_selfie_to_dropbox(
 
 
 def detect_ext_and_mime(mime: str) -> str:
+    """Tentukan ekstensi dari mime type camera/uploader."""
     mime = (mime or "").lower()
     if "png" in mime:
         return ".png"
@@ -405,6 +476,7 @@ def detect_ext_and_mime(mime: str) -> str:
 
 
 def get_selfie_bytes(selfie_cam, selfie_upload) -> Tuple[Optional[bytes], str]:
+    """Ambil bytes selfie dari camera_input atau file_uploader."""
     if selfie_cam is not None:
         mime = getattr(selfie_cam, "type", "") or ""
         return selfie_cam.getvalue(), detect_ext_and_mime(mime)
@@ -417,6 +489,7 @@ def get_selfie_bytes(selfie_cam, selfie_upload) -> Tuple[Optional[bytes], str]:
 
 
 def already_checked_in_today(ws, hp_clean: str, today_key: str) -> Tuple[bool, str]:
+    """Cek apakah nomor HP sudah absen hari ini."""
     hp_clean = (hp_clean or "").strip()
     if not hp_clean:
         return False, ""
@@ -434,13 +507,15 @@ def already_checked_in_today(ws, hp_clean: str, today_key: str) -> Tuple[bool, s
 
 @st.cache_data(ttl=30)
 def get_today_data_and_rekap() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int, str]:
+    """Ambil data hadir hari ini + rekap posisi dari GSheet (cache 30 detik)."""
     sh = connect_gsheet()
     ws = get_or_create_ws(sh)
 
     today_key = now_local().strftime("%d-%m-%Y")
     records = ws.get_all_records(default_blank="")
 
-    known = []
+    # Bangun referensi posisi kanonik dari data hari ini
+    known: List[str] = []
     for r in records:
         if ts_to_datekey(r.get(COL_TIMESTAMP, "")) != today_key:
             continue
@@ -450,7 +525,7 @@ def get_today_data_and_rekap() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any
     known = list(dict.fromkeys(known))
 
     hadir_today: List[Dict[str, Any]] = []
-    counter = Counter()
+    counter: Counter = Counter()
 
     for r in records:
         ts = r.get(COL_TIMESTAMP, "")
@@ -480,7 +555,10 @@ def get_today_data_and_rekap() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any
         })
 
     total = sum(counter.values())
-    rekap_rows = [{"Posisi": k, "Jumlah": v} for k, v in sorted(counter.items(), key=lambda x: (-x[1], x[0]))]
+    rekap_rows = [
+        {"Posisi": k, "Jumlah": v}
+        for k, v in sorted(counter.items(), key=lambda x: (-x[1], x[0]))
+    ]
     return hadir_today, rekap_rows, total, today_key
 
 
@@ -568,11 +646,36 @@ def build_absensi_excel_bytes(hadir_today: List[Dict[str, Any]], today_key: str)
         row_num += 1
 
     # Auto filter
-    ws.auto_filter.ref = f"A1:E{max(1, row_num-1)}"
+    ws.auto_filter.ref = f"A1:E{max(1, row_num - 1)}"
 
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def build_absensi_csv_bytes(hadir_today: List[Dict[str, Any]], today_key: str) -> bytes:
+    """
+    Export CSV yang tetap ramah Excel:
+    - Nomor HP dipaksa sebagai text (=\"08...\")
+    - Encoding UTF-8 dengan BOM agar karakter non-ASCII aman
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Timestamp", "Nama", "No HP/WA", "Posisi", "Selfie URL"])
+
+    for r in hadir_today:
+        ts_str = str(r.get("Timestamp", "")).strip()
+        nama = str(r.get("Nama", "")).strip()
+        hp = str(r.get("No HP/WA", "")).strip()
+        posisi = str(r.get("Posisi", "")).strip()
+        selfie_url = str(r.get("Selfie URL", "")).strip()
+
+        # Trik agar Excel baca sebagai text, bukan angka / scientific
+        hp_text = f'="{hp}"' if hp else ""
+        writer.writerow([ts_str, nama, hp_text, posisi, selfie_url])
+
+    # UTF-8 with BOM supaya Excel langsung kenali encoding
+    return buf.getvalue().encode("utf-8-sig")
 
 
 # =========================
@@ -692,7 +795,7 @@ if submit:
 
     img_bytes, ext = get_selfie_bytes(selfie_cam, selfie_upload)
 
-    errors = []
+    errors: List[str] = []
     if not nama_clean:
         errors.append("• Nama wajib diisi.")
     if not hp_clean or len(hp_clean.replace("+", "")) < 8:
@@ -716,13 +819,20 @@ if submit:
             exists, last_ts = already_checked_in_today(ws, hp_clean, today_key)
             if exists:
                 st.session_state.saving = False
-                st.warning(f"No HP/WA ini sudah absen hari ini (terakhir: {last_ts}). Jika itu salah, hubungi admin.")
+                st.warning(
+                    f"No HP/WA ini sudah absen hari ini (terakhir: {last_ts}). "
+                    f"Jika itu salah, hubungi admin."
+                )
                 st.stop()
 
             # referensi canon posisi hari ini
             try:
                 hadir_today_cache, _, _, _ = get_today_data_and_rekap()
-                known_canon = [normalize_posisi(x.get("Posisi", "")) for x in hadir_today_cache if x.get("Posisi")]
+                known_canon = [
+                    normalize_posisi(x.get("Posisi", ""))
+                    for x in hadir_today_cache
+                    if x.get("Posisi")
+                ]
                 known_canon = [k for k in known_canon if k]
             except Exception:
                 known_canon = []
@@ -730,7 +840,9 @@ if submit:
             posisi_norm = canonicalize_posisi(posisi_raw, known_canon=known_canon)
 
             dbx = connect_dropbox()
-            link_selfie_raw, dbx_path = upload_selfie_to_dropbox(dbx, img_bytes, nama_clean, ts_file, ext)
+            link_selfie_raw, dbx_path = upload_selfie_to_dropbox(
+                dbx, img_bytes, nama_clean, ts_file, ext
+            )
 
             link_cell = make_hyperlink(link_selfie_raw, "Bukti Foto")
 
@@ -798,13 +910,23 @@ try:
                 hide_index=True
             )
 
-        # ✅ HANYA 1 TOMBOL DOWNLOAD (XLSX SAJA, PALING RAPI)
+        # Download laporan: Excel rapi (utama) + CSV mentah (opsional)
         excel_bytes = build_absensi_excel_bytes(hadir_today, today_key2)
+        csv_bytes = build_absensi_csv_bytes(hadir_today, today_key2)
+
         st.download_button(
-            "⬇️ Download Data Hadir Hari Ini (Excel .xlsx)",
+            "⬇️ Download Data Hadir (Excel .xlsx) – Disarankan",
             data=excel_bytes,
             file_name=f"absensi_harian_{today_key2}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+        st.download_button(
+            "⬇️ Download Data Hadir (CSV mentah)",
+            data=csv_bytes,
+            file_name=f"absensi_harian_{today_key2}.csv",
+            mime="text/csv",
             use_container_width=True
         )
 
