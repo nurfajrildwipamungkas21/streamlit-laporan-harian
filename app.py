@@ -68,17 +68,16 @@ COL_KENDALA = "Kendala"
 COL_PENDING = "Next Plan (Pending)"
 # === UPDATE FITUR FEEDBACK ===
 COL_FEEDBACK = "Feedback Lead"
-# === FITUR BARU: INTEREST (PERSENTASE) ===
+
+# === FITUR BARU: INTEREST (%) ===
 COL_INTEREST = "Interest (%)"
 
-# NOTE:
-# Kolom Interest ditambahkan di AKHIR agar tidak menggeser kolom lama pada sheet yang sudah ada.
 NAMA_KOLOM_STANDAR = [
     COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI,
     COL_LINK_FOTO, COL_LINK_SOSMED,
     COL_KESIMPULAN, COL_KENDALA, COL_PENDING,
-    COL_FEEDBACK,
-    COL_INTEREST  # Menambahkan kolom Interest (baru) di akhir
+    COL_FEEDBACK,          # kolom feedback tetap
+    COL_INTEREST           # ✅ kolom baru: Interest (%)
 ]
 
 # --- KONEKSI ---
@@ -160,9 +159,9 @@ def auto_format_sheet(worksheet):
                 cell_format_override["horizontalAlignment"] = "CENTER"
             elif col_name == "Nama":
                 width = 150
-            # === FITUR BARU: FORMAT KOLOM INTEREST ===
-            elif col_name == COL_INTEREST or col_name == "Interest (%)":
-                width = 120
+            # ✅ FORMAT KOLOM BARU INTEREST
+            elif col_name in ["Interest (%)"]:
+                width = 140
                 cell_format_override["horizontalAlignment"] = "CENTER"
 
             requests.append({
@@ -405,21 +404,11 @@ def kirim_feedback_admin(nama_staf, timestamp_key, isi_feedback):
 def simpan_laporan_harian_batch(list_of_rows, nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
-
-        # Pastikan header update jika ada kolom baru (tanpa menggeser kolom lama)
+        # Pastikan header update jika ada kolom baru
         current_header = ws.row_values(1)
-
-        # Tambah kolom yang hilang ke AKHIR agar tidak merusak mapping data lama
-        missing_cols = [c for c in NAMA_KOLOM_STANDAR if c not in current_header]
-        if missing_cols or len(current_header) < len(NAMA_KOLOM_STANDAR):
-            new_header = current_header.copy() if current_header else []
-            for c in NAMA_KOLOM_STANDAR:
-                if c not in new_header:
-                    new_header.append(c)
-
-            if ws.col_count < len(new_header):
-                ws.resize(cols=len(new_header))
-            ws.update(range_name="A1", values=[new_header], value_input_option='USER_ENTERED')
+        if len(current_header) < len(NAMA_KOLOM_STANDAR):
+            ws.resize(cols=len(NAMA_KOLOM_STANDAR))
+            ws.update(range_name="A1", values=[NAMA_KOLOM_STANDAR], value_input_option='USER_ENTERED')
 
         ws.append_rows(list_of_rows, value_input_option='USER_ENTERED')
         auto_format_sheet(ws)
@@ -458,15 +447,7 @@ def load_all_reports(daftar_staf):
                 d = ws.get_all_records()
                 if d: all_data.extend(d)
         except: pass
-
-    df = pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
-
-    # Pastikan semua kolom standar ada (termasuk kolom baru Interest)
-    for c in NAMA_KOLOM_STANDAR:
-        if c not in df.columns:
-            df[c] = ""
-
-    return df
+    return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
 def render_hybrid_table(df_data, unique_key, main_text_col):
     use_aggrid_attempt = HAS_AGGRID
@@ -718,18 +699,16 @@ if KONEKSI_GSHEET_BERHASIL:
             with col_ref_1:
                 input_kesimpulan = st.text_area("💡 Kesimpulan / Apa yang dicapai hari ini?", height=100, placeholder="Contoh: Klien setuju, tapi minta diskon. / Konten sudah jadi 3 feeds.")
 
-                # === FITUR BARU: INPUT INTEREST (PERSENTASE) ===
-                # Diminta khusus untuk kunjungan pribadi => kita tampilkan saat kategori = Sales
-                input_interest = "-"
-                if kategori_aktivitas == "🚗 Sales":
-                    input_interest = st.radio(
-                        "📈 Tingkat Interest (Presentase)",
-                        ["Under 50% (A)", "50-75% (B)", "75%-100%"],
-                        horizontal=True
-                    )
-
             with col_ref_2:
                 input_kendala = st.text_area("🚧 Kendala / Masalah?", height=100, placeholder="Contoh: Hujan deras jadi telat. / Laptop agak lemot render video.")
+
+            # ✅ FITUR BARU (MUNCUL DI KESIMPULAN HARIAN): INTEREST (%)
+            input_interest = st.radio(
+                "📈 Tingkat Interest (Presentase)",
+                ["Under 50% (A)", "50-75% (B)", "75%-100%"],
+                horizontal=True,
+                key="interest_persen"
+            )
 
             input_pending = st.text_input("📌 Next Plan / Pending Item (Akan jadi Reminder Besok)", placeholder="Contoh: Follow up Bu Susi jam 10 pagi. / Revisi desain banner.")
 
@@ -752,28 +731,17 @@ if KONEKSI_GSHEET_BERHASIL:
                         val_kendala = input_kendala if input_kendala else "-"
                         val_pending = input_pending if input_pending else "-"
                         val_feedback = ""  # Kosong saat inisialisasi awal
-                        val_interest = input_interest if input_interest else "-"  # === BARU ===
+                        val_interest = input_interest if input_interest else "-"  # ✅ BARU
 
                         if fotos and KONEKSI_DROPBOX_BERHASIL:
                             for f in fotos:
                                 url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
                                 desc = deskripsi_map.get(f.name, "-")
-                                # Append kolom baru di sini (Interest di akhir)
-                                rows.append([
-                                    ts, nama_pelapor, final_lokasi, desc,
-                                    url, sosmed_link if sosmed_link else "-",
-                                    val_kesimpulan, val_kendala, val_pending,
-                                    val_feedback,
-                                    val_interest
-                                ])
+                                # ✅ Append kolom Interest (%) di akhir
+                                rows.append([ts, nama_pelapor, final_lokasi, desc, url, sosmed_link if sosmed_link else "-", val_kesimpulan, val_kendala, val_pending, val_feedback, val_interest])
                         else:
-                            rows.append([
-                                ts, nama_pelapor, final_lokasi, main_deskripsi,
-                                "-", sosmed_link if sosmed_link else "-",
-                                val_kesimpulan, val_kendala, val_pending,
-                                val_feedback,
-                                val_interest
-                            ])
+                            # ✅ Append kolom Interest (%) di akhir
+                            rows.append([ts, nama_pelapor, final_lokasi, main_deskripsi, "-", sosmed_link if sosmed_link else "-", val_kesimpulan, val_kendala, val_pending, val_feedback, val_interest])
 
                         if simpan_laporan_harian_batch(rows, nama_pelapor):
                             st.success(f"Laporan Tersimpan! Reminder besok: {val_pending}"); st.balloons(); st.cache_data.clear()
@@ -871,16 +839,8 @@ if KONEKSI_GSHEET_BERHASIL:
                                 st.divider()
                                 # Bagian Refleksi (Kolom 3 Sejajar)
                                 col_a, col_b, col_c = st.columns(3)
-
-                                # === INCLUDE INTEREST DI BOX KESIMPULAN (MINIMAL CHANGE) ===
-                                interest_val = row.get(COL_INTEREST, "-")
-                                if pd.isna(interest_val): interest_val = "-"
-
                                 with col_a:
-                                    st.info(
-                                        f"💡 **Hasil/Kesimpulan:**\n\n{row.get(COL_KESIMPULAN, '-')}\n\n"
-                                        f"📈 **Interest:** {interest_val}"
-                                    )
+                                    st.info(f"💡 **Hasil/Kesimpulan:**\n\n{row.get(COL_KESIMPULAN, '-')}")
                                 with col_b:
                                     st.warning(f"🚧 **Kendala:**\n\n{row.get(COL_KENDALA, '-')}")
                                 with col_c:
@@ -943,4 +903,5 @@ if KONEKSI_GSHEET_BERHASIL:
                 else:
                     st.info("Belum ada bukti yang terupload.")
 
-else: st.error("Database Error.")
+else:
+    st.error("Database Error.")
