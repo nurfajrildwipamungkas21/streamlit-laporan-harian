@@ -656,11 +656,12 @@ def build_absensi_excel_bytes(hadir_today: List[Dict[str, Any]], today_key: str)
 def build_absensi_csv_bytes(hadir_today: List[Dict[str, Any]], today_key: str) -> bytes:
     """
     Export CSV yang tetap ramah Excel:
-    - Nomor HP dipaksa sebagai text (=\"08...\")
-    - Encoding UTF-8 dengan BOM agar karakter non-ASCII aman
+    - Gunakan semicolon (;) sebagai delimiter agar Excel Indonesia mengenali kolom.
+    - Nomor HP dipaksa sebagai text (=\"08...\") supaya tidak jadi scientific notation.
+    - Encoding UTF-8 dengan BOM agar karakter non-ASCII aman.
     """
     buf = io.StringIO()
-    writer = csv.writer(buf)
+    writer = csv.writer(buf, delimiter=';')
     writer.writerow(["Timestamp", "Nama", "No HP/WA", "Posisi", "Selfie URL"])
 
     for r in hadir_today:
@@ -900,6 +901,7 @@ try:
     if total == 0:
         st.info("Belum ada absensi untuk hari ini.")
     else:
+        # Tampilkan rekap posisi tanpa tombol download rekap
         st.table(rekap_rows)
 
         with st.expander("👥 Daftar hadir hari ini (klik untuk buka)"):
@@ -910,7 +912,7 @@ try:
                 hide_index=True
             )
 
-        # Download laporan: Excel rapi (utama) + CSV mentah (opsional)
+        # Download laporan: Excel rapi (utama) + CSV (opsional)
         excel_bytes = build_absensi_excel_bytes(hadir_today, today_key2)
         csv_bytes = build_absensi_csv_bytes(hadir_today, today_key2)
 
@@ -923,7 +925,7 @@ try:
         )
 
         st.download_button(
-            "⬇️ Download Data Hadir (CSV mentah)",
+            "⬇️ Download Data Hadir (CSV – delimiter semicolon)",
             data=csv_bytes,
             file_name=f"absensi_harian_{today_key2}.csv",
             mime="text/csv",
