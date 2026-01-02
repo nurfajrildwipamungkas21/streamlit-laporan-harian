@@ -3,7 +3,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import re
 import io
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, List
+from collections import defaultdict
+import difflib
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -29,15 +31,12 @@ QR_URL = APP_CFG.get("qr_url", "")
 ENABLE_TOKEN = bool(APP_CFG.get("enable_token", False))
 TOKEN_SECRET = str(APP_CFG.get("token", "")).strip()
 
-# ✅ kalau True, sistem mengizinkan nomor yang sama absen berkali-kali dalam 1 hari
-ALLOW_RESUBMIT_SAME_DAY = bool(APP_CFG.get("allow_resubmit_same_day", False))
-
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
 COL_HP = "No HP/WA"
 COL_POSISI = "Posisi"
-COL_LINK_SELFIE = "Bukti Selfie"
-COL_DBX_PATH = "Dropbox Path"
+COL_LINK_SELFIE = "Bukti Selfie"     # tampil lebih professional
+COL_DBX_PATH = "Dropbox Path"        # internal/admin
 
 SHEET_COLUMNS = [COL_TIMESTAMP, COL_NAMA, COL_HP, COL_POSISI, COL_LINK_SELFIE, COL_DBX_PATH]
 
@@ -46,6 +45,7 @@ SHEET_COLUMNS = [COL_TIMESTAMP, COL_NAMA, COL_HP, COL_POSISI, COL_LINK_SELFIE, C
 # HELPERS
 # =========================
 def get_mode() -> str:
+    # kompatibel streamlit baru & lama
     try:
         return str(st.query_params.get("mode", "")).strip().lower()
     except Exception:
@@ -95,30 +95,42 @@ def build_qr_png(url: str) -> bytes:
 
 
 def make_hyperlink(url: str, label: str = "Bukti Foto") -> str:
+    """Supaya kolom link rapi di GSheet/Excel."""
     if not url or url == "-":
         return "-"
-    safe = url.replace('"', '""')
+    safe = url.replace('"', '""')  # escape double quote untuk formula
     return f'=HYPERLINK("{safe}", "{label}")'
 
 
 def auto_format_absensi_sheet(ws):
+    """Format Google Sheet Absensi agar rapi & profesional."""
     try:
         sheet_id = ws.id
         all_values = ws.get_all_values()
         row_count = max(len(all_values), ws.row_count)
 
+        # Lebar kolom A-F
+        # A Timestamp, B Nama, C No HP/WA, D Posisi, E Bukti Selfie, F Dropbox Path
         col_widths = [170, 180, 150, 180, 140, 340]
+
         requests = []
 
+        # 1) Set lebar kolom
         for i, w in enumerate(col_widths):
             requests.append({
                 "updateDimensionProperties": {
-                    "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": i, "endIndex": i + 1},
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": i,
+                        "endIndex": i + 1
+                    },
                     "properties": {"pixelSize": w},
                     "fields": "pixelSize"
                 }
             })
 
+        # 2) Header styling (row 1)
         requests.append({
             "repeatCell": {
                 "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
@@ -133,6 +145,7 @@ def auto_format_absensi_sheet(ws):
             }
         })
 
+        # 3) Freeze header
         requests.append({
             "updateSheetProperties": {
                 "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
@@ -140,14 +153,19 @@ def auto_format_absensi_sheet(ws):
             }
         })
 
+        # 4) Body default format
         requests.append({
             "repeatCell": {
                 "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": row_count},
-                "cell": {"userEnteredFormat": {"verticalAlignment": "MIDDLE", "wrapStrategy": "CLIP"}},
+                "cell": {"userEnteredFormat": {
+                    "verticalAlignment": "MIDDLE",
+                    "wrapStrategy": "CLIP"
+                }},
                 "fields": "userEnteredFormat(verticalAlignment,wrapStrategy)"
             }
         })
 
+        # 5) Center: Timestamp (A) & No HP (C)
         requests.append({
             "repeatCell": {
                 "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": row_count, "startColumnIndex": 0, "endColumnIndex": 1},
@@ -163,6 +181,7 @@ def auto_format_absensi_sheet(ws):
             }
         })
 
+        # 6) Wrap untuk Dropbox Path (F)
         requests.append({
             "repeatCell": {
                 "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": row_count, "startColumnIndex": 5, "endColumnIndex": 6},
@@ -171,8 +190,11 @@ def auto_format_absensi_sheet(ws):
             }
         })
 
-        ws.spreadsheet.batch_update({"requests": requests})
+        if requests:
+            ws.spreadsheet.batch_update({"requests": requests})
+
     except Exception as e:
+        # jangan bikin app crash kalau format gagal
         print(f"Format Absensi Error: {e}")
 
 
@@ -181,7 +203,10 @@ def connect_gsheet():
     if "gcp_service_account" not in st.secrets:
         raise RuntimeError("GSheet secrets tidak ditemukan: gcp_service_account")
 
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
     creds_dict = dict(st.secrets["gcp_service_account"])
     if "private_key" in creds_dict:
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
@@ -219,7 +244,16 @@ def connect_dropbox():
     return dbx
 
 
-def upload_selfie_to_dropbox(dbx, img_bytes: bytes, nama: str, ts_file: str, ext: str) -> Tuple[str, str]:
+def upload_selfie_to_dropbox(
+    dbx,
+    img_bytes: bytes,
+    nama: str,
+    ts_file: str,
+    ext: str
+) -> Tuple[str, str]:
+    """
+    Return (shared_link_raw, dropbox_path)
+    """
     clean_name = sanitize_name(nama).replace(" ", "_") or "Unknown"
     filename = f"{ts_file}_selfie{ext}"
     path = f"{DROPBOX_ROOT}/{clean_name}/{filename}"
@@ -246,10 +280,15 @@ def upload_selfie_to_dropbox(dbx, img_bytes: bytes, nama: str, ts_file: str, ext
 
 def detect_ext_and_mime(mime: str) -> str:
     mime = (mime or "").lower()
-    return ".png" if "png" in mime else ".jpg"
+    if "png" in mime:
+        return ".png"
+    return ".jpg"
 
 
 def get_selfie_bytes(selfie_cam, selfie_upload) -> Tuple[Optional[bytes], str]:
+    """
+    Return (bytes, ext).
+    """
     if selfie_cam is not None:
         mime = getattr(selfie_cam, "type", "") or ""
         return selfie_cam.getvalue(), detect_ext_and_mime(mime)
@@ -261,36 +300,187 @@ def get_selfie_bytes(selfie_cam, selfie_upload) -> Tuple[Optional[bytes], str]:
     return None, ".jpg"
 
 
-def already_absen_today(ws, hp_clean: str, today_ddmmyyyy: str) -> bool:
+# =========================
+# REKAP (PINTAR) - POSISI & HADIR
+# =========================
+def normalize_posisi(text: str) -> str:
     """
-    Cek apakah No HP/WA ini sudah absen di tanggal yang sama.
-    Timestamp format: dd-mm-YYYY HH:MM:SS
+    Normalisasi posisi agar kategori konsisten walau input manual:
+    - lowercase
+    - hapus simbol aneh
+    - samakan separator (/ , . - _) jadi spasi
+    - rapikan spasi
     """
-    if not hp_clean:
-        return False
+    t = str(text or "").strip().lower()
+    t = t.replace("&", " dan ")
+    t = re.sub(r"[/,_\-\.]+", " ", t)
+    t = re.sub(r"[^a-z0-9\s]+", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
+
+# Silakan tambah alias sesuai kebutuhan kantor kamu
+POSISI_ALIASES: Dict[str, str] = {
+    "spv": "supervisor",
+    "sup": "supervisor",
+    "super visor": "supervisor",
+    "supervisior": "supervisor",
+    "admin": "administrasi",
+    "adm": "administrasi",
+    "kry": "karyawan",
+    "karyawan": "karyawan",
+    "staf": "staff",
+    "staff": "staff",
+    "teknisi": "teknisi",
+    "technician": "teknisi",
+    "driver": "driver",
+    "drv": "driver",
+    "security": "security",
+    "satpam": "security",
+}
+
+
+def smart_canonical_posisi(raw_pos: str, known_canon: List[str]) -> str:
+    """
+    Buat kategori posisi yang "pintar":
+    1) normalisasi
+    2) alias mapping (spv -> supervisor)
+    3) fuzzy match ke kategori yang sudah ada (biar typo kecil nyatu)
+    """
+    p = normalize_posisi(raw_pos)
+    if not p:
+        return ""
+
+    # alias langsung
+    if p in POSISI_ALIASES:
+        p = POSISI_ALIASES[p]
+
+    # fuzzy match ke yang sudah ada
+    # threshold dibuat cukup ketat biar tidak salah gabung
+    if known_canon:
+        best = difflib.get_close_matches(p, known_canon, n=1, cutoff=0.88)
+        if best:
+            return best[0]
+
+    return p
+
+
+def display_posisi(canon: str) -> str:
+    if not canon:
+        return "-"
+    return " ".join(w.capitalize() for w in canon.split())
+
+
+def parse_date_prefix(ts: str) -> str:
+    """
+    Kembalikan tanggal dd-mm-YYYY dari Timestamp sheet.
+    Aman walau format agak beda; kalau gagal, fallback pakai 10 char pertama.
+    """
+    s = str(ts or "").strip()
+    if not s:
+        return ""
     try:
-        # Ambil kolom A..C saja (lebih ringan daripada get_all_values)
-        values = ws.get("A:C")  # termasuk header
-        if not values or len(values) < 2:
-            return False
-
-        # skip header
-        for row in values[1:]:
-            ts = (row[0] if len(row) > 0 else "").strip()
-            hp = (row[2] if len(row) > 2 else "").strip()
-            if not ts or not hp:
-                continue
-
-            # cocokkan tanggal + hp
-            # ts: "02-01-2026 23:40:12" => tanggal = ts[:10]
-            if ts[:10] == today_ddmmyyyy and sanitize_phone(hp) == hp_clean:
-                return True
-
-        return False
+        dt = datetime.strptime(s, "%d-%m-%Y %H:%M:%S")
+        return dt.strftime("%d-%m-%Y")
     except Exception:
-        # kalau gagal baca, jangan false positive; anggap belum
-        return False
+        return s[:10]  # fallback
+
+
+@st.cache_data(ttl=30)
+def get_rekap_today() -> Dict:
+    """
+    Rekap hari ini (berdasarkan Timestamp):
+    - Total hadir (dedup by no_hp, fallback nama)
+    - Jumlah per posisi (posisi pintar)
+    - Daftar siapa saja yang sudah datang (per posisi dan total)
+    """
+    sh = connect_gsheet()
+    ws = get_or_create_ws(sh)
+
+    # Ambil A:D supaya ringan (Timestamp, Nama, NoHP, Posisi)
+    rows = ws.get("A:D")
+    if not rows or len(rows) < 2:
+        return {
+            "today": now_local().strftime("%d-%m-%Y"),
+            "total": 0,
+            "dup_removed": 0,
+            "by_pos": [],
+            "all_people": [],
+        }
+
+    header, data = rows[0], rows[1:]
+    today_str = now_local().strftime("%d-%m-%Y")
+
+    # Dedup: kunci utama No HP (lebih unik), fallback Nama.
+    seen_keys = set()
+    dup_removed = 0
+
+    # posisi_canon -> list of people strings
+    people_by_pos = defaultdict(list)
+    all_people = []
+
+    known_canon = []  # untuk fuzzy matching konsisten dalam 1 rekap
+
+    for r in data:
+        # Pastikan panjang minimal 4
+        ts = (r[0] if len(r) > 0 else "") or ""
+        nama = (r[1] if len(r) > 1 else "") or ""
+        hp = (r[2] if len(r) > 2 else "") or ""
+        pos = (r[3] if len(r) > 3 else "") or ""
+
+        if parse_date_prefix(ts) != today_str:
+            continue
+
+        nama_clean = sanitize_name(nama)
+        hp_clean = sanitize_phone(hp)
+        key = hp_clean if hp_clean else nama_clean.lower().strip()
+
+        if not key:
+            # kalau dua-duanya kosong, skip biar tidak bikin rekap kacau
+            continue
+
+        if key in seen_keys:
+            dup_removed += 1
+            continue
+
+        seen_keys.add(key)
+
+        pos_canon = smart_canonical_posisi(pos, known_canon)
+        if pos_canon and pos_canon not in known_canon:
+            known_canon.append(pos_canon)
+
+        who = nama_clean if nama_clean else (hp_clean if hp_clean else "Tanpa Nama")
+        # Biar “siapa yang hadir” jelas, tampilkan nama + (hp) kalau ada
+        who_display = f"{who} ({hp_clean})" if hp_clean and who else who
+
+        all_people.append({
+            "Nama": who,
+            "No HP/WA": hp_clean or "-",
+            "Posisi": display_posisi(pos_canon) if pos_canon else "-",
+            "Timestamp": ts,
+        })
+
+        people_by_pos[pos_canon if pos_canon else "(tanpa posisi)"].append(who_display)
+
+    # Build summary per posisi
+    by_pos = []
+    for canon, people in people_by_pos.items():
+        by_pos.append({
+            "Posisi": display_posisi(canon) if canon != "(tanpa posisi)" else "Tanpa Posisi",
+            "Jumlah": len(people),
+            "Yang Hadir": ", ".join(people),
+        })
+
+    # Urutkan: jumlah desc, posisi asc
+    by_pos.sort(key=lambda x: (-x["Jumlah"], x["Posisi"].lower()))
+
+    return {
+        "today": today_str,
+        "total": len(seen_keys),
+        "dup_removed": dup_removed,
+        "by_pos": by_pos,
+        "all_people": all_people,
+    }
 
 
 # =========================
@@ -346,5 +536,158 @@ if mode != "absen":
 
     with st.expander("Tips penggunaan (klik untuk buka)"):
         st.write(
-            "- Pastikan URL aplikasi **HTTPS**.\n"
-            "- Jika kamera bermasalah, pakai **Upload
+            "- Pastikan URL aplikasi **HTTPS** (Streamlit Cloud biasanya sudah).\n"
+            "- Untuk HP jadul: jika kamera bermasalah, pakai opsi **Upload foto**.\n"
+            "- Jika pakai token, QR mengandung `token=...` agar tidak sembarang orang submit."
+        )
+    st.stop()
+
+
+# ===== PAGE: ABSEN (dibuka dari scan QR)
+st.title("🧾 Form Absensi")
+
+if ENABLE_TOKEN and TOKEN_SECRET:
+    incoming_token = get_token_from_url()
+    if incoming_token != TOKEN_SECRET:
+        st.error("Akses tidak valid. Silakan scan QR resmi dari kantor.")
+        st.stop()
+
+dt = now_local()
+ts_display = dt.strftime("%d-%m-%Y %H:%M:%S")
+ts_file = dt.strftime("%Y-%m-%d_%H-%M-%S")
+st.caption(f"🕒 Waktu server ({TZ_NAME}): **{ts_display}**")
+
+st.info("Jika muncul pop-up izin kamera, pilih **Allow / Izinkan**. Untuk HP tertentu, gunakan **Upload foto**.")
+
+with st.form("form_absen", clear_on_submit=False):
+    st.subheader("1) Data Karyawan")
+
+    nama = st.text_input("Nama Lengkap", placeholder="Contoh: Andi Saputra")
+    no_hp = st.text_input("No HP/WA", placeholder="Contoh: 08xxxxxxxxxx atau +628xxxxxxxxxx")
+    posisi = st.text_input("Posisi / Jabatan", placeholder="Contoh: Driver / Teknisi / Supervisor")
+
+    st.divider()
+    st.subheader("2) Selfie Kehadiran")
+
+    open_cam_now = st.checkbox("Buka kamera (disarankan jika HP mendukung)", value=st.session_state.open_cam)
+    st.session_state.open_cam = open_cam_now
+
+    selfie_cam = None
+    if st.session_state.open_cam:
+        selfie_cam = st.camera_input("Ambil selfie")
+
+    st.caption("Jika kamera tidak bisa dibuka, gunakan opsi upload:")
+    selfie_upload = st.file_uploader("Upload foto selfie", type=["jpg", "jpeg", "png"])
+
+    st.divider()
+
+    submit = st.form_submit_button(
+        "✅ Submit Absensi",
+        disabled=st.session_state.saving or st.session_state.submitted_once,
+        use_container_width=True
+    )
+
+# ===== SUBMIT LOGIC
+if submit:
+    if st.session_state.submitted_once:
+        st.warning("Absensi sudah tersimpan. Jika ingin absen lagi, refresh halaman.")
+        st.stop()
+
+    nama_clean = sanitize_name(nama)
+    hp_clean = sanitize_phone(no_hp)
+    posisi_final = str(posisi).strip()
+
+    img_bytes, ext = get_selfie_bytes(selfie_cam, selfie_upload)
+
+    errors = []
+    if not nama_clean:
+        errors.append("• Nama wajib diisi.")
+    if not hp_clean or len(hp_clean.replace("+", "")) < 8:
+        errors.append("• No HP/WA wajib diisi (minimal 8 digit).")
+    if not posisi_final:
+        errors.append("• Posisi wajib diisi.")
+    if img_bytes is None:
+        errors.append("• Selfie wajib (kamera atau upload).")
+
+    if errors:
+        st.error("Mohon lengkapi dulu:\n\n" + "\n".join(errors))
+        st.stop()
+
+    st.session_state.saving = True
+    try:
+        with st.spinner("Menyimpan absensi..."):
+            sh = connect_gsheet()
+            ws = get_or_create_ws(sh)
+            dbx = connect_dropbox()
+
+            link_selfie, dbx_path = upload_selfie_to_dropbox(dbx, img_bytes, nama_clean, ts_file, ext)
+
+            # ✅ buat link rapi (tidak panjang)
+            link_cell = make_hyperlink(link_selfie, "Bukti Foto")
+
+            ws.append_row(
+                [ts_display, nama_clean, hp_clean, posisi_final, link_cell, dbx_path],
+                value_input_option="USER_ENTERED"
+            )
+
+            # ✅ format ulang agar kalau row bertambah tetap rapi (aman dipanggil)
+            auto_format_absensi_sheet(ws)
+
+        # setelah submit, rekap perlu refresh
+        get_rekap_today.clear()
+
+        st.session_state.submitted_once = True
+        st.success("Absensi berhasil tersimpan. Terima kasih ✅")
+        st.balloons()
+
+        if st.button("↩️ Isi ulang (reset form)", use_container_width=True):
+            st.session_state.open_cam = False
+            st.session_state.saving = False
+            st.session_state.submitted_once = False
+            st.rerun()
+
+    except AuthError:
+        st.error("Dropbox token tidak valid. Hubungi admin.")
+    except Exception as e:
+        st.error("Gagal menyimpan absensi.")
+        with st.expander("Detail error (untuk admin)"):
+            st.code(str(e))
+    finally:
+        st.session_state.saving = False
+
+
+# =========================
+# UI: REKAP KEHADIRAN (BAGIAN BAWAH)
+# =========================
+st.divider()
+st.subheader("📊 Rekap Kehadiran (Hari ini)")
+
+try:
+    rekap = get_rekap_today()
+
+    top1, top2 = st.columns([1, 1])
+    with top1:
+        st.metric("Total hadir", rekap["total"])
+    with top2:
+        if st.button("🔄 Refresh rekap", use_container_width=True):
+            get_rekap_today.clear()
+            st.rerun()
+
+    st.caption(f"Tanggal: **{rekap['today']}**")
+
+    if rekap["dup_removed"] > 0:
+        st.info(f"Catatan: terdeteksi **{rekap['dup_removed']}** entri duplikat (No HP/Nama sama) dan tidak dihitung agar rekap akurat.")
+
+    if rekap["total"] == 0:
+        st.warning("Belum ada absensi untuk hari ini.")
+    else:
+        st.write("**Klasifikasi jumlah hadir per posisi:**")
+        st.dataframe(rekap["by_pos"], use_container_width=True, hide_index=True)
+
+        with st.expander("👥 Lihat siapa saja yang sudah datang (detail)"):
+            st.dataframe(rekap["all_people"], use_container_width=True, hide_index=True)
+
+except Exception as e:
+    st.warning("Rekap kehadiran belum bisa ditampilkan (cek koneksi GSheet).")
+    with st.expander("Detail error (untuk admin)"):
+        st.code(str(e))
