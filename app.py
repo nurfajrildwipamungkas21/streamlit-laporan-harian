@@ -66,7 +66,6 @@ def get_mode() -> str:
         qp = st.experimental_get_query_params()
         return (qp.get("mode", [""])[0] or "").strip().lower()
 
-
 def get_token_from_url() -> str:
     """Ambil token dari query param ?token=..."""
     try:
@@ -75,14 +74,12 @@ def get_token_from_url() -> str:
         qp = st.experimental_get_query_params()
         return (qp.get("token", [""])[0] or "").strip()
 
-
 def sanitize_name(text: str) -> str:
     """Bersihkan nama dari karakter aneh + spasi berlebih."""
     text = str(text).strip()
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"[^A-Za-z0-9 _.-]", "", text)
     return text.strip()
-
 
 def sanitize_phone(text: str) -> str:
     """Ambil hanya digit (dan + di depan bila ada)."""
@@ -91,11 +88,9 @@ def sanitize_phone(text: str) -> str:
         return "+" + re.sub(r"\D", "", text[1:])
     return re.sub(r"\D", "", text)
 
-
 def now_local() -> datetime:
     """Waktu lokal sesuai TZ_NAME."""
     return datetime.now(tz=ZoneInfo(TZ_NAME))
-
 
 def build_qr_png(url: str) -> bytes:
     """Generate QR code PNG dari URL."""
@@ -112,14 +107,12 @@ def build_qr_png(url: str) -> bytes:
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-
 def make_hyperlink(url: str, label: str = "Bukti Foto") -> str:
     """Formula HYPERLINK untuk Google Sheet."""
     if not url or url == "-":
         return "-"
     safe = url.replace('"', '""')
     return f'=HYPERLINK("{safe}", "{label}")'
-
 
 # ---- Normalisasi posisi (pintar tapi aman)
 def _default_pos_aliases() -> Dict[str, str]:
@@ -150,7 +143,6 @@ def _default_pos_aliases() -> Dict[str, str]:
         "operational": "operasional",
     }
 
-
 def normalize_posisi(text: str) -> str:
     t = str(text or "").strip().lower()
     if not t:
@@ -160,7 +152,6 @@ def normalize_posisi(text: str) -> str:
     t = re.sub(r"[^a-z0-9\s]+", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     return t
-
 
 def get_pos_aliases() -> Dict[str, str]:
     """Gabung alias default + alias custom (dari secrets)."""
@@ -172,7 +163,6 @@ def get_pos_aliases() -> Dict[str, str]:
         if kk and vv:
             merged[kk] = vv
     return merged
-
 
 def canonicalize_posisi(raw_pos: str, known_canon: Optional[List[str]] = None) -> str:
     """Normalisasi + mapping ke posisi kanonik."""
@@ -200,13 +190,11 @@ def canonicalize_posisi(raw_pos: str, known_canon: Optional[List[str]] = None) -
 
     return base
 
-
 def display_posisi(norm: str) -> str:
     """Posisi untuk display (kapital tiap kata)."""
     if not norm:
         return "-"
     return " ".join([w.capitalize() for w in norm.split(" ")])
-
 
 def ts_to_datekey(ts: str) -> str:
     """Ambil bagian tanggal dari timestamp string (dd-mm-YYYY)."""
@@ -218,7 +206,6 @@ def ts_to_datekey(ts: str) -> str:
         return dt.strftime("%d-%m-%Y")
     except Exception:
         return ""
-
 
 def parse_ts(ts: str) -> Optional[datetime]:
     """
@@ -241,7 +228,6 @@ def parse_ts(ts: str) -> Optional[datetime]:
         return datetime.strptime(s, "%d-%m-%Y %H:%M:%S")
     except Exception:
         return None
-
 
 def auto_format_absensi_sheet(ws) -> None:
     """Format sheet Google agar rapi (sekali saja, dipanggil saat init/update header)."""
@@ -380,7 +366,6 @@ def auto_format_absensi_sheet(ws) -> None:
     except Exception as e:
         print(f"Format Absensi Error: {e}")
 
-
 @st.cache_resource
 def connect_gsheet():
     """Koneksi ke Google Sheet utama."""
@@ -399,7 +384,6 @@ def connect_gsheet():
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     gc = gspread.authorize(creds)
     return gc.open(SHEET_NAME)
-
 
 def get_or_create_ws(spreadsheet):
     """Ambil worksheet log; buat + set header bila belum ada."""
@@ -423,7 +407,6 @@ def get_or_create_ws(spreadsheet):
 
     return ws
 
-
 @st.cache_resource
 def connect_dropbox():
     """Koneksi ke Dropbox untuk simpan selfie."""
@@ -433,7 +416,6 @@ def connect_dropbox():
     dbx = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
     dbx.users_get_current_account()
     return dbx
-
 
 def upload_selfie_to_dropbox(
     dbx,
@@ -466,14 +448,12 @@ def upload_selfie_to_dropbox(
     url_raw = url.replace("?dl=0", "?raw=1") if url and url != "-" else "-"
     return url_raw, path
 
-
 def detect_ext_and_mime(mime: str) -> str:
     """Tentukan ekstensi dari mime type camera/uploader."""
     mime = (mime or "").lower()
     if "png" in mime:
         return ".png"
     return ".jpg"
-
 
 def get_selfie_bytes(selfie_cam, selfie_upload) -> Tuple[Optional[bytes], str]:
     """Ambil bytes selfie dari camera_input atau file_uploader."""
@@ -486,7 +466,6 @@ def get_selfie_bytes(selfie_cam, selfie_upload) -> Tuple[Optional[bytes], str]:
         return selfie_upload.getvalue(), detect_ext_and_mime(mime)
 
     return None, ".jpg"
-
 
 def already_checked_in_today(ws, hp_clean: str, today_key: str) -> Tuple[bool, str]:
     """Cek apakah nomor HP sudah absen hari ini."""
@@ -503,7 +482,6 @@ def already_checked_in_today(ws, hp_clean: str, today_key: str) -> Tuple[bool, s
         if sanitize_phone(hp) == hp_clean:
             return True, str(ts)
     return False, ""
-
 
 @st.cache_data(ttl=30)
 def get_today_data_and_rekap() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int, str]:
@@ -560,7 +538,6 @@ def get_today_data_and_rekap() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any
         for k, v in sorted(counter.items(), key=lambda x: (-x[1], x[0]))
     ]
     return hadir_today, rekap_rows, total, today_key
-
 
 def build_absensi_excel_bytes(hadir_today: List[Dict[str, Any]], today_key: str) -> bytes:
     """
@@ -652,7 +629,6 @@ def build_absensi_excel_bytes(hadir_today: List[Dict[str, Any]], today_key: str)
     wb.save(buf)
     return buf.getvalue()
 
-
 def build_absensi_csv_bytes(hadir_today: List[Dict[str, Any]], today_key: str) -> bytes:
     """
     Export CSV yang tetap ramah Excel:
@@ -678,7 +654,6 @@ def build_absensi_csv_bytes(hadir_today: List[Dict[str, Any]], today_key: str) -
     # UTF-8 with BOM supaya Excel langsung kenali encoding
     return buf.getvalue().encode("utf-8-sig")
 
-
 # =========================
 # SESSION DEFAULTS
 # =========================
@@ -688,7 +663,6 @@ if "saving" not in st.session_state:
     st.session_state.saving = False
 if "submitted_once" not in st.session_state:
     st.session_state.submitted_once = False
-
 
 # =========================
 # UI
@@ -737,7 +711,6 @@ if mode != "absen":
             "- Jika pakai token, QR mengandung `token=...`."
         )
     st.stop()
-
 
 # ===== PAGE: ABSEN
 st.title("🧾 Form Absensi")
@@ -874,7 +847,6 @@ if submit:
     finally:
         st.session_state.saving = False
 
-
 # =========================
 # REKAP + DOWNLOAD (UI/UX bawah)
 # =========================
@@ -912,25 +884,18 @@ try:
                 hide_index=True
             )
 
-        # Download laporan: Excel rapi (utama) + CSV (opsional)
+        # Download laporan: hanya Excel (CSV dihapus)
         excel_bytes = build_absensi_excel_bytes(hadir_today, today_key2)
-        csv_bytes = build_absensi_csv_bytes(hadir_today, today_key2)
 
         st.download_button(
-            "⬇️ Download Data Hadir (Excel .xlsx) – Disarankan",
+            "⬇️ Download Data Hadir (Excel .xlsx)",
             data=excel_bytes,
             file_name=f"absensi_harian_{today_key2}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
 
-        st.download_button(
-            "⬇️ Download Data Hadir (CSV – delimiter semicolon)",
-            data=csv_bytes,
-            file_name=f"absensi_harian_{today_key2}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        # Catatan: CSV tidak disediakan di sini lagi sesuai permintaan
 
 except Exception as e:
     st.warning("Rekap kehadiran belum bisa ditampilkan (cek koneksi GSheet).")
