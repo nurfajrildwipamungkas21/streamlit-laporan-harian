@@ -58,6 +58,9 @@ SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 # ✅ SHEET BARU: CONFIG TEAM
 SHEET_CONFIG_TEAM = "Config_Team"
 
+# ✅ SHEET BARU: CLOSING DEAL
+SHEET_CLOSING_DEAL = "Closing_Deal"
+
 # --- KOLOM LAPORAN HARIAN (UPDATED WITH FEEDBACK) ---
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
@@ -94,6 +97,13 @@ TEAM_COL_NAMA_TEAM = "Nama Team"
 TEAM_COL_POSISI = "Posisi"
 TEAM_COL_ANGGOTA = "Nama Anggota"
 TEAM_COLUMNS = [TEAM_COL_NAMA_TEAM, TEAM_COL_POSISI, TEAM_COL_ANGGOTA]
+
+# ✅ KOLOM UNTUK CLOSING DEAL (SHEET Closing_Deal)
+COL_GROUP = "Nama Group"
+COL_MARKETING = "Nama Marketing"
+COL_TGL_EVENT = "Tanggal Event"
+COL_BIDANG = "Bidang"
+CLOSING_COLUMNS = [COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_BIDANG]
 
 # --- KONEKSI ---
 KONEKSI_GSHEET_BERHASIL = False
@@ -167,11 +177,12 @@ def auto_format_sheet(worksheet):
                 "Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed",
                 "Tempat Dikunjungi", "Kesimpulan", "Kendala", "Next Plan (Pending)", "Feedback Lead",
                 COL_NAMA_KLIEN,
-                TEAM_COL_NAMA_TEAM, TEAM_COL_POSISI, TEAM_COL_ANGGOTA
+                TEAM_COL_NAMA_TEAM, TEAM_COL_POSISI, TEAM_COL_ANGGOTA,
+                COL_GROUP, COL_MARKETING, COL_BIDANG
             ]:
                 width = 300
                 cell_format_override["wrapStrategy"] = "WRAP"
-            elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp"]:
+            elif col_name in ["Tgl_Mulai", "Tgl_Selesai", "Timestamp", COL_TGL_EVENT]:
                 width = 150 if col_name == "Timestamp" else 120
                 cell_format_override["horizontalAlignment"] = "CENTER"
             elif col_name in ["Status", "Done?"]:
@@ -618,6 +629,64 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
             use_container_width=True
         )
 
+# =========================
+# ✅ CLOSING DEAL FUNCTIONS
+# =========================
+
+@st.cache_data(ttl=60)
+def load_closing_deal():
+    if not KONEKSI_GSHEET_BERHASIL:
+        return pd.DataFrame(columns=CLOSING_COLUMNS)
+
+    try:
+        try:
+            ws = spreadsheet.worksheet(SHEET_CLOSING_DEAL)
+        except:
+            ws = spreadsheet.add_worksheet(title=SHEET_CLOSING_DEAL, rows=300, cols=len(CLOSING_COLUMNS))
+            ws.append_row(CLOSING_COLUMNS, value_input_option='USER_ENTERED')
+            auto_format_sheet(ws)
+            return pd.DataFrame(columns=CLOSING_COLUMNS)
+
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+        df.fillna("", inplace=True)
+
+        for c in CLOSING_COLUMNS:
+            if c not in df.columns:
+                df[c] = ""
+
+        return df[CLOSING_COLUMNS].copy()
+    except:
+        return pd.DataFrame(columns=CLOSING_COLUMNS)
+
+def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang):
+    if not KONEKSI_GSHEET_BERHASIL:
+        return False, "Koneksi GSheet belum aktif."
+
+    try:
+        nama_group = str(nama_group).strip()
+        nama_marketing = str(nama_marketing).strip()
+        bidang = str(bidang).strip()
+
+        if not nama_group or not nama_marketing or not tanggal_event or not bidang:
+            return False, "Semua field wajib diisi (Nama Group, Marketing, Tanggal Event, Bidang)."
+
+        try:
+            ws = spreadsheet.worksheet(SHEET_CLOSING_DEAL)
+        except:
+            ws = spreadsheet.add_worksheet(title=SHEET_CLOSING_DEAL, rows=300, cols=len(CLOSING_COLUMNS))
+            ws.append_row(CLOSING_COLUMNS, value_input_option='USER_ENTERED')
+            auto_format_sheet(ws)
+
+        tgl_str = tanggal_event.strftime("%Y-%m-%d") if hasattr(tanggal_event, "strftime") else str(tanggal_event)
+
+        ws.append_row([nama_group, nama_marketing, tgl_str, bidang], value_input_option='USER_ENTERED')
+        auto_format_sheet(ws)
+
+        return True, "Closing deal berhasil disimpan!"
+    except Exception as e:
+        return False, str(e)
+
 # --- APLIKASI UTAMA ---
 if KONEKSI_GSHEET_BERHASIL:
     if not KONEKSI_DROPBOX_BERHASIL:
@@ -735,6 +804,47 @@ if KONEKSI_GSHEET_BERHASIL:
                     st.dataframe(df_team_cfg, use_container_width=True, hide_index=True)
                 else:
                     st.info("Belum ada team yang tersimpan.")
+
+        # =========================
+        # ✅ FITUR BARU: CLOSING DEAL (di bawah Manajemen Target)
+        # =========================
+        st.divider()
+        st.header("🤝 Closing Deal")
+
+        with st.expander("➕ Input Closing Deal", expanded=False):
+            with st.form("form_closing_deal", clear_on_submit=True):
+                cd_group = st.text_input("Nama Group", placeholder="Contoh: Group ABC")
+                cd_marketing = st.text_input("Nama Marketing", placeholder="Contoh: Andi")
+                cd_tgl = st.date_input(
+                    "Tanggal Event",
+                    value=datetime.now(tz=ZoneInfo("Asia/Jakarta")).date(),
+                    key="closing_event_date"
+                )
+                cd_bidang = st.text_input("Bidang (Manual)", placeholder="Contoh: F&B / Properti / Pendidikan")
+
+                if st.form_submit_button("✅ Simpan Closing Deal"):
+                    res, msg = tambah_closing_deal(cd_group, cd_marketing, cd_tgl, cd_bidang)
+                    if res:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        with st.expander("📋 Data Closing Deal", expanded=False):
+            df_cd = load_closing_deal()
+            if not df_cd.empty:
+                st.dataframe(df_cd, use_container_width=True, hide_index=True)
+                csv_cd = df_cd.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇️ Download CSV Closing Deal",
+                    data=csv_cd,
+                    file_name="closing_deal.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.info("Belum ada data closing deal.")
 
     st.title("🚀 Sales & Marketing Action Center")
     st.caption(f"Realtime: {datetime.now(tz=ZoneInfo('Asia/Jakarta')).strftime('%d %B %Y %H:%M:%S')}")
