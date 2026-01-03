@@ -659,17 +659,23 @@ def load_closing_deal():
     except:
         return pd.DataFrame(columns=CLOSING_COLUMNS)
 
+# ✅ FINAL: Nama Group OPSIONAL (boleh kosong)
 def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang):
     if not KONEKSI_GSHEET_BERHASIL:
         return False, "Koneksi GSheet belum aktif."
 
     try:
-        nama_group = str(nama_group).strip()
-        nama_marketing = str(nama_marketing).strip()
-        bidang = str(bidang).strip()
+        nama_group = str(nama_group).strip() if nama_group is not None else ""
+        nama_marketing = str(nama_marketing).strip() if nama_marketing is not None else ""
+        bidang = str(bidang).strip() if bidang is not None else ""
 
-        if not nama_group or not nama_marketing or not tanggal_event or not bidang:
-            return False, "Semua field wajib diisi (Nama Group, Marketing, Tanggal Event, Bidang)."
+        # ✅ Nama Group OPSIONAL
+        if not nama_group:
+            nama_group = "-"
+
+        # ✅ Field WAJIB: marketing, tanggal, bidang
+        if not nama_marketing or not tanggal_event or not bidang:
+            return False, "Field wajib: Nama Marketing, Tanggal Event, dan Bidang."
 
         try:
             ws = spreadsheet.worksheet(SHEET_CLOSING_DEAL)
@@ -813,7 +819,6 @@ if KONEKSI_GSHEET_BERHASIL:
 
         with st.expander("➕ Input Closing Deal", expanded=False):
             with st.form("form_closing_deal", clear_on_submit=True):
-                # ✅ UX: jelaskan bahwa group opsional
                 cd_group = st.text_input("Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada")
                 cd_marketing = st.text_input("Nama Marketing", placeholder="Contoh: Andi")
                 cd_tgl = st.date_input(
