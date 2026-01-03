@@ -151,16 +151,20 @@ except Exception as e:
 
 
 # =========================================================
-# RUPIAH PARSER (input bebas -> int Rupiah)
+# RUPIAH PARSER (input bebas -> int Rupiah)  ✅ FIXED
 # =========================================================
 def parse_rupiah_to_int(value):
     """
-    Input bebas:
+    Parser Rupiah yang lebih pintar.
+
+    Contoh input yang didukung:
       - 15000000
       - 15.000.000
       - Rp 15.000.000
       - 15jt / 15,5jt / 15.5jt
       - 15 juta / 15,5 juta
+      - 15.000.000,00
+
     Output: int rupiah, atau None kalau invalid.
     """
     if value is None:
@@ -177,55 +181,90 @@ def parse_rupiah_to_int(value):
     if not s:
         return None
 
-    s_lower = s.lower().replace(" ", "")
-
-    multiplier = 1
-    if "jt" in s_lower or "juta" in s_lower:
-        multiplier = 1_000_000
-
-    # cari angka pertama (boleh desimal)
-    m = re.search(r"(\d+(?:[.,]\d+)?)", s_lower)
-    if not m:
-        digits = re.sub(r"\D", "", s_lower)
-        if digits:
-            try:
-                return int(digits) * multiplier
-            except Exception:
-                return None
+    s_lower = s.lower().strip()
+    if s_lower in {"nan", "none", "-", "null"}:
         return None
 
-    num_str = m.group(1)
+    # hilangkan spasi + penanda mata uang
+    s_lower = re.sub(r"\s+", "", s_lower)
+    s_lower = s_lower.replace("idr", "").replace("rp", "")
 
-    # jika jt/juta, izinkan desimal
+    # deteksi satuan
+    multiplier = 1
+    if "miliar" in s_lower or "milyar" in s_lower:
+        multiplier = 1_000_000_000
+    elif "jt" in s_lower or "juta" in s_lower:
+        multiplier = 1_000_000
+    elif "rb" in s_lower or "ribu" in s_lower:
+        multiplier = 1_000
+
+    # buang kata satuan dari string angka
+    s_num = re.sub(r"(miliar|milyar|juta|jt|ribu|rb)", "", s_lower)
+
+    # sisakan digit + pemisah ribuan/desimal
+    s_num = re.sub(r"[^0-9.,]", "", s_num)
+    if not s_num:
+        return None
+
+    def to_float_locale(num_str: str) -> float:
+        # kasus ada titik & koma sekaligus -> tentukan decimal dari pemisah terakhir
+        if "." in num_str and "," in num_str:
+            if num_str.rfind(",") > num_str.rfind("."):
+                # dot ribuan, koma desimal (contoh 15.000.000,50)
+                cleaned = num_str.replace(".", "").replace(",", ".")
+            else:
+                # koma ribuan, dot desimal (contoh 15,000,000.50)
+                cleaned = num_str.replace(",", "")
+            return float(cleaned)
+
+        # hanya koma
+        if "," in num_str:
+            if num_str.count(",") > 1:
+                # anggap koma ribuan
+                return float(num_str.replace(",", ""))
+            after = num_str.split(",")[1]
+            # kalau 3 digit setelah koma -> kemungkinan pemisah ribuan
+            if len(after) == 3:
+                return float(num_str.replace(",", ""))
+            # selain itu -> desimal
+            return float(num_str.replace(",", "."))
+
+        # hanya titik
+        if "." in num_str:
+            if num_str.count(".") > 1:
+                # anggap titik ribuan
+                return float(num_str.replace(".", ""))
+            after = num_str.split(".")[1]
+            if len(after) == 3:
+                return float(num_str.replace(".", ""))
+            return float(num_str)
+
+        return float(num_str)
+
+    try:
+        base = to_float_locale(s_num)
+    except Exception:
+        digits = re.sub(r"\D", "", s_num)
+        return int(digits) if digits else None
+
     if multiplier != 1:
-        # 15,5jt -> 15.5
-        num_norm = num_str.replace(".", "").replace(",", ".")
-        try:
-            f = float(num_norm)
-            return int(round(f * multiplier))
-        except Exception:
-            digits = re.sub(r"\D", "", s_lower)
-            return int(digits) * multiplier if digits else None
+        # heuristik: kalau user sudah ketik full rupiah besar, jangan dikali lagi
+        if base >= multiplier:
+            return int(round(base))
+        return int(round(base * multiplier))
 
-    # bukan jt/juta: ambil digit saja
-    digits = re.sub(r"\D", "", num_str)
-    if not digits:
-        digits = re.sub(r"\D", "", s_lower)
-    if digits:
-        try:
-            return int(digits)
-        except Exception:
-            return None
-    return None
+    return int(round(base))
 
 
-def format_rupiah_display(amount_int: int) -> str:
+def format_rupiah_display(amount) -> str:
     """Hanya untuk display di UI (bukan untuk disimpan)."""
     try:
-        n = int(amount_int)
+        if amount is None or pd.isna(amount):
+            return ""
+        n = int(amount)
         return "Rp " + f"{n:,}".replace(",", ".")
     except Exception:
-        return str(amount_int)
+        return str(amount)
 
 
 # =========================================================
@@ -887,7 +926,7 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 
 
 # =========================================================
-# CLOSING DEAL (NUMERIC STORAGE + RUPIAH DISPLAY)
+# CLOSING DEAL (NUMERIC STORAGE + RUPIAH DISPLAY) ✅ FIXED
 # =========================================================
 @st.cache_data(ttl=60)
 def load_closing_deal():
@@ -911,15 +950,21 @@ def load_closing_deal():
         ensure_headers(ws, CLOSING_COLUMNS)
 
         data = ws.get_all_records()
-        df = pd.DataFrame(data).fillna("")
+        df = pd.DataFrame(data)
 
         for c in CLOSING_COLUMNS:
             if c not in df.columns:
                 df[c] = ""
 
-        # ✅ pastikan Nilai Kontrak numeric
+        # ✅ pastikan Nilai Kontrak numeric (nullable int agar tidak jadi NaN float)
         if COL_NILAI_KONTRAK in df.columns:
-            df[COL_NILAI_KONTRAK] = df[COL_NILAI_KONTRAK].apply(parse_rupiah_to_int)
+            parsed = df[COL_NILAI_KONTRAK].apply(parse_rupiah_to_int)
+            df[COL_NILAI_KONTRAK] = pd.Series(parsed, dtype="Int64")
+
+        # rapikan kolom lain kosong jadi ""
+        for c in [COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_BIDANG]:
+            if c in df.columns:
+                df[c] = df[c].fillna("").astype(str)
 
         return df[CLOSING_COLUMNS].copy()
     except Exception:
@@ -1126,7 +1171,7 @@ if KONEKSI_GSHEET_BERHASIL:
                 # Display versi rupiah (UI), tapi data asli df_cd tetap numeric untuk export
                 df_cd_display = df_cd.copy()
                 df_cd_display[COL_NILAI_KONTRAK] = df_cd_display[COL_NILAI_KONTRAK].apply(
-                    lambda x: "" if x is None else format_rupiah_display(x)
+                    lambda x: "" if pd.isna(x) else format_rupiah_display(x)   # ✅ FIX: no 'nan'
                 )
                 st.dataframe(df_cd_display, use_container_width=True, hide_index=True)
 
@@ -1143,7 +1188,7 @@ if KONEKSI_GSHEET_BERHASIL:
                     # pastikan numeric (int/None)
                     df_export = df_cd.copy()
                     df_export[COL_NILAI_KONTRAK] = df_export[COL_NILAI_KONTRAK].apply(
-                        lambda x: None if x is None else int(x)
+                        lambda x: None if pd.isna(x) else int(x)              # ✅ FIX: pd.isna
                     )
 
                     excel_bytes = df_to_excel_bytes(
