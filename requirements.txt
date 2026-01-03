@@ -5,3 +5,4 @@ google-auth
 dropbox
 plotly
 streamlit-aggrid
+openpyxl
