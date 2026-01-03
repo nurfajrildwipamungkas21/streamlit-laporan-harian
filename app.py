@@ -813,7 +813,8 @@ if KONEKSI_GSHEET_BERHASIL:
 
         with st.expander("➕ Input Closing Deal", expanded=False):
             with st.form("form_closing_deal", clear_on_submit=True):
-                cd_group = st.text_input("Nama Group", placeholder="Contoh: Group ABC")
+                # ✅ UX: jelaskan bahwa group opsional
+                cd_group = st.text_input("Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada")
                 cd_marketing = st.text_input("Nama Marketing", placeholder="Contoh: Andi")
                 cd_tgl = st.date_input(
                     "Tanggal Event",
