@@ -9,6 +9,8 @@ from dropbox.exceptions import AuthError, ApiError
 from dropbox.sharing import RequestedVisibility, SharedLinkSettings
 import re
 import io
+import hashlib
+import hmac
 
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
@@ -147,7 +149,7 @@ TZ_JKT = ZoneInfo("Asia/Jakarta")
 
 
 # =========================================================
-# SMALL HELPERS (Audit / Actor)
+# SMALL HELPERS (Audit / Actor / Admin Password)
 # =========================================================
 def now_ts_str() -> str:
     """Timestamp akurat (WIB) untuk semua perubahan."""
@@ -194,6 +196,56 @@ def get_actor_fallback(default="-") -> str:
         if k in st.session_state and safe_str(st.session_state.get(k), "").strip():
             return safe_str(st.session_state.get(k)).strip()
     return default
+
+
+def verify_admin_password(pwd_input: str) -> bool:
+    """
+    ✅ Implementasi saran keamanan:
+    - Tidak ada default password hardcoded.
+    - Support 2 mode:
+      (A) st.secrets["password_admin_hash"] = SHA256 hex dari password
+      (B) st.secrets["password_admin"] = password plain (legacy)
+    """
+    pwd_input = safe_str(pwd_input, "").strip()
+    if not pwd_input:
+        return False
+
+    # Mode hash (disarankan)
+    hash_secret = None
+    try:
+        hash_secret = st.secrets.get("password_admin_hash", None)
+    except Exception:
+        hash_secret = None
+
+    if hash_secret and safe_str(hash_secret, "").strip():
+        try:
+            digest = hashlib.sha256(pwd_input.encode("utf-8")).hexdigest()
+            return hmac.compare_digest(digest, safe_str(hash_secret, "").strip())
+        except Exception:
+            return False
+
+    # Mode plain (legacy)
+    plain_secret = None
+    try:
+        plain_secret = st.secrets.get("password_admin", None)
+    except Exception:
+        plain_secret = None
+
+    if plain_secret and safe_str(plain_secret, "").strip():
+        return hmac.compare_digest(pwd_input, safe_str(plain_secret, "").strip())
+
+    # Tidak ada secret terset
+    return False
+
+
+def admin_secret_configured() -> bool:
+    try:
+        return bool(
+            safe_str(st.secrets.get("password_admin_hash", ""), "").strip()
+            or safe_str(st.secrets.get("password_admin", ""), "").strip()
+        )
+    except Exception:
+        return False
 
 
 # =========================================================
@@ -1631,13 +1683,15 @@ if KONEKSI_GSHEET_BERHASIL:
 
         if not st.session_state["is_admin"]:
             with st.expander("🔐 Akses Khusus Admin"):
+                if not admin_secret_configured():
+                    st.warning("Admin login belum aktif: set `password_admin_hash` (disarankan) atau `password_admin` di Streamlit Secrets.")
                 pwd = st.text_input("Password:", type="password", key="input_pwd")
                 if st.button("Login Admin"):
-                    if pwd == st.secrets.get("password_admin", "fajril123"):
+                    if verify_admin_password(pwd):
                         st.session_state["is_admin"] = True
                         st.rerun()
                     else:
-                        st.error("Password salah!")
+                        st.error("Password salah / belum dikonfigurasi!")
         else:
             if st.button("🔓 Logout Admin"):
                 st.session_state["is_admin"] = False
