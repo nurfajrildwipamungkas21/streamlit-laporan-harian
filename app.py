@@ -123,7 +123,7 @@ INDIV_CHECKLIST_COLUMNS = ["Nama", "Target", "Tgl_Mulai", "Tgl_Selesai", "Status
 # ✅ NEW: Pembayaran Columns
 COL_TS_BAYAR = "Timestamp Input"
 COL_JENIS_BAYAR = "Jenis Pembayaran"       # DP/Termin/Pelunasan/Lainnya(custom)
-COL_NOMINAL_BAYAR = "Nominal Pembayaran"   # numeric int
+COL_NOMINAL_BAYAR = "Nominal Pembayaran"   # numeric int (disimpan)
 COL_JATUH_TEMPO = "Batas Waktu Bayar"      # yyyy-mm-dd
 COL_STATUS_BAYAR = "Status Pembayaran"     # TRUE/FALSE
 COL_BUKTI_BAYAR = "Bukti Pembayaran"       # link dropbox
@@ -403,6 +403,66 @@ def format_rupiah_display(amount) -> str:
         return "Rp " + f"{n:,}".replace(",", ".")
     except Exception:
         return str(amount)
+
+
+# =========================================================
+# ✅ UI DISPLAY HELPERS (RUPIAH)
+# =========================================================
+def payment_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Untuk tampilan UI saja:
+    - Nominal Pembayaran jadi string 'Rp 15.000.000'
+    Data asli (numeric) tetap dipakai untuk simpan/export.
+    """
+    dfv = df.copy()
+    if dfv is None or dfv.empty:
+        return dfv
+    if COL_NOMINAL_BAYAR in dfv.columns:
+        dfv[COL_NOMINAL_BAYAR] = dfv[COL_NOMINAL_BAYAR].apply(
+            lambda x: "" if x is None or pd.isna(x) else format_rupiah_display(x)
+        )
+    return dfv
+
+
+def on_change_pay_nominal():
+    """
+    Auto-format input nominal ke 'Rp 15.000.000' (untuk UI).
+    Disimpan tetap numeric via parse_rupiah_to_int saat submit.
+    """
+    raw = st.session_state.get("pay_nominal", "")
+    val = parse_rupiah_to_int(raw)
+    if val is not None:
+        st.session_state["pay_nominal"] = format_rupiah_display(val)
+
+
+def reset_payment_form_state():
+    """Reset field input pembayaran (agar terasa seperti clear_on_submit)."""
+    keys = [
+        "pay_group",
+        "pay_marketing",
+        "pay_event_date",
+        "pay_jenis_opt",
+        "pay_jenis_custom",
+        "pay_nominal",
+        "pay_due_date",
+        "pay_status",
+        "pay_note",
+        "pay_file",
+    ]
+    for k in keys:
+        try:
+            if k == "pay_event_date":
+                st.session_state[k] = datetime.now(tz=TZ_JKT).date()
+            elif k == "pay_due_date":
+                st.session_state[k] = datetime.now(tz=TZ_JKT).date() + timedelta(days=7)
+            elif k == "pay_jenis_opt":
+                st.session_state[k] = "Down Payment (DP)"
+            elif k == "pay_status":
+                st.session_state[k] = False
+            else:
+                st.session_state[k] = ""
+        except Exception:
+            pass
 
 
 # =========================================================
@@ -1866,101 +1926,111 @@ if KONEKSI_GSHEET_BERHASIL:
 
         # =========================================================
         # PEMBAYARAN (DP/TERMIN/PELUNASAN) - Sidebar section
-        # - Bisa edit kembali: Jenis, Jatuh Tempo, Status, Catatan
-        # - Semua edit otomatis update: Timestamp Update + Updated By
-        # - Alert table juga bisa edit Catatan (langsung) + audit
+        # ✅ Implementasi full:
+        # - Tabel: Nominal tampil "Rp 15.000.000" (display-only)
+        # - Input: Nominal auto-format ke "Rp 15.000.000"
+        # - Simpan: tetap numeric ke GSheet
         # =========================================================
         st.divider()
         st.header("💳 Pembayaran (DP / Termin / Pelunasan)")
 
         with st.expander("➕ Input Pembayaran", expanded=False):
-            with st.form("form_pembayaran_dp", clear_on_submit=True):
-                p_group = st.text_input(
-                    "Nama Group (Opsional)",
-                    placeholder="Kosongkan jika tidak ada",
-                    key="pay_group"
-                )
-                p_marketing = st.text_input(
-                    "Nama Marketing (Wajib)",
-                    placeholder="Contoh: Andi",
-                    key="pay_marketing"
-                )
-                p_tgl_event = st.date_input(
-                    "Tanggal Event (Opsional)",
-                    value=datetime.now(tz=TZ_JKT).date(),
-                    key="pay_event_date"
+            # NOTE: tidak memakai st.form agar auto-format nominal bisa realtime
+            p_group = st.text_input(
+                "Nama Group (Opsional)",
+                placeholder="Kosongkan jika tidak ada",
+                key="pay_group"
+            )
+            p_marketing = st.text_input(
+                "Nama Marketing (Wajib)",
+                placeholder="Contoh: Andi",
+                key="pay_marketing"
+            )
+            p_tgl_event = st.date_input(
+                "Tanggal Event (Opsional)",
+                value=st.session_state.get("pay_event_date", datetime.now(tz=TZ_JKT).date()),
+                key="pay_event_date"
+            )
+
+            p_jenis_opt = st.selectbox(
+                "Jenis Pembayaran",
+                ["Down Payment (DP)", "Termin", "Pelunasan", "Lainnya"],
+                index=0 if st.session_state.get("pay_jenis_opt", "Down Payment (DP)") == "Down Payment (DP)" else 0,
+                key="pay_jenis_opt"
+            )
+
+            p_jenis_custom = ""
+            if p_jenis_opt == "Lainnya":
+                p_jenis_custom = st.text_input(
+                    "Tulis Jenis Pembayaran (Custom) *wajib*",
+                    placeholder="Contoh: Cicilan 1 / Cicilan 2 / Fee Admin / Refund / dll",
+                    key="pay_jenis_custom"
                 )
 
-                p_jenis_opt = st.selectbox(
-                    "Jenis Pembayaran",
-                    ["Down Payment (DP)", "Termin", "Pelunasan", "Lainnya"],
-                    index=0,
-                    key="pay_jenis_opt"
-                )
+            # final jenis
+            p_jenis_final = p_jenis_opt
+            if p_jenis_opt == "Lainnya":
+                p_jenis_final = (p_jenis_custom or "").strip()
 
-                p_jenis_custom = ""
-                if p_jenis_opt == "Lainnya":
-                    p_jenis_custom = st.text_input(
-                        "Tulis Jenis Pembayaran (Custom) *wajib*",
-                        placeholder="Contoh: Cicilan 1 / Cicilan 2 / Fee Admin / Refund / dll",
-                        key="pay_jenis_custom"
+            p_nominal = st.text_input(
+                "Nominal Pembayaran (Input bebas)",
+                placeholder="Contoh: 5000000 / 5jt / Rp 5.000.000 / 5,5jt",
+                key="pay_nominal",
+                on_change=on_change_pay_nominal
+            )
+
+            # preview (realtime)
+            nom_preview = parse_rupiah_to_int(p_nominal)
+            if nom_preview is not None:
+                st.caption(f"Preview: **{format_rupiah_display(nom_preview)}**")
+            else:
+                st.caption("Preview: -")
+
+            p_jatuh_tempo = st.date_input(
+                "Batas Waktu Bayar (Jatuh Tempo)",
+                value=st.session_state.get("pay_due_date", datetime.now(tz=TZ_JKT).date() + timedelta(days=7)),
+                key="pay_due_date"
+            )
+
+            p_status = st.checkbox("✅ Sudah Dibayar?", value=bool(st.session_state.get("pay_status", False)), key="pay_status")
+
+            p_catatan = st.text_area(
+                "Catatan (Opsional)",
+                height=90,
+                placeholder="Contoh: DP untuk booking tanggal event...",
+                key="pay_note"
+            )
+
+            p_bukti = st.file_uploader(
+                "Upload Bukti Pembayaran (Foto/Screenshot/PDF)",
+                key="pay_file",
+                disabled=not KONEKSI_DROPBOX_BERHASIL
+            )
+
+            if st.button("✅ Simpan Pembayaran", use_container_width=True, key="btn_save_payment"):
+                # validasi "Lainnya"
+                if p_jenis_opt == "Lainnya" and not p_jenis_final:
+                    st.error("Karena memilih 'Lainnya', jenis pembayaran custom wajib diisi.")
+                else:
+                    res, msg = tambah_pembayaran_dp(
+                        nama_group=p_group,
+                        nama_marketing=p_marketing,
+                        tanggal_event=p_tgl_event,
+                        jenis_bayar=p_jenis_final,
+                        nominal_input=p_nominal,
+                        jatuh_tempo=p_jatuh_tempo,
+                        status_bayar=p_status,
+                        bukti_file=p_bukti,
+                        catatan=p_catatan
                     )
 
-                # final jenis
-                p_jenis_final = p_jenis_opt
-                if p_jenis_opt == "Lainnya":
-                    p_jenis_final = p_jenis_custom.strip()
-
-                p_nominal = st.text_input(
-                    "Nominal Pembayaran (Input bebas)",
-                    placeholder="Contoh: 5000000 / 5jt / Rp 5.000.000 / 5,5jt",
-                    key="pay_nominal"
-                )
-
-                p_jatuh_tempo = st.date_input(
-                    "Batas Waktu Bayar (Jatuh Tempo)",
-                    value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7),
-                    key="pay_due_date"
-                )
-
-                p_status = st.checkbox("✅ Sudah Dibayar?", value=False, key="pay_status")
-
-                p_catatan = st.text_area(
-                    "Catatan (Opsional)",
-                    height=90,
-                    placeholder="Contoh: DP untuk booking tanggal event...",
-                    key="pay_note"
-                )
-
-                p_bukti = st.file_uploader(
-                    "Upload Bukti Pembayaran (Foto/Screenshot/PDF)",
-                    key="pay_file",
-                    disabled=not KONEKSI_DROPBOX_BERHASIL
-                )
-
-                if st.form_submit_button("✅ Simpan Pembayaran"):
-                    # validasi "Lainnya"
-                    if p_jenis_opt == "Lainnya" and not p_jenis_final:
-                        st.error("Karena memilih 'Lainnya', jenis pembayaran custom wajib diisi.")
+                    if res:
+                        st.success(msg)
+                        reset_payment_form_state()
+                        st.cache_data.clear()
+                        st.rerun()
                     else:
-                        res, msg = tambah_pembayaran_dp(
-                            nama_group=p_group,
-                            nama_marketing=p_marketing,
-                            tanggal_event=p_tgl_event,
-                            jenis_bayar=p_jenis_final,
-                            nominal_input=p_nominal,
-                            jatuh_tempo=p_jatuh_tempo,
-                            status_bayar=p_status,
-                            bukti_file=p_bukti,
-                            catatan=p_catatan
-                        )
-
-                        if res:
-                            st.success(msg)
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(msg)
+                        st.error(msg)
 
         with st.expander("📋 Data Pembayaran + Alert Jatuh Tempo", expanded=False):
             df_pay = load_pembayaran_dp()
@@ -1991,18 +2061,21 @@ if KONEKSI_GSHEET_BERHASIL:
                         COL_TS_BAYAR,
                         COL_GROUP, COL_MARKETING, COL_JENIS_BAYAR,
                         COL_NOMINAL_BAYAR, COL_JATUH_TEMPO,
+                        COL_STATUS_BAYAR,
                         COL_BUKTI_BAYAR, COL_CATATAN_BAYAR,
                         COL_TS_UPDATE, COL_UPDATED_BY
                     ]
                     cols_alert = [c for c in cols_alert if c in overdue_df.columns]
 
+                    overdue_view = payment_df_for_display(overdue_df[cols_alert])
+
                     overdue_edit = st.data_editor(
-                        overdue_df[cols_alert],
+                        overdue_view,
                         column_config={
                             COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
                             COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
                             COL_JENIS_BAYAR: st.column_config.TextColumn("Jenis Pembayaran", width="medium"),
-                            COL_NOMINAL_BAYAR: st.column_config.NumberColumn("Nominal (Rp)", width="medium"),
+                            COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True, width="medium"),
                             COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
                             COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
                             COL_TS_UPDATE: st.column_config.TextColumn("Timestamp Update", disabled=True, width="medium"),
@@ -2043,17 +2116,21 @@ if KONEKSI_GSHEET_BERHASIL:
                         COL_TS_BAYAR,
                         COL_GROUP, COL_MARKETING, COL_JENIS_BAYAR,
                         COL_NOMINAL_BAYAR, COL_JATUH_TEMPO,
+                        COL_STATUS_BAYAR,
                         COL_BUKTI_BAYAR, COL_CATATAN_BAYAR,
                         COL_TS_UPDATE, COL_UPDATED_BY
                     ]
                     cols_alert = [c for c in cols_alert if c in due_soon_df.columns]
 
+                    due_soon_view = payment_df_for_display(due_soon_df[cols_alert])
+
                     due_soon_edit = st.data_editor(
-                        due_soon_df[cols_alert],
+                        due_soon_view,
                         column_config={
+                            COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
                             COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
                             COL_JENIS_BAYAR: st.column_config.TextColumn("Jenis Pembayaran", width="medium"),
-                            COL_NOMINAL_BAYAR: st.column_config.NumberColumn("Nominal (Rp)", width="medium"),
+                            COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True, width="medium"),
                             COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
                             COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
                             COL_TS_UPDATE: st.column_config.TextColumn("Timestamp Update", disabled=True, width="medium"),
@@ -2095,13 +2172,16 @@ if KONEKSI_GSHEET_BERHASIL:
                 editable_cols = {COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_JENIS_BAYAR}
                 disabled_cols = [c for c in PAYMENT_COLUMNS if c not in editable_cols]
 
-                edited_pay = st.data_editor(
-                    df_pay,
+                # ✅ tampilkan nominal sebagai "Rp 15.000.000" (display-only)
+                df_pay_view = payment_df_for_display(df_pay)
+
+                edited_pay_view = st.data_editor(
+                    df_pay_view,
                     column_config={
                         COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
                         COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
                         COL_JENIS_BAYAR: st.column_config.TextColumn("Jenis Pembayaran", width="medium"),
-                        COL_NOMINAL_BAYAR: st.column_config.NumberColumn("Nominal (Rp)", width="medium"),
+                        COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True, width="medium"),
                         COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
                         COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
                         COL_TS_UPDATE: st.column_config.TextColumn("Timestamp Update", disabled=True, width="medium"),
@@ -2114,7 +2194,20 @@ if KONEKSI_GSHEET_BERHASIL:
                 )
 
                 if st.button("💾 Simpan Perubahan Pembayaran", use_container_width=True):
-                    df_to_save = apply_audit_payments_changes(df_pay, edited_pay, actor=actor_final)
+                    # ✅ IMPORTANT:
+                    # edited_pay_view berisi nominal string (Rp ..), jadi kita hanya copy kolom editable
+                    editable_cols_list = [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_JENIS_BAYAR]
+
+                    df_after = df_pay.copy().set_index(COL_TS_BAYAR, drop=False)
+                    ed = edited_pay_view.copy().set_index(COL_TS_BAYAR, drop=False)
+
+                    for c in editable_cols_list:
+                        if c in ed.columns:
+                            df_after.loc[ed.index, c] = ed[c]
+
+                    df_after = df_after.reset_index(drop=True)
+
+                    df_to_save = apply_audit_payments_changes(df_pay, df_after, actor=actor_final)
                     if save_pembayaran_dp(df_to_save):
                         st.toast("Tersimpan!", icon="✅")
                         st.cache_data.clear()
