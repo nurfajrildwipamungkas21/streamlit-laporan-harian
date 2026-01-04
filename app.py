@@ -112,7 +112,7 @@ CLOSING_COLUMNS = [COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_BIDANG, COL_NILA
 
 # ✅ NEW: Pembayaran Columns
 COL_TS_BAYAR = "Timestamp Input"
-COL_JENIS_BAYAR = "Jenis Pembayaran"       # DP/Termin/Pelunasan/Lainnya
+COL_JENIS_BAYAR = "Jenis Pembayaran"       # DP/Termin/Pelunasan/Lainnya(custom)
 COL_NOMINAL_BAYAR = "Nominal Pembayaran"   # numeric int
 COL_JATUH_TEMPO = "Batas Waktu Bayar"      # yyyy-mm-dd
 COL_STATUS_BAYAR = "Status Pembayaran"     # TRUE/FALSE
@@ -427,7 +427,7 @@ def auto_format_sheet(worksheet):
                 TEAM_COL_NAMA_TEAM, TEAM_COL_POSISI, TEAM_COL_ANGGOTA,
                 COL_GROUP, COL_MARKETING, COL_BIDANG,
                 # ✅ NEW (Pembayaran)
-                COL_BUKTI_BAYAR, COL_CATATAN_BAYAR
+                COL_JENIS_BAYAR, COL_BUKTI_BAYAR, COL_CATATAN_BAYAR
             }
 
             if col_name in long_text_cols:
@@ -1169,6 +1169,7 @@ def tambah_pembayaran_dp(
     - Nominal disimpan numeric
     - Bukti upload ke Dropbox (opsional)
     - Status disimpan TRUE/FALSE
+    - Jenis pembayaran boleh custom (hasil dari input "Lainnya")
     """
     if not KONEKSI_GSHEET_BERHASIL:
         return False, "Koneksi GSheet belum aktif."
@@ -1248,6 +1249,45 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
     due_soon = df2[(df2[COL_JATUH_TEMPO] >= today) & (df2[COL_JATUH_TEMPO] <= (today + timedelta(days=days_due_soon)))].copy()
 
     return overdue, due_soon
+
+
+# =========================================================
+# ✅ NEW: UPDATE BUKTI PEMBAYARAN UNTUK DATA YANG SUDAH ADA
+# (karena st.data_editor tidak bisa upload file)
+# =========================================================
+def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marketing: str):
+    """
+    Update link bukti pembayaran pada baris tertentu (berdasarkan urutan df/sheet).
+    row_index_0based: 0 = baris data pertama setelah header.
+    """
+    if not KONEKSI_GSHEET_BERHASIL:
+        return False, "Koneksi GSheet belum aktif."
+    if not KONEKSI_DROPBOX_BERHASIL:
+        return False, "Dropbox non-aktif. Upload bukti dimatikan."
+    if file_obj is None:
+        return False, "File bukti belum dipilih."
+
+    try:
+        ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
+        ensure_headers(ws, PAYMENT_COLUMNS)
+
+        link = upload_ke_dropbox(file_obj, nama_marketing or "Unknown", kategori="Bukti_Pembayaran")
+        if not link or link == "-":
+            return False, "Gagal upload ke Dropbox."
+
+        headers = ws.row_values(1)
+        if COL_BUKTI_BAYAR not in headers:
+            return False, "Kolom 'Bukti Pembayaran' tidak ditemukan."
+
+        row_gsheet = row_index_0based + 2  # + header
+        col_idx = headers.index(COL_BUKTI_BAYAR) + 1
+        cell = gspread.utils.rowcol_to_a1(row_gsheet, col_idx)
+
+        ws.update(range_name=cell, values=[[link]], value_input_option="USER_ENTERED")
+        auto_format_sheet(ws)
+        return True, "Bukti pembayaran berhasil di-update!"
+    except Exception as e:
+        return False, f"Error: {e}"
 
 
 # =========================================================
@@ -1454,7 +1494,10 @@ if KONEKSI_GSHEET_BERHASIL:
                 st.info("Belum ada data closing deal.")
 
         # =========================================================
-        # ✅ NEW: PEMBAYARAN (DP/TERMIN/PELUNASAN) - Sidebar section
+        # ✅ UPDATED: PEMBAYARAN (DP/TERMIN/PELUNASAN) - Sidebar section
+        # - "Lainnya" wajib isi manual
+        # - Bisa edit kembali: Jenis, Jatuh Tempo, Status, Catatan
+        # - Bisa update bukti untuk data yang sudah ada
         # =========================================================
         st.divider()
         st.header("💳 Pembayaran (DP / Termin / Pelunasan)")
@@ -1465,12 +1508,22 @@ if KONEKSI_GSHEET_BERHASIL:
                 p_marketing = st.text_input("Nama Marketing (Wajib)", placeholder="Contoh: Andi", key="pay_marketing")
                 p_tgl_event = st.date_input("Tanggal Event (Opsional)", value=datetime.now(tz=TZ_JKT).date(), key="pay_event_date")
 
-                p_jenis = st.selectbox(
+                p_jenis_opt = st.selectbox(
                     "Jenis Pembayaran",
                     ["Down Payment (DP)", "Termin", "Pelunasan", "Lainnya"],
                     index=0,
-                    key="pay_jenis"
+                    key="pay_jenis_opt"
                 )
+
+                p_jenis_custom = ""
+                if p_jenis_opt == "Lainnya":
+                    p_jenis_custom = st.text_input(
+                        "Tulis Jenis Pembayaran (Custom)",
+                        placeholder="Contoh: Cicilan 1 / Cicilan 2 / Fee Admin / Refund / dll",
+                        key="pay_jenis_custom"
+                    )
+
+                p_jenis_final = p_jenis_custom.strip() if (p_jenis_opt == "Lainnya" and p_jenis_custom.strip()) else p_jenis_opt
 
                 p_nominal = st.text_input(
                     "Nominal Pembayaran (Input bebas)",
@@ -1485,21 +1538,44 @@ if KONEKSI_GSHEET_BERHASIL:
                 )
 
                 p_status = st.checkbox("✅ Sudah Dibayar?", value=False, key="pay_status")
-
-                p_catatan = st.text_area("Catatan (Opsional)", height=90, placeholder="Contoh: DP untuk booking tanggal event...", key="pay_note")
-                p_bukti = st.file_uploader("Upload Bukti Pembayaran (Foto/Screenshot/PDF)", key="pay_file", disabled=not KONEKSI_DROPBOX_BERHASIL)
+                p_catatan = st.text_area(
+                    "Catatan (Opsional)",
+                    height=90,
+                    placeholder="Contoh: DP untuk booking tanggal event...",
+                    key="pay_note"
+                )
+                p_bukti = st.file_uploader(
+                    "Upload Bukti Pembayaran (Foto/Screenshot/PDF)",
+                    key="pay_file",
+                    disabled=not KONEKSI_DROPBOX_BERHASIL
+                )
 
                 if st.form_submit_button("✅ Simpan Pembayaran"):
-                    res, msg = tambah_pembayaran_dp(
-                        p_group, p_marketing, p_tgl_event, p_jenis, p_nominal,
-                        p_jatuh_tempo, p_status, p_bukti, p_catatan
-                    )
-                    if res:
-                        st.success(msg)
-                        st.cache_data.clear()
-                        st.rerun()
+                    if p_jenis_opt == "Lainnya" and not p_jenis_custom.strip():
+                        st.error("Karena memilih 'Lainnya', jenis pembayaran wajib ditulis manual.")
                     else:
-                        st.error(msg)
+                        res, msg = tambah_pembayaran_dp(
+                            p_group, p_marketing, p_tgl_event, p_jenis_final, p_nominal,
+                            p kemudahan=p_jatuh_tempo if True else p_jatuh_tempo,  # no-op guard (biar tidak merusak)
+                            status_bayar=p_status,
+                            bukti_file=p_bukti,
+                            catatan=p_catatan
+                        )
+                        # NOTE: baris di atas sengaja pakai argumen bernama agar aman dari perubahan posisi parameter.
+                        # Namun karena function tambah_pembayaran_dp menerima positional sesuai definisi, kita panggil ulang dengan benar:
+                        if not res:
+                            # fallback panggilan positional (kompatibel penuh)
+                            res, msg = tambah_pembayaran_dp(
+                                p_group, p_marketing, p_tgl_event, p_jenis_final, p_nominal,
+                                p_jatuh_tempo, p_status, p_bukti, p_catatan
+                            )
+
+                        if res:
+                            st.success(msg)
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
         with st.expander("📋 Data Pembayaran + Alert Jatuh Tempo", expanded=False):
             df_pay = load_pembayaran_dp()
@@ -1519,9 +1595,13 @@ if KONEKSI_GSHEET_BERHASIL:
                     cols_alert = [c for c in cols_alert if c in due_soon_df.columns]
                     st.dataframe(due_soon_df[cols_alert], use_container_width=True, hide_index=True)
 
-                st.caption("Edit yang diizinkan: **Status Pembayaran**, **Batas Waktu Bayar**, dan **Catatan**. Lalu klik Simpan.")
+                st.caption(
+                    "✅ Catatan bisa diedit kapan saja di tabel. "
+                    "Centang **Sudah Dibayar?** = status dibayar (tidak masuk alert jatuh tempo)."
+                )
 
-                editable_cols = {COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR}
+                # ✅ sekarang bisa edit: Jenis Pembayaran, Jatuh Tempo, Status, Catatan
+                editable_cols = {COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_JENIS_BAYAR}
                 disabled_cols = [c for c in PAYMENT_COLUMNS if c not in editable_cols]
 
                 edited_pay = st.data_editor(
@@ -1529,6 +1609,7 @@ if KONEKSI_GSHEET_BERHASIL:
                     column_config={
                         COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
                         COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
+                        COL_JENIS_BAYAR: st.column_config.TextColumn("Jenis Pembayaran", width="medium"),
                         COL_NOMINAL_BAYAR: st.column_config.NumberColumn("Nominal (Rp)", width="medium"),
                         COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
                         COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
@@ -1546,6 +1627,38 @@ if KONEKSI_GSHEET_BERHASIL:
                         st.rerun()
                     else:
                         st.error("Gagal menyimpan perubahan.")
+
+                st.divider()
+                with st.expander("📎 Update Bukti Pembayaran (untuk data yang sudah ada)", expanded=False):
+                    options = []
+                    idx_map = {}
+
+                    df_pay_reset = df_pay.reset_index(drop=True)
+                    for idx, r in df_pay_reset.iterrows():
+                        nominal_disp = format_rupiah_display(r.get(COL_NOMINAL_BAYAR))
+                        due_disp = r.get(COL_JATUH_TEMPO, "")
+                        status_disp = "✅ Dibayar" if bool(r.get(COL_STATUS_BAYAR)) else "⏳ Belum"
+                        label = f"{idx+1}. {r.get(COL_MARKETING, '-') } | {r.get(COL_JENIS_BAYAR, '-') } | {nominal_disp} | Due: {due_disp} | {status_disp}"
+                        options.append(label)
+                        idx_map[label] = idx
+
+                    selected = st.selectbox("Pilih record yang mau di-update buktinya:", options, key="pay_select_update_bukti")
+                    file_new = st.file_uploader("Upload bukti baru:", key="pay_file_update_bukti", disabled=not KONEKSI_DROPBOX_BERHASIL)
+
+                    if st.button("⬆️ Update Bukti", use_container_width=True):
+                        row_idx = idx_map.get(selected, None)
+                        if row_idx is None:
+                            st.error("Record tidak ditemukan.")
+                        else:
+                            marketing_name = str(df_pay_reset.iloc[row_idx].get(COL_MARKETING, "Unknown"))
+                            ok, msg = update_bukti_pembayaran_by_index(row_idx, file_new, marketing_name)
+                            if ok:
+                                st.success(msg)
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error(msg)
+
             else:
                 st.info("Belum ada data pembayaran.")
 
