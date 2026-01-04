@@ -67,6 +67,9 @@ SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 SHEET_CONFIG_TEAM = "Config_Team"
 SHEET_CLOSING_DEAL = "Closing_Deal"
 
+# ✅ NEW: Pembayaran (DP/Termin/Pelunasan)
+SHEET_PEMBAYARAN = "Pembayaran_DP"
+
 # Kolom laporan harian
 COL_TIMESTAMP = "Timestamp"
 COL_NAMA = "Nama"
@@ -106,6 +109,28 @@ COL_BIDANG = "Bidang"
 COL_NILAI_KONTRAK = "Nilai Kontrak"  # disimpan sebagai angka (int)
 
 CLOSING_COLUMNS = [COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_BIDANG, COL_NILAI_KONTRAK]
+
+# ✅ NEW: Pembayaran Columns
+COL_TS_BAYAR = "Timestamp Input"
+COL_JENIS_BAYAR = "Jenis Pembayaran"       # DP/Termin/Pelunasan/Lainnya
+COL_NOMINAL_BAYAR = "Nominal Pembayaran"   # numeric int
+COL_JATUH_TEMPO = "Batas Waktu Bayar"      # yyyy-mm-dd
+COL_STATUS_BAYAR = "Status Pembayaran"     # TRUE/FALSE
+COL_BUKTI_BAYAR = "Bukti Pembayaran"       # link dropbox
+COL_CATATAN_BAYAR = "Catatan"
+
+PAYMENT_COLUMNS = [
+    COL_TS_BAYAR,
+    COL_GROUP,
+    COL_MARKETING,
+    COL_TGL_EVENT,
+    COL_JENIS_BAYAR,
+    COL_NOMINAL_BAYAR,
+    COL_JATUH_TEMPO,
+    COL_STATUS_BAYAR,
+    COL_BUKTI_BAYAR,
+    COL_CATATAN_BAYAR
+]
 
 TZ_JKT = ZoneInfo("Asia/Jakarta")
 
@@ -362,7 +387,10 @@ def auto_format_sheet(worksheet):
     - body: top align, clip default
     - header: bold, gray, center, freeze
     - smart column width + wrap kolom panjang
-    - khusus COL_NILAI_KONTRAK: RIGHT + CURRENCY (Rupiah) => numeric tetap numeric, tampil Rp
+    - khusus Rupiah numeric:
+        - COL_NILAI_KONTRAK
+        - COL_NOMINAL_BAYAR
+      => RIGHT + CURRENCY (Rupiah) => numeric tetap numeric, tampil Rp
     """
     try:
         sheet_id = worksheet.id
@@ -397,17 +425,19 @@ def auto_format_sheet(worksheet):
                 "Tempat Dikunjungi", "Kesimpulan", "Kendala", "Next Plan (Pending)", "Feedback Lead",
                 COL_NAMA_KLIEN,
                 TEAM_COL_NAMA_TEAM, TEAM_COL_POSISI, TEAM_COL_ANGGOTA,
-                COL_GROUP, COL_MARKETING, COL_BIDANG
+                COL_GROUP, COL_MARKETING, COL_BIDANG,
+                # ✅ NEW (Pembayaran)
+                COL_BUKTI_BAYAR, COL_CATATAN_BAYAR
             }
 
             if col_name in long_text_cols:
                 width = 300
                 cell_format_override["wrapStrategy"] = "WRAP"
-            elif col_name in {"Tgl_Mulai", "Tgl_Selesai", "Timestamp", COL_TGL_EVENT}:
-                width = 150 if col_name == "Timestamp" else 120
+            elif col_name in {"Tgl_Mulai", "Tgl_Selesai", "Timestamp", COL_TGL_EVENT, COL_JATUH_TEMPO, COL_TS_BAYAR}:
+                width = 150 if col_name in {"Timestamp", COL_TS_BAYAR} else 120
                 cell_format_override["horizontalAlignment"] = "CENTER"
-            elif col_name in {"Status", "Done?"}:
-                width = 60
+            elif col_name in {"Status", "Done?", COL_STATUS_BAYAR}:
+                width = 130 if col_name == COL_STATUS_BAYAR else 60
                 cell_format_override["horizontalAlignment"] = "CENTER"
             elif col_name == "Nama":
                 width = 150
@@ -417,7 +447,7 @@ def auto_format_sheet(worksheet):
             elif col_name == COL_KONTAK_KLIEN:
                 width = 150
                 cell_format_override["horizontalAlignment"] = "CENTER"
-            elif col_name == COL_NILAI_KONTRAK:
+            elif col_name in {COL_NILAI_KONTRAK, COL_NOMINAL_BAYAR}:
                 # ✅ Rupiah numeric format
                 width = 180
                 cell_format_override["horizontalAlignment"] = "RIGHT"
@@ -1018,6 +1048,209 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
 
 
 # =========================================================
+# ✅ NEW: PEMBAYARAN (DP/TERMIN/PELUNASAN)
+# =========================================================
+@st.cache_data(ttl=60)
+def load_pembayaran_dp():
+    """
+    Load Pembayaran:
+    - Nominal Pembayaran dipaksa numeric (Int64)
+    - Status Pembayaran diparse jadi boolean
+    - Jatuh tempo diparse jadi date
+    """
+    if not KONEKSI_GSHEET_BERHASIL:
+        return pd.DataFrame(columns=PAYMENT_COLUMNS)
+
+    try:
+        try:
+            ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
+        except Exception:
+            ws = spreadsheet.add_worksheet(title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
+            ws.append_row(PAYMENT_COLUMNS, value_input_option="USER_ENTERED")
+            auto_format_sheet(ws)
+            return pd.DataFrame(columns=PAYMENT_COLUMNS)
+
+        ensure_headers(ws, PAYMENT_COLUMNS)
+
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+
+        for c in PAYMENT_COLUMNS:
+            if c not in df.columns:
+                df[c] = ""
+
+        # nominal numeric
+        if COL_NOMINAL_BAYAR in df.columns:
+            parsed = df[COL_NOMINAL_BAYAR].apply(parse_rupiah_to_int)
+            df[COL_NOMINAL_BAYAR] = pd.Series(parsed, dtype="Int64")
+
+        # status boolean
+        if COL_STATUS_BAYAR in df.columns:
+            df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(lambda x: True if str(x).upper() == "TRUE" else False)
+
+        # jatuh tempo ke date
+        if COL_JATUH_TEMPO in df.columns:
+            df[COL_JATUH_TEMPO] = pd.to_datetime(df[COL_JATUH_TEMPO], errors="coerce").dt.date
+
+        # rapikan kolom string
+        for c in [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR, COL_BUKTI_BAYAR, COL_CATATAN_BAYAR]:
+            if c in df.columns:
+                df[c] = df[c].fillna("").astype(str)
+
+        return df[PAYMENT_COLUMNS].copy()
+    except Exception:
+        return pd.DataFrame(columns=PAYMENT_COLUMNS)
+
+
+def save_pembayaran_dp(df: pd.DataFrame) -> bool:
+    """
+    Save full table Pembayaran:
+    - Status -> TRUE/FALSE
+    - Nominal -> int / ""
+    - Jatuh tempo -> yyyy-mm-dd / ""
+    """
+    try:
+        ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
+        ensure_headers(ws, PAYMENT_COLUMNS)
+
+        ws.clear()
+
+        rows_needed = len(df) + 1
+        if ws.row_count < rows_needed:
+            ws.resize(rows=rows_needed)
+
+        df_save = df.copy()
+
+        # Pastikan semua kolom ada
+        for c in PAYMENT_COLUMNS:
+            if c not in df_save.columns:
+                df_save[c] = ""
+
+        # status -> TRUE/FALSE
+        df_save[COL_STATUS_BAYAR] = df_save[COL_STATUS_BAYAR].apply(lambda x: "TRUE" if bool(x) else "FALSE")
+
+        # nominal -> int / ""
+        df_save[COL_NOMINAL_BAYAR] = df_save[COL_NOMINAL_BAYAR].apply(lambda x: "" if pd.isna(x) else int(x))
+
+        # jatuh tempo -> yyyy-mm-dd / ""
+        def _fmt_date(d):
+            if d is None or pd.isna(d):
+                return ""
+            if hasattr(d, "strftime"):
+                return d.strftime("%Y-%m-%d")
+            s = str(d).strip()
+            return s if s and s.lower() not in {"nan", "none"} else ""
+
+        df_save[COL_JATUH_TEMPO] = df_save[COL_JATUH_TEMPO].apply(_fmt_date)
+
+        df_save = df_save[PAYMENT_COLUMNS].fillna("")
+        data_to_save = [df_save.columns.values.tolist()] + df_save.values.tolist()
+
+        ws.update(range_name="A1", values=data_to_save, value_input_option="USER_ENTERED")
+        auto_format_sheet(ws)
+        return True
+    except Exception:
+        return False
+
+
+def tambah_pembayaran_dp(
+    nama_group,
+    nama_marketing,
+    tanggal_event,
+    jenis_bayar,
+    nominal_input,
+    jatuh_tempo,
+    status_bayar,
+    bukti_file,
+    catatan
+):
+    """
+    Tambah 1 record pembayaran:
+    - Nominal disimpan numeric
+    - Bukti upload ke Dropbox (opsional)
+    - Status disimpan TRUE/FALSE
+    """
+    if not KONEKSI_GSHEET_BERHASIL:
+        return False, "Koneksi GSheet belum aktif."
+
+    try:
+        nama_group = str(nama_group).strip() if nama_group else "-"
+        nama_marketing = str(nama_marketing).strip() if nama_marketing else ""
+        jenis_bayar = str(jenis_bayar).strip() if jenis_bayar else "Down Payment (DP)"
+        catatan = str(catatan).strip() if catatan else "-"
+
+        if not nama_marketing or not str(nominal_input).strip() or not jatuh_tempo:
+            return False, "Field wajib: Nama Marketing, Nominal, dan Batas Waktu Bayar."
+
+        nominal_int = parse_rupiah_to_int(nominal_input)
+        if nominal_int is None:
+            return False, "Nominal tidak valid. Contoh: 5000000 / 5jt / Rp 5.000.000 / 5,5jt"
+
+        # upload bukti (opsional)
+        link_bukti = "-"
+        if bukti_file and KONEKSI_DROPBOX_BERHASIL:
+            link_bukti = upload_ke_dropbox(bukti_file, nama_marketing, kategori="Bukti_Pembayaran")
+
+        try:
+            ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
+        except Exception:
+            ws = spreadsheet.add_worksheet(title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
+            ws.append_row(PAYMENT_COLUMNS, value_input_option="USER_ENTERED")
+
+        ensure_headers(ws, PAYMENT_COLUMNS)
+
+        tgl_event_str = tanggal_event.strftime("%Y-%m-%d") if hasattr(tanggal_event, "strftime") else (str(tanggal_event) if tanggal_event else "-")
+        jatuh_tempo_str = jatuh_tempo.strftime("%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
+
+        ts_input = datetime.now(tz=TZ_JKT).strftime("%d-%m-%Y %H:%M:%S")
+        ws.append_row(
+            [
+                ts_input,
+                nama_group,
+                nama_marketing,
+                tgl_event_str,
+                jenis_bayar,
+                int(nominal_int),  # ✅ numeric
+                jatuh_tempo_str,
+                "TRUE" if bool(status_bayar) else "FALSE",
+                link_bukti,
+                catatan if catatan else "-"
+            ],
+            value_input_option="USER_ENTERED"
+        )
+
+        auto_format_sheet(ws)
+        return True, "Pembayaran berhasil disimpan!"
+    except Exception as e:
+        return False, str(e)
+
+
+def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
+    """
+    Return (overdue_df, due_soon_df) hanya untuk status belum dibayar.
+    """
+    if df is None or df.empty:
+        return (pd.DataFrame(columns=df.columns if df is not None else PAYMENT_COLUMNS),
+                pd.DataFrame(columns=df.columns if df is not None else PAYMENT_COLUMNS))
+
+    today = datetime.now(tz=TZ_JKT).date()
+
+    df2 = df.copy()
+    if COL_STATUS_BAYAR in df2.columns:
+        df2 = df2[df2[COL_STATUS_BAYAR] == False].copy()
+
+    if COL_JATUH_TEMPO in df2.columns:
+        df2 = df2[pd.notna(df2[COL_JATUH_TEMPO])].copy()
+    else:
+        return (pd.DataFrame(columns=df.columns), pd.DataFrame(columns=df.columns))
+
+    overdue = df2[df2[COL_JATUH_TEMPO] < today].copy()
+    due_soon = df2[(df2[COL_JATUH_TEMPO] >= today) & (df2[COL_JATUH_TEMPO] <= (today + timedelta(days=days_due_soon)))].copy()
+
+    return overdue, due_soon
+
+
+# =========================================================
 # APP UI
 # =========================================================
 if KONEKSI_GSHEET_BERHASIL:
@@ -1171,7 +1404,7 @@ if KONEKSI_GSHEET_BERHASIL:
                 # Display versi rupiah (UI), tapi data asli df_cd tetap numeric untuk export
                 df_cd_display = df_cd.copy()
                 df_cd_display[COL_NILAI_KONTRAK] = df_cd_display[COL_NILAI_KONTRAK].apply(
-                    lambda x: "" if pd.isna(x) else format_rupiah_display(x)   # ✅ FIX: no 'nan'
+                    lambda x: "" if pd.isna(x) else format_rupiah_display(x)
                 )
                 st.dataframe(df_cd_display, use_container_width=True, hide_index=True)
 
@@ -1185,10 +1418,9 @@ if KONEKSI_GSHEET_BERHASIL:
                         COL_NILAI_KONTRAK: 18
                     }
 
-                    # pastikan numeric (int/None)
                     df_export = df_cd.copy()
                     df_export[COL_NILAI_KONTRAK] = df_export[COL_NILAI_KONTRAK].apply(
-                        lambda x: None if pd.isna(x) else int(x)              # ✅ FIX: pd.isna
+                        lambda x: None if pd.isna(x) else int(x)
                     )
 
                     excel_bytes = df_to_excel_bytes(
@@ -1221,11 +1453,119 @@ if KONEKSI_GSHEET_BERHASIL:
             else:
                 st.info("Belum ada data closing deal.")
 
+        # =========================================================
+        # ✅ NEW: PEMBAYARAN (DP/TERMIN/PELUNASAN) - Sidebar section
+        # =========================================================
+        st.divider()
+        st.header("💳 Pembayaran (DP / Termin / Pelunasan)")
+
+        with st.expander("➕ Input Pembayaran", expanded=False):
+            with st.form("form_pembayaran_dp", clear_on_submit=True):
+                p_group = st.text_input("Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada", key="pay_group")
+                p_marketing = st.text_input("Nama Marketing (Wajib)", placeholder="Contoh: Andi", key="pay_marketing")
+                p_tgl_event = st.date_input("Tanggal Event (Opsional)", value=datetime.now(tz=TZ_JKT).date(), key="pay_event_date")
+
+                p_jenis = st.selectbox(
+                    "Jenis Pembayaran",
+                    ["Down Payment (DP)", "Termin", "Pelunasan", "Lainnya"],
+                    index=0,
+                    key="pay_jenis"
+                )
+
+                p_nominal = st.text_input(
+                    "Nominal Pembayaran (Input bebas)",
+                    placeholder="Contoh: 5000000 / 5jt / Rp 5.000.000 / 5,5jt",
+                    key="pay_nominal"
+                )
+
+                p_jatuh_tempo = st.date_input(
+                    "Batas Waktu Bayar (Jatuh Tempo)",
+                    value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7),
+                    key="pay_due_date"
+                )
+
+                p_status = st.checkbox("✅ Sudah Dibayar?", value=False, key="pay_status")
+
+                p_catatan = st.text_area("Catatan (Opsional)", height=90, placeholder="Contoh: DP untuk booking tanggal event...", key="pay_note")
+                p_bukti = st.file_uploader("Upload Bukti Pembayaran (Foto/Screenshot/PDF)", key="pay_file", disabled=not KONEKSI_DROPBOX_BERHASIL)
+
+                if st.form_submit_button("✅ Simpan Pembayaran"):
+                    res, msg = tambah_pembayaran_dp(
+                        p_group, p_marketing, p_tgl_event, p_jenis, p_nominal,
+                        p_jatuh_tempo, p_status, p_bukti, p_catatan
+                    )
+                    if res:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        with st.expander("📋 Data Pembayaran + Alert Jatuh Tempo", expanded=False):
+            df_pay = load_pembayaran_dp()
+
+            if not df_pay.empty:
+                overdue_df, due_soon_df = build_alert_pembayaran(df_pay, days_due_soon=3)
+
+                if not overdue_df.empty:
+                    st.error(f"⛔ Overdue: {len(overdue_df)} pembayaran melewati jatuh tempo!")
+                    cols_alert = [COL_GROUP, COL_MARKETING, COL_JENIS_BAYAR, COL_NOMINAL_BAYAR, COL_JATUH_TEMPO, COL_BUKTI_BAYAR, COL_CATATAN_BAYAR]
+                    cols_alert = [c for c in cols_alert if c in overdue_df.columns]
+                    st.dataframe(overdue_df[cols_alert], use_container_width=True, hide_index=True)
+
+                if not due_soon_df.empty:
+                    st.warning(f"⚠️ Jatuh tempo ≤ 3 hari: {len(due_soon_df)} pembayaran belum dibayar.")
+                    cols_alert = [COL_GROUP, COL_MARKETING, COL_JENIS_BAYAR, COL_NOMINAL_BAYAR, COL_JATUH_TEMPO, COL_BUKTI_BAYAR, COL_CATATAN_BAYAR]
+                    cols_alert = [c for c in cols_alert if c in due_soon_df.columns]
+                    st.dataframe(due_soon_df[cols_alert], use_container_width=True, hide_index=True)
+
+                st.caption("Edit yang diizinkan: **Status Pembayaran**, **Batas Waktu Bayar**, dan **Catatan**. Lalu klik Simpan.")
+
+                editable_cols = {COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR}
+                disabled_cols = [c for c in PAYMENT_COLUMNS if c not in editable_cols]
+
+                edited_pay = st.data_editor(
+                    df_pay,
+                    column_config={
+                        COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
+                        COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
+                        COL_NOMINAL_BAYAR: st.column_config.NumberColumn("Nominal (Rp)", width="medium"),
+                        COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
+                        COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
+                    },
+                    disabled=disabled_cols,
+                    hide_index=True,
+                    use_container_width=True,
+                    key="editor_payments"
+                )
+
+                if st.button("💾 Simpan Perubahan Pembayaran", use_container_width=True):
+                    if save_pembayaran_dp(edited_pay):
+                        st.toast("Tersimpan!", icon="✅")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("Gagal menyimpan perubahan.")
+            else:
+                st.info("Belum ada data pembayaran.")
+
     # =========================================================
     # MAIN PAGE
     # =========================================================
     st.title("🚀 Sales & Marketing Action Center")
     st.caption(f"Realtime: {datetime.now(tz=TZ_JKT).strftime('%d %B %Y %H:%M:%S')}")
+
+    # ✅ Optional ringkas alert di main page (tidak mengganggu layout)
+    try:
+        df_pay_main = load_pembayaran_dp()
+        if not df_pay_main.empty:
+            overdue_main, due_soon_main = build_alert_pembayaran(df_pay_main, days_due_soon=3)
+            if len(overdue_main) > 0:
+                st.error(f"⛔ Alert Pembayaran: {len(overdue_main)} pembayaran OVERDUE!")
+            elif len(due_soon_main) > 0:
+                st.warning(f"⚠️ Alert Pembayaran: {len(due_soon_main)} pembayaran jatuh tempo ≤ 3 hari.")
+    except Exception:
+        pass
 
     # -----------------------------
     # MENU: LAPORAN & TARGET
