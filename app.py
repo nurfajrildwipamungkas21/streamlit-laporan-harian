@@ -2102,8 +2102,33 @@ with st.sidebar:
 # =========================================================
 # MAIN PAGE
 # =========================================================
-st.title("🚀 Sales & Marketing Action Center")
-st.caption(f"Realtime: {_now().strftime('%d %B %Y %H:%M:%S')}")
+# Buat 3 kolom: [Logo Kiri] - [Judul Tengah] - [Logo Kanan]
+col_kiri, col_tengah, col_kanan = st.columns([1, 5, 1])
+
+with col_kiri:
+    # Pastikan nama file sama persis dengan yang di folder assets (case-sensitive)
+    try:
+        st.image("assets/logo traine.png", use_container_width=True) 
+    except Exception:
+        st.write("") # Kosongkan jika gambar tidak ketemu
+
+with col_tengah:
+    # Judul dibuat rata tengah menggunakan HTML
+    st.markdown(
+        "<h1 style='text-align: center;'>Sales & Marketing Action Center</h1>", 
+        unsafe_allow_html=True
+    )
+    # Caption Realtime juga rata tengah
+    st.markdown(
+        f"<p style='text-align: center; color: gray;'>Realtime: {_now().strftime('%d %B %Y %H:%M:%S')}</p>", 
+        unsafe_allow_html=True
+    )
+
+with col_kanan:
+    try:
+        st.image("assets/logo EO.png", use_container_width=True)
+    except Exception:
+        st.write("")
 
 try:
     df_pay_main = load_pembayaran_dp()
