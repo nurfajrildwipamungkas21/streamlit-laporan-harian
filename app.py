@@ -1,7 +1,10 @@
+
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
+from pathlib import Path
+import time
 import gspread
 from google.oauth2.service_account import Credentials
 import dropbox
@@ -40,20 +43,146 @@ except ImportError:
 # =========================================================
 # PAGE CONFIG
 # =========================================================
+APP_TITLE = "Sales & Marketing Action Center"
 st.set_page_config(
-    page_title="Sales & Marketing Action Center",
+    page_title=APP_TITLE,
     page_icon="🚀",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-hide_st_style = """
-<style>
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
-</style>
-"""
-st.markdown(hide_st_style, unsafe_allow_html=True)
+# =========================================================
+# GLOBAL STYLE (Fun but Elegant, Professional UI)
+# =========================================================
+def inject_global_css():
+    st.markdown(
+        """
+        <style>
+        /* ---------- App background ---------- */
+        .stApp {
+            background:
+                radial-gradient(circle at 12% 10%, rgba(124, 58, 237, 0.35) 0%, rgba(124, 58, 237, 0.0) 45%),
+                radial-gradient(circle at 82% 12%, rgba(6, 182, 212, 0.28) 0%, rgba(6, 182, 212, 0.0) 42%),
+                radial-gradient(circle at 20% 90%, rgba(34, 197, 94, 0.18) 0%, rgba(34, 197, 94, 0.0) 38%),
+                linear-gradient(180deg, #0b1020 0%, #0f172a 50%, #111827 100%);
+            color: rgba(255,255,255,0.92);
+        }
+
+        /* Hide Streamlit default UI chrome (we use custom header) */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+
+        /* Sidebar polish */
+        section[data-testid="stSidebar"] > div {
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(17, 24, 39, 0.92) 100%);
+            border-right: 1px solid rgba(255,255,255,0.08);
+        }
+        section[data-testid="stSidebar"] * {
+            color: rgba(255,255,255,0.92) !important;
+        }
+        section[data-testid="stSidebar"] hr {
+            border-color: rgba(255,255,255,0.08);
+        }
+
+        /* Typography */
+        h1, h2, h3, h4, h5, h6, p, label, span, div {
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
+        }
+
+        /* Card styling for containers with border=True */
+        div[data-testid="stVerticalBlockBorderWrapper"] > div {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 16px;
+            padding: 1rem 1rem 0.6rem 1rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+            backdrop-filter: blur(10px);
+        }
+
+        /* Buttons */
+        .stButton>button, .stDownloadButton>button {
+            border-radius: 12px !important;
+            border: 1px solid rgba(255,255,255,0.14) !important;
+            background: rgba(255,255,255,0.06) !important;
+            color: rgba(255,255,255,0.94) !important;
+            transition: all 0.15s ease-in-out;
+        }
+        .stButton>button:hover, .stDownloadButton>button:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255,255,255,0.25) !important;
+            background: rgba(255,255,255,0.10) !important;
+        }
+
+        /* Primary button (type=primary) */
+        button[kind="primary"] {
+            background: linear-gradient(135deg, rgba(124,58,237,0.95), rgba(6,182,212,0.95)) !important;
+            border: none !important;
+        }
+        button[kind="primary"]:hover {
+            filter: brightness(1.05);
+        }
+
+        /* Inputs */
+        .stTextInput input, .stTextArea textarea, .stNumberInput input {
+            border-radius: 12px !important;
+        }
+        .stDateInput input {
+            border-radius: 12px !important;
+        }
+        .stSelectbox div[data-baseweb="select"] > div {
+            border-radius: 12px !important;
+        }
+
+        /* Dataframes / tables */
+        div[data-testid="stDataFrame"] {
+            border-radius: 14px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.10);
+        }
+
+        /* Custom header block */
+        .hero-title {
+            font-size: 2.0rem;
+            font-weight: 800;
+            line-height: 1.1;
+            margin: 0;
+            letter-spacing: 0.2px;
+        }
+        .hero-subtitle {
+            margin-top: 0.25rem;
+            color: rgba(255,255,255,0.70);
+            font-size: 0.95rem;
+        }
+        .pill {
+            display: inline-block;
+            padding: 0.25rem 0.6rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.06);
+            color: rgba(255,255,255,0.85);
+            font-size: 0.80rem;
+            margin-right: 0.4rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+inject_global_css()
+
+# =========================================================
+# COMPAT HELPERS (toast / link button)
+# =========================================================
+def ui_toast(message: str, icon=None):
+    """Streamlit toast (fallback ke success jika tidak tersedia)."""
+    if hasattr(st, "toast"):
+        try:
+            ui_toast(message, icon=icon)
+            return
+        except Exception:
+            pass
+    st.success(message)
 
 
 # =========================================================
@@ -68,8 +197,6 @@ SHEET_TARGET_TEAM = "Target_Team_Checklist"
 SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 SHEET_CONFIG_TEAM = "Config_Team"
 SHEET_CLOSING_DEAL = "Closing_Deal"
-
-# ✅ NEW: Pembayaran (DP/Termin/Pelunasan)
 SHEET_PEMBAYARAN = "Pembayaran_DP"
 
 # Kolom laporan harian
@@ -81,7 +208,6 @@ COL_LINK_FOTO = "Link Foto"
 COL_LINK_SOSMED = "Link Sosmed"
 COL_KESIMPULAN = "Kesimpulan"
 COL_KENDALA = "Kendala"
-# ✅ NEW: Kendala Klien (lebih spesifik daripada Kendala umum)
 COL_KENDALA_KLIEN = "Kendala Klien"
 COL_PENDING = "Next Plan (Pending)"
 COL_FEEDBACK = "Feedback Lead"
@@ -92,7 +218,7 @@ COL_KONTAK_KLIEN = "No HP/WA"
 NAMA_KOLOM_STANDAR = [
     COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI,
     COL_LINK_FOTO, COL_LINK_SOSMED,
-    COL_KESIMPULAN, COL_KENDALA, COL_KENDALA_KLIEN,  # ✅ disisipkan di sini (agar tidak menggeser field lead)
+    COL_KESIMPULAN, COL_KENDALA, COL_KENDALA_KLIEN,
     COL_PENDING,
     COL_FEEDBACK,
     COL_INTEREST,
@@ -100,10 +226,7 @@ NAMA_KOLOM_STANDAR = [
     COL_KONTAK_KLIEN
 ]
 
-# ✅ Audit columns
-# CATATAN:
-# - Untuk PEMBAYARAN, COL_TS_UPDATE berisi LOG rapih & bernomor (multi-line).
-# - Untuk checklist target, kolom ini tetap bisa dipakai sebagai timestamp biasa.
+# Audit columns
 COL_TS_UPDATE = "Timestamp Update (Log)"
 COL_UPDATED_BY = "Updated By"
 
@@ -122,17 +245,17 @@ COL_NILAI_KONTRAK = "Nilai Kontrak"  # disimpan sebagai angka (int)
 
 CLOSING_COLUMNS = [COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_BIDANG, COL_NILAI_KONTRAK]
 
-# ✅ Target/checklist columns (ditambah audit)
+# Target/checklist columns
 TEAM_CHECKLIST_COLUMNS = ["Misi", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan", COL_TS_UPDATE, COL_UPDATED_BY]
 INDIV_CHECKLIST_COLUMNS = ["Nama", "Target", "Tgl_Mulai", "Tgl_Selesai", "Status", "Bukti/Catatan", COL_TS_UPDATE, COL_UPDATED_BY]
 
-# ✅ NEW: Pembayaran Columns
+# Pembayaran Columns
 COL_TS_BAYAR = "Timestamp Input"
-COL_JENIS_BAYAR = "Jenis Pembayaran"       # DP/Termin/Pelunasan/Lainnya(custom)
-COL_NOMINAL_BAYAR = "Nominal Pembayaran"   # numeric int (disimpan)
-COL_JATUH_TEMPO = "Batas Waktu Bayar"      # yyyy-mm-dd
-COL_STATUS_BAYAR = "Status Pembayaran"     # TRUE/FALSE
-COL_BUKTI_BAYAR = "Bukti Pembayaran"       # link dropbox
+COL_JENIS_BAYAR = "Jenis Pembayaran"
+COL_NOMINAL_BAYAR = "Nominal Pembayaran"
+COL_JATUH_TEMPO = "Batas Waktu Bayar"
+COL_STATUS_BAYAR = "Status Pembayaran"
+COL_BUKTI_BAYAR = "Bukti Pembayaran"
 COL_CATATAN_BAYAR = "Catatan"
 
 PAYMENT_COLUMNS = [
@@ -146,16 +269,18 @@ PAYMENT_COLUMNS = [
     COL_STATUS_BAYAR,
     COL_BUKTI_BAYAR,
     COL_CATATAN_BAYAR,
-    # ✅ audit
     COL_TS_UPDATE,
     COL_UPDATED_BY
 ]
 
 TZ_JKT = ZoneInfo("Asia/Jakarta")
 
+# Formatting throttling (avoid heavy batch formatting too frequently)
+FORMAT_THROTTLE_SECONDS = 300  # 5 minutes
+
 
 # =========================================================
-# SMALL HELPERS (Audit / Actor / Admin Password)
+# SMALL HELPERS
 # =========================================================
 def now_ts_str() -> str:
     """Timestamp akurat (WIB) untuk semua perubahan."""
@@ -198,16 +323,17 @@ def get_actor_fallback(default="-") -> str:
     Ambil 'actor' (siapa yang mengedit) dari session_state yang tersedia.
     Jika tidak ada, fallback ke default.
     """
-    for k in ["pelapor_main", "sidebar_user"]:
+    for k in ["pelapor_main", "sidebar_user", "payment_editor_name"]:
         if k in st.session_state and safe_str(st.session_state.get(k), "").strip():
             return safe_str(st.session_state.get(k)).strip()
     return default
 
 
+# =========================================================
+# ADMIN PASSWORD HELPERS
+# =========================================================
 def verify_admin_password(pwd_input: str) -> bool:
     """
-    ✅ Implementasi saran keamanan:
-    - Tidak ada default password hardcoded.
     - Support 2 mode:
       (A) st.secrets["password_admin_hash"] = SHA256 hex dari password
       (B) st.secrets["password_admin"] = password plain (legacy)
@@ -240,7 +366,6 @@ def verify_admin_password(pwd_input: str) -> bool:
     if plain_secret and safe_str(plain_secret, "").strip():
         return hmac.compare_digest(pwd_input, safe_str(plain_secret, "").strip())
 
-    # Tidak ada secret terset
     return False
 
 
@@ -298,9 +423,7 @@ except Exception as e:
 # RUPIAH PARSER (input bebas -> int Rupiah)
 # =========================================================
 def parse_rupiah_to_int(value):
-    """
-    Parser Rupiah yang lebih pintar.
-    """
+    """Parser Rupiah yang lebih pintar."""
     if value is None:
         return None
 
@@ -392,7 +515,7 @@ def format_rupiah_display(amount) -> str:
 
 
 # =========================================================
-# ✅ AUDIT LOG HELPERS (PEMBAYARAN) - FORMAT RAPIIH BERNOMOR
+# AUDIT LOG HELPERS (PEMBAYARAN)
 # =========================================================
 def parse_payment_log_lines(log_text: str):
     """
@@ -459,11 +582,6 @@ def _fmt_payment_val_for_log(col_name: str, v):
 def append_payment_ts_update(existing_log: str, ts: str, actor: str, changes):
     """
     Append perubahan ke log dengan format rapih & bernomor.
-
-    Contoh output:
-      1. 04-01-2026 23:37:07
-      2. [05-01-2026 06:43:05] (Saya) Jenis Pembayaran: cicilan → downpayment
-      3.  Catatan: 123 → testing
     """
     lines = parse_payment_log_lines(existing_log)
     changes = [safe_str(c, "").strip() for c in (changes or []) if safe_str(c, "").strip()]
@@ -484,14 +602,10 @@ def append_payment_ts_update(existing_log: str, ts: str, actor: str, changes):
 
 
 # =========================================================
-# ✅ UI DISPLAY HELPERS (RUPIAH)
+# UI DISPLAY HELPERS (RUPIAH)
 # =========================================================
 def payment_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Untuk tampilan UI saja:
-    - Nominal Pembayaran jadi string 'Rp 15.000.000'
-    Data asli (numeric) tetap dipakai untuk simpan/export.
-    """
+    """Untuk tampilan UI saja."""
     dfv = df.copy()
     if dfv is None or dfv.empty:
         return dfv
@@ -541,7 +655,7 @@ def reset_payment_form_state():
 
 
 # =========================================================
-# EXCEL EXPORT (rapi + bisa currency format)
+# EXCEL EXPORT
 # =========================================================
 def df_to_excel_bytes(
     df: pd.DataFrame,
@@ -551,9 +665,7 @@ def df_to_excel_bytes(
     right_align_cols=None,
     number_format_cols=None
 ):
-    """
-    Export dataframe ke .xlsx rapi.
-    """
+    """Export dataframe ke .xlsx rapi."""
     if not HAS_OPENPYXL:
         return None
 
@@ -619,10 +731,27 @@ def _build_currency_number_format_rupiah():
     return {"type": "CURRENCY", "pattern": '"Rp" #,##0'}
 
 
+def maybe_auto_format_sheet(worksheet, force: bool = False):
+    """Throttled formatting: avoid calling heavy formatting too often."""
+    try:
+        if worksheet is None:
+            return
+        if "_fmt_sheet_last" not in st.session_state:
+            st.session_state["_fmt_sheet_last"] = {}
+
+        now = time.time()
+        key = str(getattr(worksheet, "id", "unknown"))
+        last = float(st.session_state["_fmt_sheet_last"].get(key, 0))
+        if force or (now - last) > FORMAT_THROTTLE_SECONDS:
+            auto_format_sheet(worksheet)
+            st.session_state["_fmt_sheet_last"][key] = now
+    except Exception:
+        # Never break app due to formatting.
+        pass
+
+
 def auto_format_sheet(worksheet):
-    """
-    Auto-format Google Sheet.
-    """
+    """Auto-format Google Sheet."""
     try:
         sheet_id = worksheet.id
         all_values = worksheet.get_all_values()
@@ -654,13 +783,11 @@ def auto_format_sheet(worksheet):
             long_text_cols = {
                 "Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed",
                 "Tempat Dikunjungi", "Kesimpulan", "Kendala", "Next Plan (Pending)", "Feedback Lead",
-                COL_KENDALA_KLIEN,  # ✅ kendala klien
+                COL_KENDALA_KLIEN,
                 COL_NAMA_KLIEN,
                 TEAM_COL_NAMA_TEAM, TEAM_COL_POSISI, TEAM_COL_ANGGOTA,
                 COL_GROUP, COL_MARKETING, COL_BIDANG,
-                # Pembayaran
                 COL_JENIS_BAYAR, COL_BUKTI_BAYAR, COL_CATATAN_BAYAR,
-                # ✅ log panjang
                 COL_TS_UPDATE,
             }
 
@@ -727,7 +854,7 @@ def auto_format_sheet(worksheet):
                     "textFormat": {"bold": True},
                     "horizontalAlignment": "CENTER",
                     "verticalAlignment": "MIDDLE",
-                    "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
+                    "backgroundColor": {"red": 0.90, "green": 0.92, "blue": 0.96},
                     "wrapStrategy": "WRAP"
                 }},
                 "fields": "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor,wrapStrategy)"
@@ -750,8 +877,6 @@ def auto_format_sheet(worksheet):
 def ensure_headers(worksheet, desired_headers):
     """
     Pastikan header sesuai urutan standar.
-    - Jika kolom kurang, resize.
-    - Set ulang baris header sesuai desired_headers (agar urutan kolom match dengan list data yang kita append).
     """
     try:
         if worksheet.col_count < len(desired_headers):
@@ -765,7 +890,7 @@ def ensure_headers(worksheet, desired_headers):
         )
         if need_reset:
             worksheet.update(range_name="A1", values=[desired_headers], value_input_option="USER_ENTERED")
-            auto_format_sheet(worksheet)
+            maybe_auto_format_sheet(worksheet, force=True)
     except Exception as e:
         print(f"Ensure Header Error: {e}")
 
@@ -773,26 +898,32 @@ def ensure_headers(worksheet, desired_headers):
 # =========================================================
 # WORKSHEET GET/CREATE + STAFF LIST
 # =========================================================
-@st.cache_resource(ttl=60)
-def get_or_create_worksheet(nama_worksheet):
-    """
-    ✅ Upgrade: setiap kali worksheet diambil, pastikan header selalu up-to-date.
-    Ini yang membuat kolom baru (mis. Kendala Klien) otomatis muncul tanpa nunggu Submit.
-    """
+@st.cache_resource(ttl=600)
+def _get_or_create_ws_cached(nama_worksheet: str):
+    """Get/create worksheet object (cached)."""
     try:
         ws = spreadsheet.worksheet(nama_worksheet)
-        ensure_headers(ws, NAMA_KOLOM_STANDAR)  # ✅ penting
         return ws
     except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=nama_worksheet, rows=100, cols=len(NAMA_KOLOM_STANDAR))
+        ws = spreadsheet.add_worksheet(title=nama_worksheet, rows=200, cols=len(NAMA_KOLOM_STANDAR))
         ws.append_row(NAMA_KOLOM_STANDAR, value_input_option="USER_ENTERED")
-        auto_format_sheet(ws)
+        maybe_auto_format_sheet(ws, force=True)
         return ws
     except Exception:
         return None
 
 
-@st.cache_data(ttl=60)
+def get_or_create_worksheet(nama_worksheet):
+    """
+    Pastikan header selalu up-to-date.
+    """
+    ws = _get_or_create_ws_cached(nama_worksheet)
+    if ws is not None:
+        ensure_headers(ws, NAMA_KOLOM_STANDAR)
+    return ws
+
+
+@st.cache_data(ttl=120)
 def get_daftar_staf_terbaru():
     default_staf = ["Saya"]
     if not KONEKSI_GSHEET_BERHASIL:
@@ -805,7 +936,7 @@ def get_daftar_staf_terbaru():
             ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_NAMA, rows=100, cols=1)
             ws.append_row(["Daftar Nama Staf"], value_input_option="USER_ENTERED")
             ws.append_row(["Saya"], value_input_option="USER_ENTERED")
-            auto_format_sheet(ws)
+            maybe_auto_format_sheet(ws, force=True)
             return default_staf
 
         nama_list = ws.col_values(1)
@@ -828,7 +959,7 @@ def tambah_staf_baru(nama_baru):
             return False, "Nama sudah ada!"
 
         ws.append_row([nama_baru], value_input_option="USER_ENTERED")
-        auto_format_sheet(ws)
+        maybe_auto_format_sheet(ws)
         return True, "Berhasil tambah tim!"
     except Exception as e:
         return False, str(e)
@@ -837,7 +968,7 @@ def tambah_staf_baru(nama_baru):
 # =========================================================
 # TEAM CONFIG
 # =========================================================
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=120)
 def load_team_config():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=TEAM_COLUMNS)
@@ -848,7 +979,7 @@ def load_team_config():
         except Exception:
             ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_TEAM, rows=300, cols=len(TEAM_COLUMNS))
             ws.append_row(TEAM_COLUMNS, value_input_option="USER_ENTERED")
-            auto_format_sheet(ws)
+            maybe_auto_format_sheet(ws, force=True)
             return pd.DataFrame(columns=TEAM_COLUMNS)
 
         data = ws.get_all_records()
@@ -878,7 +1009,7 @@ def tambah_team_baru(nama_team, posisi, anggota_list):
         except Exception:
             ws = spreadsheet.add_worksheet(title=SHEET_CONFIG_TEAM, rows=300, cols=len(TEAM_COLUMNS))
             ws.append_row(TEAM_COLUMNS, value_input_option="USER_ENTERED")
-            auto_format_sheet(ws)
+            maybe_auto_format_sheet(ws, force=True)
 
         existing = set()
         try:
@@ -902,7 +1033,7 @@ def tambah_team_baru(nama_team, posisi, anggota_list):
             return False, "Semua anggota sudah terdaftar di team tersebut."
 
         ws.append_rows(rows_to_add, value_input_option="USER_ENTERED")
-        auto_format_sheet(ws)
+        maybe_auto_format_sheet(ws)
         return True, f"Berhasil tambah team '{nama_team}' ({len(rows_to_add)} anggota)."
     except Exception as e:
         return False, str(e)
@@ -953,6 +1084,7 @@ def clean_bulk_input(text_input):
     return cleaned_targets
 
 
+@st.cache_data(ttl=120)
 def load_checklist(sheet_name, columns):
     try:
         try:
@@ -960,7 +1092,7 @@ def load_checklist(sheet_name, columns):
         except Exception:
             ws = spreadsheet.add_worksheet(title=sheet_name, rows=200, cols=len(columns))
             ws.append_row(columns, value_input_option="USER_ENTERED")
-            auto_format_sheet(ws)
+            maybe_auto_format_sheet(ws, force=True)
             return pd.DataFrame(columns=columns)
 
         ensure_headers(ws, columns)
@@ -1006,16 +1138,14 @@ def save_checklist(sheet_name, df, columns):
         data_to_save = [df_save.columns.values.tolist()] + df_save.values.tolist()
 
         ws.update(range_name="A1", values=data_to_save, value_input_option="USER_ENTERED")
-        auto_format_sheet(ws)
+        maybe_auto_format_sheet(ws)
         return True
     except Exception:
         return False
 
 
 def apply_audit_checklist_changes(df_before: pd.DataFrame, df_after: pd.DataFrame, key_cols, actor: str):
-    """
-    Update audit columns hanya untuk baris yang benar-benar berubah.
-    """
+    """Update audit columns hanya untuk baris yang benar-benar berubah."""
     if df_after is None or df_after.empty:
         return df_after
 
@@ -1101,13 +1231,17 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
             rows_to_add.append(new_row)
 
         ws.append_rows(rows_to_add, value_input_option="USER_ENTERED")
-        auto_format_sheet(ws)
+        maybe_auto_format_sheet(ws)
         return True
     except Exception:
         return False
 
 
 def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_name, kategori_folder):
+    """
+    Update bukti/catatan untuk checklist (Team/Individu).
+    ✅ Optimasi: gunakan batch_update untuk mengurangi jumlah API call.
+    """
     try:
         ws = spreadsheet.worksheet(sheet_name)
 
@@ -1151,21 +1285,28 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
         if "Bukti/Catatan" not in headers:
             return False, "Kolom Bukti error."
 
+        updates = []
+
+        # Bukti/Catatan
         col_idx_gsheet = headers.index("Bukti/Catatan") + 1
         cell_address = gspread.utils.rowcol_to_a1(row_idx_gsheet, col_idx_gsheet)
-        ws.update(range_name=cell_address, values=[[final_note]], value_input_option="USER_ENTERED")
+        updates.append({"range": cell_address, "values": [[final_note]]})
 
+        # Timestamp Update
         if COL_TS_UPDATE in headers:
             col_ts = headers.index(COL_TS_UPDATE) + 1
             cell_ts = gspread.utils.rowcol_to_a1(row_idx_gsheet, col_ts)
-            ws.update(range_name=cell_ts, values=[[ts_update]], value_input_option="USER_ENTERED")
+            updates.append({"range": cell_ts, "values": [[ts_update]]})
 
+        # Updated By
         if COL_UPDATED_BY in headers:
             col_by = headers.index(COL_UPDATED_BY) + 1
             cell_by = gspread.utils.rowcol_to_a1(row_idx_gsheet, col_by)
-            ws.update(range_name=cell_by, values=[[actor]], value_input_option="USER_ENTERED")
+            updates.append({"range": cell_by, "values": [[actor]]})
 
-        auto_format_sheet(ws)
+        ws.batch_update(updates, value_input_option="USER_ENTERED")
+
+        maybe_auto_format_sheet(ws)
         return True, "Berhasil update!"
     except Exception as e:
         return False, f"Error: {e}"
@@ -1185,7 +1326,7 @@ def kirim_feedback_admin(nama_staf, timestamp_key, isi_feedback):
         if COL_FEEDBACK not in headers:
             ws.update_cell(1, len(headers) + 1, COL_FEEDBACK)
             headers.append(COL_FEEDBACK)
-            auto_format_sheet(ws)
+            maybe_auto_format_sheet(ws, force=True)
 
         all_timestamps = ws.col_values(1)
 
@@ -1221,18 +1362,19 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         if ws is None:
             return False
 
-        # ✅ Pastikan header selalu sesuai standar (termasuk kolom baru "Kendala Klien")
         ensure_headers(ws, NAMA_KOLOM_STANDAR)
-
         ws.append_rows(list_of_rows, value_input_option="USER_ENTERED")
-        auto_format_sheet(ws)
+
+        # ✅ Optimasi: jangan format tiap submit (throttled)
+        maybe_auto_format_sheet(ws)
+
         return True
     except Exception as e:
         print(f"Error saving daily report batch: {e}")
         return False
 
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=45)
 def get_reminder_pending(nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
@@ -1250,7 +1392,7 @@ def get_reminder_pending(nama_staf):
         return None
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=120)
 def load_all_reports(daftar_staf):
     all_data = []
     for nama in daftar_staf:
@@ -1280,7 +1422,14 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
                 gb.configure_column(main_text_col, wrapText=True, autoHeight=True, width=400, editable=False)
 
             if "Bukti/Catatan" in df_grid.columns:
-                gb.configure_column("Bukti/Catatan", wrapText=True, autoHeight=True, editable=True, cellEditor="agLargeTextCellEditor", width=300)
+                gb.configure_column(
+                    "Bukti/Catatan",
+                    wrapText=True,
+                    autoHeight=True,
+                    editable=True,
+                    cellEditor="agLargeTextCellEditor",
+                    width=300
+                )
 
             if COL_TS_UPDATE in df_grid.columns:
                 gb.configure_column(COL_TS_UPDATE, editable=False, width=420)
@@ -1325,9 +1474,9 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 
 
 # =========================================================
-# CLOSING DEAL (NUMERIC STORAGE + RUPIAH DISPLAY)
+# CLOSING DEAL
 # =========================================================
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=120)
 def load_closing_deal():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=CLOSING_COLUMNS)
@@ -1338,7 +1487,7 @@ def load_closing_deal():
         except Exception:
             ws = spreadsheet.add_worksheet(title=SHEET_CLOSING_DEAL, rows=300, cols=len(CLOSING_COLUMNS))
             ws.append_row(CLOSING_COLUMNS, value_input_option="USER_ENTERED")
-            auto_format_sheet(ws)
+            maybe_auto_format_sheet(ws, force=True)
             return pd.DataFrame(columns=CLOSING_COLUMNS)
 
         ensure_headers(ws, CLOSING_COLUMNS)
@@ -1394,16 +1543,16 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
 
         ws.append_row([nama_group, nama_marketing, tgl_str, bidang, int(nilai_int)], value_input_option="USER_ENTERED")
 
-        auto_format_sheet(ws)
+        maybe_auto_format_sheet(ws)
         return True, "Closing deal berhasil disimpan!"
     except Exception as e:
         return False, str(e)
 
 
 # =========================================================
-# PEMBAYARAN (DP/TERMIN/PELUNASAN) + AUDIT UPDATE (FORMAT RAPIIH)
+# PEMBAYARAN
 # =========================================================
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=120)
 def load_pembayaran_dp():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
@@ -1414,7 +1563,7 @@ def load_pembayaran_dp():
         except Exception:
             ws = spreadsheet.add_worksheet(title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
             ws.append_row(PAYMENT_COLUMNS, value_input_option="USER_ENTERED")
-            auto_format_sheet(ws)
+            maybe_auto_format_sheet(ws, force=True)
             return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
         ensure_headers(ws, PAYMENT_COLUMNS)
@@ -1441,11 +1590,11 @@ def load_pembayaran_dp():
             if c in df.columns:
                 df[c] = df[c].fillna("").astype(str)
 
-        # ✅ rapihkan log agar tampil bernomor & multiline (termasuk migrasi legacy ';')
+        # rapihkan log agar tampil bernomor & multiline
         if COL_TS_UPDATE in df.columns:
             df[COL_TS_UPDATE] = df[COL_TS_UPDATE].apply(lambda x: build_numbered_log(parse_payment_log_lines(x)))
 
-        # ✅ fallback: kalau log kosong tapi ada timestamp input, isi "1. <timestamp input>"
+        # fallback: kalau log kosong tapi ada timestamp input
         if COL_TS_BAYAR in df.columns and COL_TS_UPDATE in df.columns:
             def _fix_empty_log(row):
                 logv = safe_str(row.get(COL_TS_UPDATE, ""), "").strip()
@@ -1504,17 +1653,14 @@ def save_pembayaran_dp(df: pd.DataFrame) -> bool:
         data_to_save = [df_save.columns.values.tolist()] + df_save.values.tolist()
 
         ws.update(range_name="A1", values=data_to_save, value_input_option="USER_ENTERED")
-        auto_format_sheet(ws)
+        maybe_auto_format_sheet(ws)
         return True
     except Exception:
         return False
 
 
 def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame, actor: str):
-    """
-    Update Timestamp Update (Log) & Updated By hanya untuk baris yang berubah.
-    Kunci: Timestamp Input (COL_TS_BAYAR).
-    """
+    """Update Timestamp Update (Log) & Updated By hanya untuk baris yang berubah."""
     if df_after is None or df_after.empty:
         return df_after
 
@@ -1603,10 +1749,7 @@ def tambah_pembayaran_dp(
     bukti_file,
     catatan
 ):
-    """
-    Tambah 1 record pembayaran:
-    - Log awal dibuat: "1. <Timestamp Input>"
-    """
+    """Tambah 1 record pembayaran."""
     if not KONEKSI_GSHEET_BERHASIL:
         return False, "Koneksi GSheet belum aktif."
 
@@ -1641,7 +1784,6 @@ def tambah_pembayaran_dp(
         ts_input = now_ts_str()
         actor0 = nama_marketing or "-"
 
-        # ✅ log awal sesuai format request user
         ts_update_log = build_numbered_log([ts_input])
 
         ws.append_row(
@@ -1662,7 +1804,7 @@ def tambah_pembayaran_dp(
             value_input_option="USER_ENTERED"
         )
 
-        auto_format_sheet(ws)
+        maybe_auto_format_sheet(ws)
         return True, "Pembayaran berhasil disimpan!"
     except Exception as e:
         return False, str(e)
@@ -1690,9 +1832,6 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
     return overdue, due_soon
 
 
-# =========================================================
-# UPDATE BUKTI PEMBAYARAN UNTUK DATA YANG SUDAH ADA
-# =========================================================
 def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marketing: str, actor: str = "-"):
     if not KONEKSI_GSHEET_BERHASIL:
         return False, "Koneksi GSheet belum aktif."
@@ -1723,10 +1862,11 @@ def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marke
             old_bukti = ""
 
         cell_bukti = gspread.utils.rowcol_to_a1(row_gsheet, col_bukti)
-        ws.update(range_name=cell_bukti, values=[[link]], value_input_option="USER_ENTERED")
 
         ts = now_ts_str()
         actor_final = safe_str(actor, "-").strip() or "-"
+
+        updates = [{"range": cell_bukti, "values": [[link]]}]
 
         if COL_TS_UPDATE in headers:
             col_ts = headers.index(COL_TS_UPDATE) + 1
@@ -1742,698 +1882,157 @@ def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marke
                 [f"{COL_BUKTI_BAYAR}: {_fmt_payment_val_for_log(COL_BUKTI_BAYAR, old_bukti)} → {_fmt_payment_val_for_log(COL_BUKTI_BAYAR, link)}"]
             )
             cell_ts = gspread.utils.rowcol_to_a1(row_gsheet, col_ts)
-            ws.update(range_name=cell_ts, values=[[new_log]], value_input_option="USER_ENTERED")
+            updates.append({"range": cell_ts, "values": [[new_log]]})
 
         if COL_UPDATED_BY in headers:
             col_by = headers.index(COL_UPDATED_BY) + 1
             cell_by = gspread.utils.rowcol_to_a1(row_gsheet, col_by)
-            ws.update(range_name=cell_by, values=[[actor_final]], value_input_option="USER_ENTERED")
+            updates.append({"range": cell_by, "values": [[actor_final]]})
 
-        auto_format_sheet(ws)
+        ws.batch_update(updates, value_input_option="USER_ENTERED")
+        maybe_auto_format_sheet(ws)
         return True, "Bukti pembayaran berhasil di-update!"
     except Exception as e:
         return False, f"Error: {e}"
 
 
 # =========================================================
+# HEADER (LOGO LEFT/RIGHT)
+# =========================================================
+ASSET_DIR = Path(__file__).parent / "assets"
+LOGO_LEFT = ASSET_DIR / "log EO.png"
+LOGO_RIGHT = ASSET_DIR / "logo traine.png"
+
+def render_header():
+    with st.container(border=True):
+        c1, c2, c3 = st.columns([1, 4, 1])
+        with c1:
+            if LOGO_LEFT.exists():
+                st.image(str(LOGO_LEFT), use_container_width=True)
+        with c2:
+            st.markdown(f"<div class='hero-title'>🚀 {APP_TITLE}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='hero-subtitle'>Realtime: {datetime.now(tz=TZ_JKT).strftime('%d %B %Y %H:%M:%S')} &nbsp; "
+                f"<span class='pill'>GSheet: {'ON' if KONEKSI_GSHEET_BERHASIL else 'OFF'}</span>"
+                f"<span class='pill'>Dropbox: {'ON' if KONEKSI_DROPBOX_BERHASIL else 'OFF'}</span>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+        with c3:
+            if LOGO_RIGHT.exists():
+                st.image(str(LOGO_RIGHT), use_container_width=True)
+
+
+# =========================================================
 # APP UI
 # =========================================================
-if KONEKSI_GSHEET_BERHASIL:
-    if not KONEKSI_DROPBOX_BERHASIL:
-        st.warning("⚠️ Dropbox non-aktif. Fitur foto dimatikan.")
+if not KONEKSI_GSHEET_BERHASIL:
+    st.error("Database Error.")
+    st.stop()
 
-    # -----------------------------
-    # SIDEBAR
-    # -----------------------------
-    with st.sidebar:
-        st.header("Navigasi")
+# Small banner for Dropbox status
+if not KONEKSI_DROPBOX_BERHASIL:
+    st.warning("⚠️ Dropbox non-aktif. Fitur upload foto/bukti dimatikan.")
 
-        if "is_admin" not in st.session_state:
+# Session defaults
+if "is_admin" not in st.session_state:
+    st.session_state["is_admin"] = False
+
+# Render header
+render_header()
+
+# =========================================================
+# SIDEBAR NAV
+# =========================================================
+with st.sidebar:
+    st.markdown("### Navigasi")
+    menu_items = [
+        "📝 Laporan Harian",
+        "🎯 Target & KPI",
+        "🤝 Closing Deal",
+        "💳 Pembayaran",
+    ]
+    if st.session_state["is_admin"]:
+        menu_items.append("📊 Dashboard Admin")
+
+    menu_nav = st.radio("Pilih Menu:", menu_items, index=0)
+    st.divider()
+
+    # Admin login
+    if not st.session_state["is_admin"]:
+        with st.expander("🔐 Akses Khusus Admin", expanded=False):
+            if not admin_secret_configured():
+                st.warning("Admin login belum aktif: set `password_admin_hash` (disarankan) atau `password_admin` di Streamlit Secrets.")
+            pwd = st.text_input("Password:", type="password", key="input_pwd")
+            if st.button("Login Admin", use_container_width=True):
+                if verify_admin_password(pwd):
+                    st.session_state["is_admin"] = True
+                    st.rerun()
+                else:
+                    st.error("Password salah / belum dikonfigurasi!")
+    else:
+        if st.button("🔓 Logout Admin", use_container_width=True):
             st.session_state["is_admin"] = False
+            st.rerun()
 
-        opsi_menu = ["📝 Laporan & Target"]
-        if st.session_state["is_admin"]:
-            opsi_menu.append("📊 Dashboard Admin")
+    st.divider()
 
-        menu_nav = st.radio("Pilih Menu:", opsi_menu)
-        st.divider()
-
-        if not st.session_state["is_admin"]:
-            with st.expander("🔐 Akses Khusus Admin"):
-                if not admin_secret_configured():
-                    st.warning("Admin login belum aktif: set `password_admin_hash` (disarankan) atau `password_admin` di Streamlit Secrets.")
-                pwd = st.text_input("Password:", type="password", key="input_pwd")
-                if st.button("Login Admin"):
-                    if verify_admin_password(pwd):
-                        st.session_state["is_admin"] = True
-                        st.rerun()
-                    else:
-                        st.error("Password salah / belum dikonfigurasi!")
-        else:
-            if st.button("🔓 Logout Admin"):
-                st.session_state["is_admin"] = False
-                st.rerun()
-
-        st.divider()
-        st.header("🎯 Manajemen Target")
-
-        tab_team, tab_individu, tab_admin = st.tabs(["Team", "Pribadi", "Admin"])
-
-        with tab_team:
-            st.caption("Bulk Input Target Team")
-            with st.form("add_team_goal", clear_on_submit=True):
-                goal_team_text = st.text_area("Target Team (Satu per baris)", height=100)
-                c1, c2 = st.columns(2)
-                today = datetime.now(tz=TZ_JKT).date()
-                start_d = c1.date_input("Mulai", value=today, key="start_team")
-                end_d = c2.date_input("Selesai", value=today + timedelta(days=30), key="end_team")
-                if st.form_submit_button("➕ Tambah"):
-                    targets = clean_bulk_input(goal_team_text)
-                    if targets:
-                        if add_bulk_targets(SHEET_TARGET_TEAM, ["", str(start_d), str(end_d), "FALSE", "-"], targets):
-                            st.success(f"{len(targets)} target ditambahkan!")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error("Gagal.")
-
-        with tab_individu:
-            st.caption("Bulk Input Target Pribadi")
-            NAMA_STAF = get_daftar_staf_terbaru()
-            pilih_nama = st.selectbox("Siapa Anda?", NAMA_STAF, key="sidebar_user")
-
-            with st.form("add_indiv_goal", clear_on_submit=True):
-                goal_indiv_text = st.text_area("Target Mingguan (Satu per baris)", height=100)
-                c1, c2 = st.columns(2)
-                today = datetime.now(tz=TZ_JKT).date()
-                start_i = c1.date_input("Mulai", value=today, key="start_indiv")
-                end_i = c2.date_input("Selesai", value=today + timedelta(days=7), key="end_indiv")
-                if st.form_submit_button("➕ Tambah"):
-                    targets = clean_bulk_input(goal_indiv_text)
-                    if targets:
-                        if add_bulk_targets(SHEET_TARGET_INDIVIDU, [pilih_nama, "", str(start_i), str(end_i), "FALSE", "-"], targets):
-                            st.success(f"{len(targets)} target ditambahkan!")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error("Gagal.")
-
-        with tab_admin:
-            with st.expander("➕ Tambah Karyawan"):
-                with st.form("add_staff", clear_on_submit=True):
-                    new_name = st.text_input("Nama")
-                    new_role = st.text_input("Jabatan")
-                    if st.form_submit_button("Tambah"):
-                        if new_name and new_role:
-                            res, msg = tambah_staf_baru(f"{new_name} ({new_role})")
-                            if res:
-                                st.success(msg)
-                                st.cache_data.clear()
-                                st.rerun()
-                            else:
-                                st.error(msg)
-                        else:
-                            st.error("Nama dan jabatan wajib diisi.")
-
-            with st.expander("👥 Tambah Team (Admin)"):
-                with st.form("add_team_admin", clear_on_submit=True):
-                    team_name = st.text_input("Nama Team", placeholder="Contoh: Team Sales A")
-                    team_posisi = st.text_input("Posisi/Divisi", placeholder="Contoh: Sales Lapangan / Digital Marketing")
-                    anggota_text = st.text_area("Nama Anggota (satu per baris)", height=120, placeholder="Contoh:\nAndi\nBudi\nSusi")
-                    if st.form_submit_button("Tambah Team"):
-                        anggota_list = clean_bulk_input(anggota_text)
-                        res, msg = tambah_team_baru(team_name, team_posisi, anggota_list)
-                        if res:
-                            st.success(msg)
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-            with st.expander("📋 Lihat Daftar Team"):
-                df_team_cfg = load_team_config()
-                if not df_team_cfg.empty:
-                    st.dataframe(df_team_cfg, use_container_width=True, hide_index=True)
-                else:
-                    st.info("Belum ada team yang tersimpan.")
-
-        # -----------------------------
-        # CLOSING DEAL (Sidebar section)
-        # -----------------------------
-        st.divider()
-        st.header("🤝 Closing Deal")
-
-        with st.expander("➕ Input Closing Deal", expanded=False):
-            with st.form("form_closing_deal", clear_on_submit=True):
-                cd_group = st.text_input("Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada")
-                cd_marketing = st.text_input("Nama Marketing", placeholder="Contoh: Andi")
-                cd_tgl = st.date_input("Tanggal Event", value=datetime.now(tz=TZ_JKT).date(), key="closing_event_date")
-                cd_bidang = st.text_input("Bidang (Manual)", placeholder="Contoh: F&B / Properti / Pendidikan")
-
-                cd_nilai = st.text_input(
-                    "Nilai Kontrak (Input bebas)",
-                    placeholder="Contoh: 15000000 / 15.000.000 / Rp 15.000.000 / 15jt / 15,5jt"
-                )
-
-                if st.form_submit_button("✅ Simpan Closing Deal"):
-                    res, msg = tambah_closing_deal(cd_group, cd_marketing, cd_tgl, cd_bidang, cd_nilai)
-                    if res:
-                        st.success(msg)
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
-        with st.expander("📋 Data Closing Deal", expanded=False):
-            df_cd = load_closing_deal()
-
-            if not df_cd.empty:
-                df_cd_display = df_cd.copy()
-                df_cd_display[COL_NILAI_KONTRAK] = df_cd_display[COL_NILAI_KONTRAK].apply(
-                    lambda x: "" if pd.isna(x) else format_rupiah_display(x)
-                )
-                st.dataframe(df_cd_display, use_container_width=True, hide_index=True)
-
-                if HAS_OPENPYXL:
-                    col_widths = {
-                        COL_GROUP: 25,
-                        COL_MARKETING: 20,
-                        COL_TGL_EVENT: 16,
-                        COL_BIDANG: 25,
-                        COL_NILAI_KONTRAK: 18
-                    }
-
-                    df_export = df_cd.copy()
-                    df_export[COL_NILAI_KONTRAK] = df_export[COL_NILAI_KONTRAK].apply(
-                        lambda x: None if pd.isna(x) else int(x)
-                    )
-
-                    excel_bytes = df_to_excel_bytes(
-                        df_export,
-                        sheet_name="Closing_Deal",
-                        col_widths=col_widths,
-                        wrap_cols=[COL_GROUP, COL_BIDANG],
-                        right_align_cols=[COL_NILAI_KONTRAK],
-                        number_format_cols={COL_NILAI_KONTRAK: '"Rp" #,##0'}
-                    )
-                    st.download_button(
-                        "⬇️ Download Excel Closing Deal (Rapi + Rupiah)",
-                        data=excel_bytes,
-                        file_name="closing_deal.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-                else:
-                    st.warning("openpyxl belum tersedia. Download Excel dinonaktifkan (fallback CSV).")
-
-                csv_cd = df_cd.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    "⬇️ Download CSV Closing Deal",
-                    data=csv_cd,
-                    file_name="closing_deal.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            else:
-                st.info("Belum ada data closing deal.")
-
-        # =========================================================
-        # PEMBAYARAN - Sidebar section
-        # =========================================================
-        st.divider()
-        st.header("💳 Pembayaran (DP / Termin / Pelunasan)")
-
-        with st.expander("➕ Input Pembayaran", expanded=False):
-            p_group = st.text_input(
-                "Nama Group (Opsional)",
-                placeholder="Kosongkan jika tidak ada",
-                key="pay_group"
-            )
-            p_marketing = st.text_input(
-                "Nama Marketing (Wajib)",
-                placeholder="Contoh: Andi",
-                key="pay_marketing"
-            )
-            p_tgl_event = st.date_input(
-                "Tanggal Event (Opsional)",
-                value=st.session_state.get("pay_event_date", datetime.now(tz=TZ_JKT).date()),
-                key="pay_event_date"
-            )
-
-            p_jenis_opt = st.selectbox(
-                "Jenis Pembayaran",
-                ["Down Payment (DP)", "Termin", "Pelunasan", "Lainnya"],
-                index=0 if st.session_state.get("pay_jenis_opt", "Down Payment (DP)") == "Down Payment (DP)" else 0,
-                key="pay_jenis_opt"
-            )
-
-            p_jenis_custom = ""
-            if p_jenis_opt == "Lainnya":
-                p_jenis_custom = st.text_input(
-                    "Tulis Jenis Pembayaran (Custom) *wajib*",
-                    placeholder="Contoh: Cicilan 1 / Cicilan 2 / Fee Admin / Refund / dll",
-                    key="pay_jenis_custom"
-                )
-
-            p_jenis_final = p_jenis_opt
-            if p_jenis_opt == "Lainnya":
-                p_jenis_final = (p_jenis_custom or "").strip()
-
-            p_nominal = st.text_input(
-                "Nominal Pembayaran (Input bebas)",
-                placeholder="Contoh: 5000000 / 5jt / Rp 5.000.000 / 5,5jt",
-                key="pay_nominal",
-                on_change=on_change_pay_nominal
-            )
-
-            nom_preview = parse_rupiah_to_int(p_nominal)
-            if nom_preview is not None:
-                st.caption(f"Preview: **{format_rupiah_display(nom_preview)}**")
-            else:
-                st.caption("Preview: -")
-
-            p_jatuh_tempo = st.date_input(
-                "Batas Waktu Bayar (Jatuh Tempo)",
-                value=st.session_state.get("pay_due_date", datetime.now(tz=TZ_JKT).date() + timedelta(days=7)),
-                key="pay_due_date"
-            )
-
-            p_status = st.checkbox("✅ Sudah Dibayar?", value=bool(st.session_state.get("pay_status", False)), key="pay_status")
-
-            p_catatan = st.text_area(
-                "Catatan (Opsional)",
-                height=90,
-                placeholder="Contoh: DP untuk booking tanggal event...",
-                key="pay_note"
-            )
-
-            p_bukti = st.file_uploader(
-                "Upload Bukti Pembayaran (Foto/Screenshot/PDF)",
-                key="pay_file",
-                disabled=not KONEKSI_DROPBOX_BERHASIL
-            )
-
-            if st.button("✅ Simpan Pembayaran", use_container_width=True, key="btn_save_payment"):
-                if p_jenis_opt == "Lainnya" and not p_jenis_final:
-                    st.error("Karena memilih 'Lainnya', jenis pembayaran custom wajib diisi.")
-                else:
-                    res, msg = tambah_pembayaran_dp(
-                        nama_group=p_group,
-                        nama_marketing=p_marketing,
-                        tanggal_event=p_tgl_event,
-                        jenis_bayar=p_jenis_final,
-                        nominal_input=p_nominal,
-                        jatuh_tempo=p_jatuh_tempo,
-                        status_bayar=p_status,
-                        bukti_file=p_bukti,
-                        catatan=p_catatan
-                    )
-
-                    if res:
-                        st.success(msg)
-                        reset_payment_form_state()
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
-        with st.expander("📋 Data Pembayaran + Alert Jatuh Tempo", expanded=False):
-            df_pay = load_pembayaran_dp()
-
-            if not df_pay.empty:
-                default_actor = get_actor_fallback(default="-")
-                staff_opts = get_daftar_staf_terbaru()
-                editor_cols = st.columns([2, 1])
-                with editor_cols[0]:
-                    actor_select = st.selectbox(
-                        "Nama Editor (untuk log perubahan)",
-                        options=staff_opts,
-                        index=staff_opts.index(default_actor) if default_actor in staff_opts else 0,
-                        key="payment_editor_name"
-                    )
-                with editor_cols[1]:
-                    actor_manual = st.text_input("Atau tulis manual", placeholder="Opsional", key="payment_editor_manual")
-
-                actor_final = (actor_manual.strip() if safe_str(actor_manual, "").strip() else safe_str(actor_select, "-").strip()) or "-"
-
-                overdue_df, due_soon_df = build_alert_pembayaran(df_pay, days_due_soon=3)
-
-                if not overdue_df.empty:
-                    st.error(f"⛔ Overdue: {len(overdue_df)} pembayaran melewati jatuh tempo!")
-                    cols_alert = [
-                        COL_TS_BAYAR,
-                        COL_GROUP, COL_MARKETING, COL_JENIS_BAYAR,
-                        COL_NOMINAL_BAYAR, COL_JATUH_TEMPO,
-                        COL_STATUS_BAYAR,
-                        COL_BUKTI_BAYAR, COL_CATATAN_BAYAR,
-                        COL_TS_UPDATE, COL_UPDATED_BY
-                    ]
-                    cols_alert = [c for c in cols_alert if c in overdue_df.columns]
-
-                    overdue_view = payment_df_for_display(overdue_df[cols_alert])
-
-                    overdue_edit = st.data_editor(
-                        overdue_view,
-                        column_config={
-                            COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
-                            COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
-                            COL_JENIS_BAYAR: st.column_config.TextColumn("Jenis Pembayaran", width="medium"),
-                            COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True, width="medium"),
-                            COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
-                            COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
-                            COL_TS_UPDATE: st.column_config.TextColumn(COL_TS_UPDATE, disabled=True, width="large"),
-                            COL_UPDATED_BY: st.column_config.TextColumn("Updated By", disabled=True, width="medium"),
-                        },
-                        disabled=[c for c in cols_alert if c != COL_CATATAN_BAYAR],
-                        hide_index=True,
-                        use_container_width=True,
-                        key="overdue_editor_catatan"
-                    )
-
-                    if st.button("💾 Simpan Catatan Overdue", use_container_width=True):
-                        df_new = df_pay.copy()
-                        ts_now = now_ts_str()
-
-                        for _, r in overdue_edit.iterrows():
-                            k = safe_str(r.get(COL_TS_BAYAR, "")).strip()
-                            if not k:
-                                continue
-                            mask = df_new[COL_TS_BAYAR].astype(str) == k
-                            if mask.any():
-                                old_note = safe_str(df_new.loc[mask, COL_CATATAN_BAYAR].values[0], "")
-                                new_note = safe_str(r.get(COL_CATATAN_BAYAR, ""), "")
-
-                                df_new.loc[mask, COL_CATATAN_BAYAR] = new_note
-
-                                old_log = safe_str(df_new.loc[mask, COL_TS_UPDATE].values[0], "")
-                                df_new.loc[mask, COL_TS_UPDATE] = append_payment_ts_update(
-                                    old_log,
-                                    ts_now,
-                                    actor_final,
-                                    [f"{COL_CATATAN_BAYAR}: {_fmt_payment_val_for_log(COL_CATATAN_BAYAR, old_note)} → {_fmt_payment_val_for_log(COL_CATATAN_BAYAR, new_note)}"]
-                                )
-                                df_new.loc[mask, COL_UPDATED_BY] = actor_final
-
-                        if save_pembayaran_dp(df_new):
-                            st.toast("Catatan overdue tersimpan!", icon="✅")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error("Gagal menyimpan catatan overdue.")
-
-                if not due_soon_df.empty:
-                    st.warning(f"⚠️ Jatuh tempo ≤ 3 hari: {len(due_soon_df)} pembayaran belum dibayar.")
-                    cols_alert = [
-                        COL_TS_BAYAR,
-                        COL_GROUP, COL_MARKETING, COL_JENIS_BAYAR,
-                        COL_NOMINAL_BAYAR, COL_JATUH_TEMPO,
-                        COL_STATUS_BAYAR,
-                        COL_BUKTI_BAYAR, COL_CATATAN_BAYAR,
-                        COL_TS_UPDATE, COL_UPDATED_BY
-                    ]
-                    cols_alert = [c for c in cols_alert if c in due_soon_df.columns]
-
-                    due_soon_view = payment_df_for_display(due_soon_df[cols_alert])
-
-                    due_soon_edit = st.data_editor(
-                        due_soon_view,
-                        column_config={
-                            COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
-                            COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
-                            COL_JENIS_BAYAR: st.column_config.TextColumn("Jenis Pembayaran", width="medium"),
-                            COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True, width="medium"),
-                            COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
-                            COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
-                            COL_TS_UPDATE: st.column_config.TextColumn(COL_TS_UPDATE, disabled=True, width="large"),
-                            COL_UPDATED_BY: st.column_config.TextColumn("Updated By", disabled=True, width="medium"),
-                        },
-                        disabled=[c for c in cols_alert if c != COL_CATATAN_BAYAR],
-                        hide_index=True,
-                        use_container_width=True,
-                        key="due_soon_editor_catatan"
-                    )
-
-                    if st.button("💾 Simpan Catatan Due Soon", use_container_width=True):
-                        df_new = df_pay.copy()
-                        ts_now = now_ts_str()
-
-                        for _, r in due_soon_edit.iterrows():
-                            k = safe_str(r.get(COL_TS_BAYAR, "")).strip()
-                            if not k:
-                                continue
-                            mask = df_new[COL_TS_BAYAR].astype(str) == k
-                            if mask.any():
-                                old_note = safe_str(df_new.loc[mask, COL_CATATAN_BAYAR].values[0], "")
-                                new_note = safe_str(r.get(COL_CATATAN_BAYAR, ""), "")
-
-                                df_new.loc[mask, COL_CATATAN_BAYAR] = new_note
-
-                                old_log = safe_str(df_new.loc[mask, COL_TS_UPDATE].values[0], "")
-                                df_new.loc[mask, COL_TS_UPDATE] = append_payment_ts_update(
-                                    old_log,
-                                    ts_now,
-                                    actor_final,
-                                    [f"{COL_CATATAN_BAYAR}: {_fmt_payment_val_for_log(COL_CATATAN_BAYAR, old_note)} → {_fmt_payment_val_for_log(COL_CATATAN_BAYAR, new_note)}"]
-                                )
-                                df_new.loc[mask, COL_UPDATED_BY] = actor_final
-
-                        if save_pembayaran_dp(df_new):
-                            st.toast("Catatan due-soon tersimpan!", icon="✅")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error("Gagal menyimpan catatan due-soon.")
-
-                st.caption(
-                    "Edit yang diizinkan di tabel: **Jenis Pembayaran**, **Status Pembayaran**, "
-                    "**Jatuh Tempo**, **Catatan**. Semua perubahan akan otomatis masuk ke "
-                    f"**{COL_TS_UPDATE}** dan update **{COL_UPDATED_BY}**."
-                )
-
-                editable_cols = {COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_JENIS_BAYAR}
-                disabled_cols = [c for c in PAYMENT_COLUMNS if c not in editable_cols]
-
-                df_pay_view = payment_df_for_display(df_pay)
-
-                edited_pay_view = st.data_editor(
-                    df_pay_view,
-                    column_config={
-                        COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
-                        COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
-                        COL_JENIS_BAYAR: st.column_config.TextColumn("Jenis Pembayaran", width="medium"),
-                        COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True, width="medium"),
-                        COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
-                        COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
-                        COL_TS_UPDATE: st.column_config.TextColumn(COL_TS_UPDATE, disabled=True, width="large"),
-                        COL_UPDATED_BY: st.column_config.TextColumn("Updated By", disabled=True, width="medium"),
-                    },
-                    disabled=disabled_cols,
-                    hide_index=True,
-                    use_container_width=True,
-                    key="editor_payments"
-                )
-
-                if st.button("💾 Simpan Perubahan Pembayaran", use_container_width=True):
-                    editable_cols_list = [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_JENIS_BAYAR]
-
-                    df_after = df_pay.copy().set_index(COL_TS_BAYAR, drop=False)
-                    ed = edited_pay_view.copy().set_index(COL_TS_BAYAR, drop=False)
-
-                    for c in editable_cols_list:
-                        if c in ed.columns:
-                            df_after.loc[ed.index, c] = ed[c]
-
-                    df_after = df_after.reset_index(drop=True)
-
-                    df_to_save = apply_audit_payments_changes(df_pay, df_after, actor=actor_final)
-                    if save_pembayaran_dp(df_to_save):
-                        st.toast("Tersimpan!", icon="✅")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error("Gagal menyimpan perubahan.")
-
-                st.divider()
-
-                with st.expander("📎 Update Bukti Pembayaran (untuk data yang sudah ada)", expanded=False):
-                    df_pay_reset = df_pay.reset_index(drop=True)
-
-                    def _label_payment_idx(i: int) -> str:
-                        r = df_pay_reset.iloc[i]
-                        nominal_disp = format_rupiah_display(r.get(COL_NOMINAL_BAYAR))
-                        due_disp = r.get(COL_JATUH_TEMPO, "")
-                        status_disp = "✅ Dibayar" if bool(r.get(COL_STATUS_BAYAR)) else "⏳ Belum"
-                        return (
-                            f"{i+1}. {r.get(COL_MARKETING, '-')}"
-                            f" | {r.get(COL_JENIS_BAYAR, '-')}"
-                            f" | {nominal_disp}"
-                            f" | Due: {due_disp}"
-                            f" | {status_disp}"
-                        )
-
-                    if len(df_pay_reset) == 0:
-                        st.info("Belum ada data pembayaran.")
-                    else:
-                        selected_idx = st.selectbox(
-                            "Pilih record yang mau di-update buktinya:",
-                            options=list(range(len(df_pay_reset))),
-                            format_func=_label_payment_idx,
-                            key="pay_select_update_bukti_idx"
-                        )
-
-                        file_new = st.file_uploader(
-                            "Upload bukti baru:",
-                            key="pay_file_update_bukti",
-                            disabled=not KONEKSI_DROPBOX_BERHASIL
-                        )
-
-                        if st.button("⬆️ Update Bukti", use_container_width=True):
-                            marketing_name = str(df_pay_reset.iloc[selected_idx].get(COL_MARKETING, "Unknown"))
-                            ok, msg = update_bukti_pembayaran_by_index(
-                                selected_idx,
-                                file_new,
-                                marketing_name,
-                                actor=actor_final
-                            )
-                            if ok:
-                                st.success(msg)
-                                st.cache_data.clear()
-                                st.rerun()
-                            else:
-                                st.error(msg)
-
-            else:
-                st.info("Belum ada data pembayaran.")
-
-    # =========================================================
-    # MAIN PAGE
-    # =========================================================
-    st.title("🚀 Sales & Marketing Action Center")
-    st.caption(f"Realtime: {datetime.now(tz=TZ_JKT).strftime('%d %B %Y %H:%M:%S')}")
-
+    # Quick stats (lightweight)
     try:
-        df_pay_main = load_pembayaran_dp()
-        if not df_pay_main.empty:
-            overdue_main, due_soon_main = build_alert_pembayaran(df_pay_main, days_due_soon=3)
-            if len(overdue_main) > 0:
-                st.error(f"⛔ Alert Pembayaran: {len(overdue_main)} pembayaran OVERDUE!")
-            elif len(due_soon_main) > 0:
-                st.warning(f"⚠️ Alert Pembayaran: {len(due_soon_main)} pembayaran jatuh tempo ≤ 3 hari.")
+        df_pay_sidebar = load_pembayaran_dp()
+        overdue_s, due_soon_s = build_alert_pembayaran(df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
+        st.markdown("### Ringkasan Cepat")
+        st.metric("Overdue Payment", int(len(overdue_s)) if overdue_s is not None else 0)
+        st.metric("Due ≤ 3 hari", int(len(due_soon_s)) if due_soon_s is not None else 0)
     except Exception:
         pass
 
-    # -----------------------------
-    # MENU: LAPORAN & TARGET
-    # -----------------------------
-    if menu_nav == "📝 Laporan & Target":
-        st.subheader("📊 Checklist Target (Result KPI)")
-        col_dash_1, col_dash_2 = st.columns(2)
+    st.divider()
+    st.caption("Tips: gunakan menu di atas untuk berpindah modul.")
 
-        df_team = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
-        df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
 
-        with col_dash_1:
-            st.markdown("#### 🏆 Target Team")
-            if not df_team.empty:
-                done = len(df_team[df_team["Status"] == True])
-                st.progress(done / len(df_team) if len(df_team) > 0 else 0, text=f"Pencapaian: {done}/{len(df_team)}")
-                edited_team = render_hybrid_table(df_team, "team_table", "Misi")
+# =========================================================
+# MENU: LAPORAN HARIAN
+# =========================================================
+if menu_nav == "📝 Laporan Harian":
+    staff_list = get_daftar_staf_terbaru()
 
-                if st.button("💾 Simpan Team", use_container_width=True):
-                    actor = get_actor_fallback(default="Admin")
-                    df_to_save = apply_audit_checklist_changes(df_team, edited_team, key_cols=["Misi"], actor=actor)
-                    if save_checklist(SHEET_TARGET_TEAM, df_to_save, TEAM_CHECKLIST_COLUMNS):
-                        st.toast("Tersimpan!", icon="✅")
-                        st.cache_data.clear()
-                        st.rerun()
-
-                with st.expander("📂 Update Bukti (Team)"):
-                    pilih_misi = st.selectbox("Misi:", df_team["Misi"].tolist())
-                    note_misi = st.text_area("Catatan")
-                    file_misi = st.file_uploader("Bukti", key="up_team", disabled=not KONEKSI_DROPBOX_BERHASIL)
-                    if st.button("Update Team"):
-                        pelapor = get_actor_fallback(default="Admin")
-                        sukses, msg = update_evidence_row(SHEET_TARGET_TEAM, pilih_misi, note_misi, file_misi, pelapor, "Target_Team")
-                        if sukses:
-                            st.success("Updated!")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(msg)
-            else:
-                st.info("Belum ada target team.")
-
-        with col_dash_2:
-            st.markdown("#### ⚡ Target Individu")
-            filter_nama = st.selectbox("Filter:", get_daftar_staf_terbaru(), index=0)
-
-            if not df_indiv_all.empty:
-                df_user = df_indiv_all[df_indiv_all["Nama"] == filter_nama]
-                if not df_user.empty:
-                    done = len(df_user[df_user["Status"] == True])
-                    st.progress(done / len(df_user) if len(df_user) > 0 else 0, text=f"Progress: {done}/{len(df_user)}")
-                    edited_indiv = render_hybrid_table(df_user, f"indiv_{filter_nama}", "Target")
-
-                    if st.button(f"💾 Simpan {filter_nama}", use_container_width=True):
-                        df_all_upd = df_indiv_all.copy()
-                        df_all_upd.update(edited_indiv)
-
-                        actor = filter_nama
-                        df_all_upd = apply_audit_checklist_changes(df_indiv_all, df_all_upd, key_cols=["Nama", "Target"], actor=actor)
-
-                        if save_checklist(SHEET_TARGET_INDIVIDU, df_all_upd, INDIV_CHECKLIST_COLUMNS):
-                            st.toast("Tersimpan!", icon="✅")
-                            st.cache_data.clear()
-                            st.rerun()
-
-                    with st.expander(f"📂 Update Bukti ({filter_nama})"):
-                        pilih_target = st.selectbox("Target:", df_user["Target"].tolist())
-                        note_target = st.text_area("Catatan", key="note_indiv")
-                        file_target = st.file_uploader("Bukti", key="up_indiv", disabled=not KONEKSI_DROPBOX_BERHASIL)
-                        if st.button("Update Pribadi"):
-                            sukses, msg = update_evidence_row(SHEET_TARGET_INDIVIDU, pilih_target, note_target, file_target, filter_nama, "Target_Individu")
-                            if sukses:
-                                st.success("Updated!")
-                                st.cache_data.clear()
-                                st.rerun()
-                            else:
-                                st.error(msg)
-                else:
-                    st.info("Belum ada target.")
-            else:
-                st.info("Data kosong.")
-
-        # -----------------------------
-        # INPUT HARIAN
-        # -----------------------------
-        st.divider()
+    # Top cards: Reminder & last feedback
+    col_a, col_b = st.columns([1, 1])
+    with col_a:
         with st.container(border=True):
-            st.subheader("📝 Input Laporan Harian (Activity)")
-
-            c_nama, c_reminder = st.columns([1, 2])
-            with c_nama:
-                nama_pelapor = st.selectbox("Nama Pelapor", get_daftar_staf_terbaru(), key="pelapor_main")
-
+            st.markdown("#### 👤 Pelapor & Reminder")
+            nama_pelapor = st.selectbox("Nama Pelapor", staff_list, key="pelapor_main")
+            pending_msg = get_reminder_pending(nama_pelapor)
+            if pending_msg:
+                st.warning(f"🔔 Pending terakhir: **{pending_msg}**")
+            else:
+                st.info("Tidak ada pendingan dari laporan terakhir.")
+    with col_b:
+        with st.container(border=True):
+            st.markdown("#### 💌 Feedback Team Lead (Terakhir)")
             try:
                 df_user_only = load_all_reports([nama_pelapor])
                 if not df_user_only.empty and COL_FEEDBACK in df_user_only.columns:
                     df_with_feed = df_user_only[df_user_only[COL_FEEDBACK].astype(str).str.strip() != ""]
                     if not df_with_feed.empty:
                         last_feed = df_with_feed.iloc[-1]
-                        st.info(
-                            f"💌 **Pesan Terbaru Team Lead (Laporan {last_feed[COL_TIMESTAMP]}):**\n\n"
-                            f"\"{last_feed[COL_FEEDBACK]}\""
-                        )
-            except Exception:
-                pass
-
-            with c_reminder:
-                pending_msg = get_reminder_pending(nama_pelapor)
-                if pending_msg:
-                    st.warning(f"🔔 **Reminder:** Kamu punya pendingan kemarin: '{pending_msg}'")
+                        st.info(f"{last_feed.get(COL_FEEDBACK, '-')}")
+                    else:
+                        st.caption("Belum ada feedback.")
                 else:
-                    st.caption("Tidak ada pendingan dari laporan terakhir.")
+                    st.caption("Belum ada feedback.")
+            except Exception:
+                st.caption("Belum ada feedback.")
 
+    st.divider()
+
+    # Daily input form (using form helps smoothness)
+    with st.container(border=True):
+        st.markdown("### 📝 Input Laporan Harian (Activity)")
+        st.caption("Gunakan form ini untuk mencatat aktivitas harian. Data akan tersimpan ke Google Sheet dan bukti (opsional) ke Dropbox.")
+
+        with st.form("form_laporan_harian", clear_on_submit=False):
             kategori_aktivitas = st.radio(
                 "Jenis Aktivitas:",
                 ["🚗 Sales (Kunjungan Lapangan)", "💻 Digital Marketing / Konten / Ads", "📞 Telesales / Follow Up", "🏢 Lainnya"],
@@ -2449,16 +2048,16 @@ if KONEKSI_GSHEET_BERHASIL:
 
                 sosmed_link = ""
                 if "Digital Marketing" in kategori_aktivitas:
-                    sosmed_link = st.text_input("Link Konten / Ads / Drive (Wajib jika ada)")
+                    sosmed_link = st.text_input("Link Konten / Ads / Drive (Opsional)")
 
             with c2:
                 if is_kunjungan:
                     lokasi_input = st.text_input("📍 Nama Klien / Lokasi Kunjungan (Wajib)")
                 else:
-                    lokasi_input = st.text_input("Jenis Tugas (Otomatis)", value=kategori_aktivitas.split(" ")[1], disabled=True)
+                    lokasi_input = st.text_input("Jenis Tugas", value=kategori_aktivitas.split(" ")[1], disabled=True)
 
                 fotos = st.file_uploader(
-                    "Upload Bukti (Foto/Screenshot/Dokumen)",
+                    "Upload Bukti (Foto/Screenshot/Dokumen) - Opsional",
                     accept_multiple_files=True,
                     disabled=not KONEKSI_DROPBOX_BERHASIL
                 )
@@ -2467,13 +2066,13 @@ if KONEKSI_GSHEET_BERHASIL:
             main_deskripsi = ""
 
             if fotos:
-                st.info("📸 **Detail Bukti:** Berikan keterangan spesifik untuk setiap file:")
+                st.info("📸 Tambahkan keterangan singkat untuk setiap file bukti (membantu tracking).")
                 for i, f in enumerate(fotos):
                     with st.container(border=True):
                         col_img, col_desc = st.columns([1, 3])
                         with col_img:
-                            if f.type.startswith("image"):
-                                st.image(f, width=150)
+                            if getattr(f, "type", "").startswith("image"):
+                                st.image(f, width=140)
                             else:
                                 st.markdown(f"📄 **{f.name}**")
                         with col_desc:
@@ -2485,13 +2084,12 @@ if KONEKSI_GSHEET_BERHASIL:
                             )
             else:
                 placeholder_text = "Jelaskan hasil kunjungan..." if is_kunjungan else "Jelaskan konten/ads/calls yang dikerjakan..."
-                main_deskripsi = st.text_area("Deskripsi Aktivitas", placeholder=placeholder_text)
+                main_deskripsi = st.text_area("Deskripsi Aktivitas (Wajib)", placeholder=placeholder_text, height=120)
 
             st.divider()
-            st.markdown("#### 🏁 Kesimpulan Harian")
-            st.caption("Bagian ini penting agar progress besok lebih terarah.")
+            st.markdown("### 🏁 Kesimpulan Harian")
+            st.caption("Ringkas agar progress besok lebih terarah.")
 
-            # ✅ Upgrade: tambah field khusus kendala dari klien
             col_ref_1, col_ref_2, col_ref_3 = st.columns(3)
             with col_ref_1:
                 input_kesimpulan = st.text_area(
@@ -2530,307 +2128,833 @@ if KONEKSI_GSHEET_BERHASIL:
                 placeholder="Contoh: Follow up Bu Susi jam 10 pagi. / Revisi desain banner."
             )
 
-            if st.button("✅ Submit Laporan", type="primary"):
-                valid = True
+            submitted = st.form_submit_button("✅ Submit Laporan", type="primary", use_container_width=True)
 
-                if is_kunjungan and not str(lokasi_input).strip():
-                    st.error("Untuk Sales (Kunjungan), Lokasi Wajib Diisi!")
-                    valid = False
+        if submitted:
+            valid = True
 
-                if (not fotos) and (not str(main_deskripsi).strip()):
-                    st.error("Deskripsi Wajib Diisi!")
-                    valid = False
+            if is_kunjungan and not str(lokasi_input).strip():
+                st.error("Untuk Sales (Kunjungan), Lokasi Wajib Diisi!")
+                valid = False
 
-                if valid:
-                    with st.spinner("Menyimpan dan memformat database..."):
-                        rows = []
-                        ts = now_ts_str()
-                        final_lokasi = lokasi_input if is_kunjungan else kategori_aktivitas
+            if (not fotos) and (not str(main_deskripsi).strip()):
+                st.error("Deskripsi Wajib Diisi!")
+                valid = False
 
-                        val_kesimpulan = input_kesimpulan.strip() if str(input_kesimpulan).strip() else "-"
-                        val_kendala = input_kendala.strip() if str(input_kendala).strip() else "-"
-                        val_kendala_klien = input_kendala_klien.strip() if str(input_kendala_klien).strip() else "-"  # ✅ NEW
-                        val_pending = input_pending.strip() if str(input_pending).strip() else "-"
-                        val_feedback = ""
-                        val_interest = input_interest if input_interest else "-"
-                        val_nama_klien = input_nama_klien.strip() if str(input_nama_klien).strip() else "-"
-                        val_kontak_klien = input_kontak_klien.strip() if str(input_kontak_klien).strip() else "-"
+            if valid:
+                with st.spinner("Menyimpan laporan..."):
+                    rows = []
+                    ts = now_ts_str()
+                    final_lokasi = lokasi_input if is_kunjungan else kategori_aktivitas
 
-                        if fotos and KONEKSI_DROPBOX_BERHASIL:
-                            for f in fotos:
-                                url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
-                                desc = deskripsi_map.get(f.name, "-")
-                                rows.append([
-                                    ts, nama_pelapor, final_lokasi, desc,
-                                    url, sosmed_link if sosmed_link else "-",
-                                    val_kesimpulan, val_kendala, val_kendala_klien,  # ✅ NEW
-                                    val_pending,
-                                    val_feedback, val_interest,
-                                    val_nama_klien, val_kontak_klien
-                                ])
-                        else:
+                    val_kesimpulan = input_kesimpulan.strip() if str(input_kesimpulan).strip() else "-"
+                    val_kendala = input_kendala.strip() if str(input_kendala).strip() else "-"
+                    val_kendala_klien = input_kendala_klien.strip() if str(input_kendala_klien).strip() else "-"
+                    val_pending = input_pending.strip() if str(input_pending).strip() else "-"
+                    val_feedback = ""
+                    val_interest = input_interest if input_interest else "-"
+                    val_nama_klien = input_nama_klien.strip() if str(input_nama_klien).strip() else "-"
+                    val_kontak_klien = input_kontak_klien.strip() if str(input_kontak_klien).strip() else "-"
+
+                    if fotos and KONEKSI_DROPBOX_BERHASIL:
+                        for f in fotos:
+                            url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
+                            desc = deskripsi_map.get(f.name, "-")
                             rows.append([
-                                ts, nama_pelapor, final_lokasi, main_deskripsi,
-                                "-", sosmed_link if sosmed_link else "-",
-                                val_kesimpulan, val_kendala, val_kendala_klien,  # ✅ NEW
+                                ts, nama_pelapor, final_lokasi, desc,
+                                url, sosmed_link if sosmed_link else "-",
+                                val_kesimpulan, val_kendala, val_kendala_klien,
                                 val_pending,
                                 val_feedback, val_interest,
                                 val_nama_klien, val_kontak_klien
                             ])
+                    else:
+                        rows.append([
+                            ts, nama_pelapor, final_lokasi, main_deskripsi,
+                            "-", sosmed_link if sosmed_link else "-",
+                            val_kesimpulan, val_kendala, val_kendala_klien,
+                            val_pending,
+                            val_feedback, val_interest,
+                            val_nama_klien, val_kontak_klien
+                        ])
 
-                        if simpan_laporan_harian_batch(rows, nama_pelapor):
-                            st.success(f"Laporan Tersimpan! Reminder besok: {val_pending}")
-                            st.balloons()
-                            st.cache_data.clear()
-                        else:
-                            st.error("Gagal simpan.")
+                    if simpan_laporan_harian_batch(rows, nama_pelapor):
+                        st.success(f"✅ Laporan tersimpan! Reminder besok: **{val_pending}**")
+                        ui_toast("Laporan tersimpan!", icon="✅")
+                        st.cache_data.clear()
+                    else:
+                        st.error("Gagal simpan.")
 
-        with st.expander("📂 Log Data Mentah"):
-            if st.button("🔄 Refresh"):
+    # Raw log
+    with st.container(border=True):
+        st.markdown("### 📂 Log Data Mentah")
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            if st.button("🔄 Refresh Data", use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
-
-            df_log = load_all_reports(get_daftar_staf_terbaru())
-            if not df_log.empty:
-                st.dataframe(df_log, use_container_width=True, hide_index=True)
-            else:
-                st.info("Kosong")
-
-    # -----------------------------
-    # MENU: DASHBOARD ADMIN
-    # -----------------------------
-    elif menu_nav == "📊 Dashboard Admin":
-        st.header("📊 Dashboard Produktivitas")
-        st.info("Dashboard ini memisahkan analisa antara Sales dan Marketing.")
-
-        if st.button("🔄 Refresh Data"):
-            st.cache_data.clear()
-            st.rerun()
+        with c2:
+            st.caption("Tip: gunakan filter browser (Ctrl+F) atau download di Dashboard Admin untuk analisa lebih lanjut.")
 
         df_log = load_all_reports(get_daftar_staf_terbaru())
-
         if not df_log.empty:
-            try:
-                df_log[COL_TIMESTAMP] = pd.to_datetime(df_log[COL_TIMESTAMP], format="%d-%m-%Y %H:%M:%S", errors="coerce")
-                df_log["Tanggal"] = df_log[COL_TIMESTAMP].dt.date
-            except Exception:
-                df_log["Tanggal"] = datetime.now(tz=TZ_JKT).date()
+            st.dataframe(df_log, use_container_width=True, hide_index=True)
+        else:
+            st.info("Kosong")
 
-            keywords_digital = ["Digital", "Marketing", "Konten", "Ads", "Telesales", "Admin", "Follow"]
 
-            def get_category(val):
-                val_str = str(val)
-                if any(k in val_str for k in keywords_digital):
-                    return "Digital/Internal"
-                return "Kunjungan Lapangan"
+# =========================================================
+# MENU: TARGET & KPI
+# =========================================================
+elif menu_nav == "🎯 Target & KPI":
+    st.markdown("## 🎯 Checklist Target (Result KPI)")
+    st.caption("Kelola target Team dan Individu. Update Status + Bukti/Catatan akan tercatat di kolom audit.")
 
-            df_log["Kategori"] = df_log[COL_TEMPAT].apply(get_category)
+    tab_team, tab_individu, tab_admin = st.tabs(["🏆 Team", "⚡ Individu", "⚙️ Admin Setup"])
 
-            days = st.selectbox("Rentang Waktu:", [7, 14, 30], index=0)
-            start_date = date.today() - timedelta(days=days)
-            df_filt = df_log[df_log["Tanggal"] >= start_date]
+    with tab_team:
+        with st.container(border=True):
+            st.markdown("### 🏆 Target Team")
+            df_team = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
 
-            tab_sales, tab_marketing, tab_review, tab_galeri = st.tabs(
-                ["🚗 Sales (Lapangan)", "💻 Marketing (Digital)", "📝 Review & Feedback", "🖼️ Galeri Bukti"]
+            if not df_team.empty:
+                done = len(df_team[df_team["Status"] == True])
+                progress_val = (done / len(df_team)) if len(df_team) > 0 else 0
+                st.progress(progress_val)
+                st.caption(f"Pencapaian: {done}/{len(df_team)}")
+
+                edited_team = render_hybrid_table(df_team, "team_table", "Misi")
+
+                csave, cexp = st.columns([1, 2])
+                with csave:
+                    if st.button("💾 Simpan Perubahan Team", use_container_width=True):
+                        actor = get_actor_fallback(default="Admin")
+                        df_to_save = apply_audit_checklist_changes(df_team, edited_team, key_cols=["Misi"], actor=actor)
+                        if save_checklist(SHEET_TARGET_TEAM, df_to_save, TEAM_CHECKLIST_COLUMNS):
+                            ui_toast("Tersimpan!", icon="✅")
+                            st.cache_data.clear()
+                            st.rerun()
+                with cexp:
+                    st.caption("Anda bisa update bukti file via panel 'Update Bukti (Team)' di bawah.")
+            else:
+                st.info("Belum ada target team.")
+
+        with st.container(border=True):
+            st.markdown("### ➕ Bulk Input Target Team")
+            with st.form("add_team_goal", clear_on_submit=True):
+                goal_team_text = st.text_area("Target Team (Satu per baris)", height=100)
+                c1, c2 = st.columns(2)
+                today_ = datetime.now(tz=TZ_JKT).date()
+                start_d = c1.date_input("Mulai", value=today_, key="start_team")
+                end_d = c2.date_input("Selesai", value=today_ + timedelta(days=30), key="end_team")
+                if st.form_submit_button("➕ Tambah", use_container_width=True):
+                    targets = clean_bulk_input(goal_team_text)
+                    if targets:
+                        if add_bulk_targets(SHEET_TARGET_TEAM, ["", str(start_d), str(end_d), "FALSE", "-"], targets):
+                            st.success(f"{len(targets)} target ditambahkan!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("Gagal.")
+
+        with st.container(border=True):
+            st.markdown("### 📂 Update Bukti (Team)")
+            df_team = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
+            if df_team.empty:
+                st.info("Belum ada target team.")
+            else:
+                pilih_misi = st.selectbox("Misi:", df_team["Misi"].tolist())
+                note_misi = st.text_area("Catatan (Opsional)")
+                file_misi = st.file_uploader("Bukti", key="up_team", disabled=not KONEKSI_DROPBOX_BERHASIL)
+                if st.button("Update Team", use_container_width=True):
+                    pelapor = get_actor_fallback(default="Admin")
+                    sukses, msg = update_evidence_row(SHEET_TARGET_TEAM, pilih_misi, note_misi, file_misi, pelapor, "Target_Team")
+                    if sukses:
+                        st.success("Updated!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+    with tab_individu:
+        with st.container(border=True):
+            st.markdown("### ⚡ Target Individu")
+            df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
+            staff = get_daftar_staf_terbaru()
+            filter_nama = st.selectbox("Filter Nama:", staff, index=0)
+
+            if not df_indiv_all.empty:
+                df_user = df_indiv_all[df_indiv_all["Nama"] == filter_nama]
+                if not df_user.empty:
+                    done = len(df_user[df_user["Status"] == True])
+                    progress_val = (done / len(df_user)) if len(df_user) > 0 else 0
+                    st.progress(progress_val)
+                    st.caption(f"Progress: {done}/{len(df_user)}")
+                    edited_indiv = render_hybrid_table(df_user, f"indiv_{filter_nama}", "Target")
+
+                    if st.button(f"💾 Simpan {filter_nama}", use_container_width=True):
+                        df_all_upd = df_indiv_all.copy()
+                        df_all_upd.update(edited_indiv)
+
+                        actor = filter_nama
+                        df_all_upd = apply_audit_checklist_changes(df_indiv_all, df_all_upd, key_cols=["Nama", "Target"], actor=actor)
+
+                        if save_checklist(SHEET_TARGET_INDIVIDU, df_all_upd, INDIV_CHECKLIST_COLUMNS):
+                            ui_toast("Tersimpan!", icon="✅")
+                            st.cache_data.clear()
+                            st.rerun()
+
+                    with st.expander(f"📂 Update Bukti ({filter_nama})", expanded=False):
+                        pilih_target = st.selectbox("Target:", df_user["Target"].tolist())
+                        note_target = st.text_area("Catatan", key="note_indiv")
+                        file_target = st.file_uploader("Bukti", key="up_indiv", disabled=not KONEKSI_DROPBOX_BERHASIL)
+                        if st.button("Update Pribadi", use_container_width=True):
+                            sukses, msg = update_evidence_row(SHEET_TARGET_INDIVIDU, pilih_target, note_target, file_target, filter_nama, "Target_Individu")
+                            if sukses:
+                                st.success("Updated!")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error(msg)
+                else:
+                    st.info("Belum ada target untuk user ini.")
+            else:
+                st.info("Data kosong.")
+
+        with st.container(border=True):
+            st.markdown("### ➕ Bulk Input Target Pribadi")
+            with st.form("add_indiv_goal", clear_on_submit=True):
+                goal_indiv_text = st.text_area("Target Mingguan (Satu per baris)", height=100)
+                c1, c2 = st.columns(2)
+                today_ = datetime.now(tz=TZ_JKT).date()
+                start_i = c1.date_input("Mulai", value=today_, key="start_indiv")
+                end_i = c2.date_input("Selesai", value=today_ + timedelta(days=7), key="end_indiv")
+                if st.form_submit_button("➕ Tambah", use_container_width=True):
+                    targets = clean_bulk_input(goal_indiv_text)
+                    if targets:
+                        if add_bulk_targets(SHEET_TARGET_INDIVIDU, [filter_nama, "", str(start_i), str(end_i), "FALSE", "-"], targets):
+                            st.success(f"{len(targets)} target ditambahkan!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("Gagal.")
+
+    with tab_admin:
+        # Staff management
+        with st.container(border=True):
+            st.markdown("### ➕ Tambah Karyawan")
+            with st.form("add_staff", clear_on_submit=True):
+                new_name = st.text_input("Nama")
+                new_role = st.text_input("Jabatan")
+                if st.form_submit_button("Tambah", use_container_width=True):
+                    if new_name and new_role:
+                        res, msg = tambah_staf_baru(f"{new_name} ({new_role})")
+                        if res:
+                            st.success(msg)
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    else:
+                        st.error("Nama dan jabatan wajib diisi.")
+
+        with st.container(border=True):
+            st.markdown("### 👥 Tambah Team (Config)")
+            with st.form("add_team_admin", clear_on_submit=True):
+                team_name = st.text_input("Nama Team", placeholder="Contoh: Team Sales A")
+                team_posisi = st.text_input("Posisi/Divisi", placeholder="Contoh: Sales Lapangan / Digital Marketing")
+                anggota_text = st.text_area("Nama Anggota (satu per baris)", height=120, placeholder="Contoh:\nAndi\nBudi\nSusi")
+                if st.form_submit_button("Tambah Team", use_container_width=True):
+                    anggota_list = clean_bulk_input(anggota_text)
+                    res, msg = tambah_team_baru(team_name, team_posisi, anggota_list)
+                    if res:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        with st.container(border=True):
+            st.markdown("### 📋 Daftar Team")
+            df_team_cfg = load_team_config()
+            if not df_team_cfg.empty:
+                st.dataframe(df_team_cfg, use_container_width=True, hide_index=True)
+            else:
+                st.info("Belum ada team yang tersimpan.")
+
+
+# =========================================================
+# MENU: CLOSING DEAL
+# =========================================================
+elif menu_nav == "🤝 Closing Deal":
+    st.markdown("## 🤝 Closing Deal")
+    st.caption("Catat closing deal dan export data dalam format Excel/CSV.")
+
+    with st.container(border=True):
+        st.markdown("### ➕ Input Closing Deal")
+        with st.form("form_closing_deal", clear_on_submit=True):
+            cd_group = st.text_input("Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada")
+            cd_marketing = st.text_input("Nama Marketing", placeholder="Contoh: Andi")
+            cd_tgl = st.date_input("Tanggal Event", value=datetime.now(tz=TZ_JKT).date(), key="closing_event_date")
+            cd_bidang = st.text_input("Bidang (Manual)", placeholder="Contoh: F&B / Properti / Pendidikan")
+            cd_nilai = st.text_input(
+                "Nilai Kontrak (Input bebas)",
+                placeholder="Contoh: 15000000 / 15.000.000 / Rp 15.000.000 / 15jt / 15,5jt"
             )
 
-            with tab_sales:
-                df_sales = df_filt[df_filt["Kategori"] == "Kunjungan Lapangan"]
-                col1, col2 = st.columns(2)
-                col1.metric("Total Kunjungan", len(df_sales))
-                col2.metric("Sales Aktif", df_sales[COL_NAMA].nunique())
-                if not df_sales.empty:
-                    st.subheader("Top Visiting Sales")
-                    st.bar_chart(df_sales[COL_NAMA].value_counts())
-                    st.subheader("Lokasi Paling Sering Dikunjungi")
-                    st.dataframe(df_sales[COL_TEMPAT].value_counts().head(5), use_container_width=True)
+            if st.form_submit_button("✅ Simpan Closing Deal", use_container_width=True):
+                res, msg = tambah_closing_deal(cd_group, cd_marketing, cd_tgl, cd_bidang, cd_nilai)
+                if res:
+                    st.success(msg)
+                    st.cache_data.clear()
+                    st.rerun()
                 else:
-                    st.info("Tidak ada data kunjungan lapangan.")
+                    st.error(msg)
 
-            with tab_marketing:
-                df_mkt = df_filt[df_filt["Kategori"] == "Digital/Internal"]
-                col1, col2 = st.columns(2)
-                col1.metric("Total Output", len(df_mkt))
-                col2.metric("Marketer Aktif", df_mkt[COL_NAMA].nunique())
-                if not df_mkt.empty:
-                    st.subheader("Produktivitas Tim Digital")
-                    if HAS_PLOTLY:
-                        fig = px.pie(df_mkt, names=COL_NAMA, title="Distribusi Beban Kerja Digital")
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.bar_chart(df_mkt[COL_NAMA].value_counts())
-                    st.subheader("Jenis Tugas Digital")
-                    st.bar_chart(df_mkt[COL_TEMPAT].value_counts())
+    with st.container(border=True):
+        st.markdown("### 📋 Data Closing Deal")
+        df_cd = load_closing_deal()
+
+        if not df_cd.empty:
+            # Quick summary
+            total_kontrak = int(df_cd[COL_NILAI_KONTRAK].fillna(0).sum()) if COL_NILAI_KONTRAK in df_cd.columns else 0
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Jumlah Deal", int(len(df_cd)))
+            c2.metric("Total Nilai Kontrak", format_rupiah_display(total_kontrak))
+            c3.metric("Marketing Aktif", int(df_cd[COL_MARKETING].nunique()) if COL_MARKETING in df_cd.columns else 0)
+
+            df_cd_display = df_cd.copy()
+            df_cd_display[COL_NILAI_KONTRAK] = df_cd_display[COL_NILAI_KONTRAK].apply(
+                lambda x: "" if pd.isna(x) else format_rupiah_display(x)
+            )
+            st.dataframe(df_cd_display, use_container_width=True, hide_index=True)
+
+            cexp1, cexp2 = st.columns(2)
+
+            with cexp1:
+                if HAS_OPENPYXL:
+                    col_widths = {
+                        COL_GROUP: 25,
+                        COL_MARKETING: 20,
+                        COL_TGL_EVENT: 16,
+                        COL_BIDANG: 25,
+                        COL_NILAI_KONTRAK: 18
+                    }
+
+                    df_export = df_cd.copy()
+                    df_export[COL_NILAI_KONTRAK] = df_export[COL_NILAI_KONTRAK].apply(
+                        lambda x: None if pd.isna(x) else int(x)
+                    )
+
+                    excel_bytes = df_to_excel_bytes(
+                        df_export,
+                        sheet_name="Closing_Deal",
+                        col_widths=col_widths,
+                        wrap_cols=[COL_GROUP, COL_BIDANG],
+                        right_align_cols=[COL_NILAI_KONTRAK],
+                        number_format_cols={COL_NILAI_KONTRAK: '"Rp" #,##0'}
+                    )
+                    st.download_button(
+                        "⬇️ Download Excel (Rapi + Rupiah)",
+                        data=excel_bytes,
+                        file_name="closing_deal.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
                 else:
-                    st.info("Tidak ada data aktivitas digital.")
+                    st.warning("openpyxl belum tersedia. Download Excel dinonaktifkan.")
 
-            with tab_review:
-                st.subheader("📝 Review Catatan Harian & Feedback")
-                st.caption("Monitoring kendala dan memberikan feedback langsung per individu.")
+            with cexp2:
+                csv_cd = df_cd.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇️ Download CSV",
+                    data=csv_cd,
+                    file_name="closing_deal.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+        else:
+            st.info("Belum ada data closing deal.")
 
-                with st.expander("📇 Tarik Data Nama & No HP per Tingkat Interest", expanded=True):
-                    if COL_INTEREST not in df_filt.columns:
-                        st.warning("Kolom Interest (%) belum ada di data.")
+
+# =========================================================
+# MENU: PEMBAYARAN
+# =========================================================
+elif menu_nav == "💳 Pembayaran":
+    st.markdown("## 💳 Pembayaran (DP / Termin / Pelunasan)")
+    st.caption("Input pembayaran, monitoring jatuh tempo, dan audit log otomatis.")
+
+    # Input pembayaran
+    with st.container(border=True):
+        st.markdown("### ➕ Input Pembayaran")
+
+        p_group = st.text_input("Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada", key="pay_group")
+        p_marketing = st.text_input("Nama Marketing (Wajib)", placeholder="Contoh: Andi", key="pay_marketing")
+        p_tgl_event = st.date_input(
+            "Tanggal Event (Opsional)",
+            value=st.session_state.get("pay_event_date", datetime.now(tz=TZ_JKT).date()),
+            key="pay_event_date"
+        )
+
+        p_jenis_opt = st.selectbox(
+            "Jenis Pembayaran",
+            ["Down Payment (DP)", "Termin", "Pelunasan", "Lainnya"],
+            key="pay_jenis_opt"
+        )
+
+        p_jenis_custom = ""
+        if p_jenis_opt == "Lainnya":
+            p_jenis_custom = st.text_input(
+                "Tulis Jenis Pembayaran (Custom) *wajib*",
+                placeholder="Contoh: Cicilan 1 / Cicilan 2 / Fee Admin / Refund / dll",
+                key="pay_jenis_custom"
+            )
+
+        p_jenis_final = p_jenis_opt if p_jenis_opt != "Lainnya" else (p_jenis_custom or "").strip()
+
+        p_nominal = st.text_input(
+            "Nominal Pembayaran (Input bebas)",
+            placeholder="Contoh: 5000000 / 5jt / Rp 5.000.000 / 5,5jt",
+            key="pay_nominal",
+            on_change=on_change_pay_nominal
+        )
+
+        nom_preview = parse_rupiah_to_int(p_nominal)
+        st.caption(f"Preview nominal: **{format_rupiah_display(nom_preview) if nom_preview is not None else '-'}**")
+
+        p_jatuh_tempo = st.date_input(
+            "Batas Waktu Bayar (Jatuh Tempo)",
+            value=st.session_state.get("pay_due_date", datetime.now(tz=TZ_JKT).date() + timedelta(days=7)),
+            key="pay_due_date"
+        )
+
+        p_status = st.checkbox("✅ Sudah Dibayar?", value=bool(st.session_state.get("pay_status", False)), key="pay_status")
+
+        p_catatan = st.text_area(
+            "Catatan (Opsional)",
+            height=90,
+            placeholder="Contoh: DP untuk booking tanggal event...",
+            key="pay_note"
+        )
+
+        p_bukti = st.file_uploader(
+            "Upload Bukti Pembayaran (Foto/Screenshot/PDF)",
+            key="pay_file",
+            disabled=not KONEKSI_DROPBOX_BERHASIL
+        )
+
+        if st.button("✅ Simpan Pembayaran", type="primary", use_container_width=True, key="btn_save_payment"):
+            if p_jenis_opt == "Lainnya" and not p_jenis_final:
+                st.error("Karena memilih 'Lainnya', jenis pembayaran custom wajib diisi.")
+            else:
+                res, msg = tambah_pembayaran_dp(
+                    nama_group=p_group,
+                    nama_marketing=p_marketing,
+                    tanggal_event=p_tgl_event,
+                    jenis_bayar=p_jenis_final,
+                    nominal_input=p_nominal,
+                    jatuh_tempo=p_jatuh_tempo,
+                    status_bayar=p_status,
+                    bukti_file=p_bukti,
+                    catatan=p_catatan
+                )
+
+                if res:
+                    st.success(msg)
+                    reset_payment_form_state()
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    # Data pembayaran + alert
+    with st.container(border=True):
+        st.markdown("### 📋 Data Pembayaran + Alert Jatuh Tempo")
+        df_pay = load_pembayaran_dp()
+
+        if df_pay.empty:
+            st.info("Belum ada data pembayaran.")
+        else:
+            default_actor = get_actor_fallback(default="-")
+            staff_opts = get_daftar_staf_terbaru()
+            editor_cols = st.columns([2, 1])
+            with editor_cols[0]:
+                actor_select = st.selectbox(
+                    "Nama Editor (untuk log perubahan)",
+                    options=staff_opts,
+                    index=staff_opts.index(default_actor) if default_actor in staff_opts else 0,
+                    key="payment_editor_name"
+                )
+            with editor_cols[1]:
+                actor_manual = st.text_input("Atau tulis manual", placeholder="Opsional", key="payment_editor_manual")
+
+            actor_final = (actor_manual.strip() if safe_str(actor_manual, "").strip() else safe_str(actor_select, "-").strip()) or "-"
+
+            overdue_df, due_soon_df = build_alert_pembayaran(df_pay, days_due_soon=3)
+
+            # Alerts
+            a1, a2 = st.columns(2)
+            with a1:
+                st.metric("⛔ Overdue", int(len(overdue_df)))
+            with a2:
+                st.metric("⚠️ Due ≤ 3 hari", int(len(due_soon_df)))
+
+            if len(overdue_df) > 0:
+                st.error(f"⛔ Overdue: {len(overdue_df)} pembayaran melewati jatuh tempo!")
+
+            if len(due_soon_df) > 0:
+                st.warning(f"⚠️ Jatuh tempo ≤ 3 hari: {len(due_soon_df)} pembayaran belum dibayar.")
+
+            st.caption(
+                "Kolom yang bisa diedit: **Jenis Pembayaran**, **Status Pembayaran**, "
+                "**Jatuh Tempo**, **Catatan**. Semua perubahan otomatis tercatat pada log."
+            )
+
+            editable_cols = {COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_JENIS_BAYAR}
+            disabled_cols = [c for c in PAYMENT_COLUMNS if c not in editable_cols]
+
+            df_pay_view = payment_df_for_display(df_pay)
+
+            edited_pay_view = st.data_editor(
+                df_pay_view,
+                column_config={
+                    COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Sudah Dibayar?", width="small"),
+                    COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
+                    COL_JENIS_BAYAR: st.column_config.TextColumn("Jenis Pembayaran", width="medium"),
+                    COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True, width="medium"),
+                    COL_BUKTI_BAYAR: st.column_config.TextColumn("Bukti (Link)", width="large"),
+                    COL_CATATAN_BAYAR: st.column_config.TextColumn("Catatan", width="large"),
+                    COL_TS_UPDATE: st.column_config.TextColumn(COL_TS_UPDATE, disabled=True, width="large"),
+                    COL_UPDATED_BY: st.column_config.TextColumn("Updated By", disabled=True, width="medium"),
+                },
+                disabled=disabled_cols,
+                hide_index=True,
+                use_container_width=True,
+                key="editor_payments"
+            )
+
+            if st.button("💾 Simpan Perubahan Pembayaran", use_container_width=True):
+                editable_cols_list = [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_JENIS_BAYAR]
+
+                df_after = df_pay.copy().set_index(COL_TS_BAYAR, drop=False)
+                ed = edited_pay_view.copy().set_index(COL_TS_BAYAR, drop=False)
+
+                for c in editable_cols_list:
+                    if c in ed.columns:
+                        df_after.loc[ed.index, c] = ed[c]
+
+                df_after = df_after.reset_index(drop=True)
+
+                df_to_save = apply_audit_payments_changes(df_pay, df_after, actor=actor_final)
+                if save_pembayaran_dp(df_to_save):
+                    ui_toast("Tersimpan!", icon="✅")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error("Gagal menyimpan perubahan.")
+
+            st.divider()
+            with st.expander("📎 Update Bukti Pembayaran (data existing)", expanded=False):
+                df_pay_reset = df_pay.reset_index(drop=True)
+
+                def _label_payment_idx(i: int) -> str:
+                    r = df_pay_reset.iloc[i]
+                    nominal_disp = format_rupiah_display(r.get(COL_NOMINAL_BAYAR))
+                    due_disp = r.get(COL_JATUH_TEMPO, "")
+                    status_disp = "✅ Dibayar" if bool(r.get(COL_STATUS_BAYAR)) else "⏳ Belum"
+                    return (
+                        f"{i+1}. {r.get(COL_MARKETING, '-')}"
+                        f" | {r.get(COL_JENIS_BAYAR, '-')}"
+                        f" | {nominal_disp}"
+                        f" | Due: {due_disp}"
+                        f" | {status_disp}"
+                    )
+
+                selected_idx = st.selectbox(
+                    "Pilih record yang mau di-update buktinya:",
+                    options=list(range(len(df_pay_reset))),
+                    format_func=_label_payment_idx,
+                    key="pay_select_update_bukti_idx"
+                )
+
+                file_new = st.file_uploader(
+                    "Upload bukti baru:",
+                    key="pay_file_update_bukti",
+                    disabled=not KONEKSI_DROPBOX_BERHASIL
+                )
+
+                if st.button("⬆️ Update Bukti", use_container_width=True):
+                    marketing_name = str(df_pay_reset.iloc[selected_idx].get(COL_MARKETING, "Unknown"))
+                    ok, msg = update_bukti_pembayaran_by_index(
+                        selected_idx,
+                        file_new,
+                        marketing_name,
+                        actor=actor_final
+                    )
+                    if ok:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
                     else:
-                        if "filter_interest_admin" not in st.session_state:
-                            st.session_state["filter_interest_admin"] = "Under 50% (A)"
+                        st.error(msg)
 
-                        b1, b2, b3 = st.columns(3)
-                        if b1.button("Tarik Under 50% (A)", use_container_width=True):
-                            st.session_state["filter_interest_admin"] = "Under 50% (A)"
-                        if b2.button("Tarik 50-75% (B)", use_container_width=True):
-                            st.session_state["filter_interest_admin"] = "50-75% (B)"
-                        if b3.button("Tarik 75%-100%", use_container_width=True):
-                            st.session_state["filter_interest_admin"] = "75%-100%"
 
-                        selected_interest = st.session_state["filter_interest_admin"]
-                        st.info(f"Filter aktif: **{selected_interest}**")
+# =========================================================
+# MENU: DASHBOARD ADMIN
+# =========================================================
+elif menu_nav == "📊 Dashboard Admin":
+    if not st.session_state.get("is_admin", False):
+        st.warning("Akses Dashboard Admin memerlukan login admin.")
+        st.stop()
 
-                        df_tmp = df_filt.copy()
-                        for c in [COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_INTEREST]:
-                            if c not in df_tmp.columns:
-                                df_tmp[c] = ""
+    st.markdown("## 📊 Dashboard Produktivitas")
+    st.info("Dashboard ini memisahkan analisa antara Sales dan Marketing.")
 
-                        df_tmp[COL_INTEREST] = df_tmp[COL_INTEREST].astype(str).fillna("").str.strip()
-                        df_interest = df_tmp[df_tmp[COL_INTEREST] == selected_interest].copy()
+    if st.button("🔄 Refresh Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
-                        cols_out = []
-                        for c in [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_INTEREST, COL_TEMPAT, COL_DESKRIPSI, COL_KENDALA_KLIEN]:
-                            if c in df_interest.columns:
-                                cols_out.append(c)
+    staff_list = get_daftar_staf_terbaru()
+    df_log = load_all_reports(staff_list)
 
-                        df_out = df_interest[cols_out].copy() if cols_out else df_interest.copy()
-                        st.dataframe(df_out, use_container_width=True, hide_index=True)
+    if df_log.empty:
+        st.info("Belum ada data laporan.")
+        st.stop()
 
-                        if HAS_OPENPYXL:
-                            df_export = df_out.copy()
-                            if COL_TIMESTAMP in df_export.columns and pd.api.types.is_datetime64_any_dtype(df_export[COL_TIMESTAMP]):
-                                df_export[COL_TIMESTAMP] = df_export[COL_TIMESTAMP].dt.strftime("%d-%m-%Y %H:%M:%S")
+    # Parse time
+    try:
+        df_log[COL_TIMESTAMP] = pd.to_datetime(df_log[COL_TIMESTAMP], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+        df_log["Tanggal"] = df_log[COL_TIMESTAMP].dt.date
+    except Exception:
+        df_log["Tanggal"] = datetime.now(tz=TZ_JKT).date()
 
-                            excel_bytes = df_to_excel_bytes(
-                                df_export,
-                                sheet_name="Data_Interest",
-                                wrap_cols=[COL_DESKRIPSI, COL_TEMPAT, COL_KENDALA_KLIEN],
-                            )
-                            safe_name = selected_interest.replace("%", "").replace(" ", "_").replace("/", "_").replace("(", "").replace(")", "")
-                            st.download_button(
-                                "⬇️ Download Excel (sesuai filter)",
-                                data=excel_bytes,
-                                file_name=f"data_klien_{safe_name}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
+    keywords_digital = ["Digital", "Marketing", "Konten", "Ads", "Telesales", "Admin", "Follow"]
 
-                        df_export_csv = df_out.copy()
-                        if COL_TIMESTAMP in df_export_csv.columns and pd.api.types.is_datetime64_any_dtype(df_export_csv[COL_TIMESTAMP]):
-                            df_export_csv[COL_TIMESTAMP] = df_export_csv[COL_TIMESTAMP].dt.strftime("%d-%m-%Y %H:%M:%S")
+    def get_category(val):
+        val_str = str(val)
+        if any(k in val_str for k in keywords_digital):
+            return "Digital/Internal"
+        return "Kunjungan Lapangan"
 
-                        csv_data = df_export_csv.to_csv(index=False).encode("utf-8")
+    df_log["Kategori"] = df_log[COL_TEMPAT].apply(get_category)
+
+    # Filters
+    with st.container(border=True):
+        st.markdown("### 🔎 Filter")
+        c1, c2, c3 = st.columns([1, 1, 2])
+        days = c1.selectbox("Rentang (hari):", [7, 14, 30, 60], index=0)
+        start_date = date.today() - timedelta(days=days)
+        df_filt = df_log[df_log["Tanggal"] >= start_date].copy()
+        c2.metric("Total Aktivitas", int(len(df_filt)))
+        c3.metric("Staf Aktif", int(df_filt[COL_NAMA].nunique()) if COL_NAMA in df_filt.columns else 0)
+
+    tab_sales, tab_marketing, tab_review, tab_galeri = st.tabs(
+        ["🚗 Sales (Lapangan)", "💻 Marketing (Digital)", "📝 Review & Feedback", "🖼️ Galeri Bukti"]
+    )
+
+    with tab_sales:
+        with st.container(border=True):
+            df_sales = df_filt[df_filt["Kategori"] == "Kunjungan Lapangan"]
+            c1, c2 = st.columns(2)
+            c1.metric("Total Kunjungan", int(len(df_sales)))
+            c2.metric("Sales Aktif", int(df_sales[COL_NAMA].nunique()) if COL_NAMA in df_sales.columns else 0)
+            if not df_sales.empty:
+                st.markdown("#### Top Visiting Sales")
+                st.bar_chart(df_sales[COL_NAMA].value_counts())
+                st.markdown("#### Lokasi Paling Sering Dikunjungi")
+                st.dataframe(df_sales[COL_TEMPAT].value_counts().head(10), use_container_width=True)
+            else:
+                st.info("Tidak ada data kunjungan lapangan.")
+
+    with tab_marketing:
+        with st.container(border=True):
+            df_mkt = df_filt[df_filt["Kategori"] == "Digital/Internal"]
+            c1, c2 = st.columns(2)
+            c1.metric("Total Output", int(len(df_mkt)))
+            c2.metric("Marketer Aktif", int(df_mkt[COL_NAMA].nunique()) if COL_NAMA in df_mkt.columns else 0)
+            if not df_mkt.empty:
+                st.markdown("#### Produktivitas Tim Digital")
+                if HAS_PLOTLY:
+                    fig = px.pie(df_mkt, names=COL_NAMA, title="Distribusi Beban Kerja Digital")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.bar_chart(df_mkt[COL_NAMA].value_counts())
+                st.markdown("#### Jenis Tugas Digital")
+                st.bar_chart(df_mkt[COL_TEMPAT].value_counts())
+            else:
+                st.info("Tidak ada data aktivitas digital.")
+
+    with tab_review:
+        with st.container(border=True):
+            st.markdown("### 📝 Review Catatan Harian & Feedback")
+            st.caption("Monitoring kendala dan memberikan feedback langsung per individu.")
+
+            # Limit cards for smoothness
+            max_cards = st.slider("Jumlah kartu yang ditampilkan", min_value=10, max_value=200, value=50, step=10)
+
+            # Interest export section
+            with st.expander("📇 Tarik Data Nama & No HP per Tingkat Interest", expanded=True):
+                if COL_INTEREST not in df_filt.columns:
+                    st.warning("Kolom Interest (%) belum ada di data.")
+                else:
+                    if "filter_interest_admin" not in st.session_state:
+                        st.session_state["filter_interest_admin"] = "Under 50% (A)"
+
+                    b1, b2, b3 = st.columns(3)
+                    if b1.button("Tarik Under 50% (A)", use_container_width=True):
+                        st.session_state["filter_interest_admin"] = "Under 50% (A)"
+                    if b2.button("Tarik 50-75% (B)", use_container_width=True):
+                        st.session_state["filter_interest_admin"] = "50-75% (B)"
+                    if b3.button("Tarik 75%-100%", use_container_width=True):
+                        st.session_state["filter_interest_admin"] = "75%-100%"
+
+                    selected_interest = st.session_state["filter_interest_admin"]
+                    st.info(f"Filter aktif: **{selected_interest}**")
+
+                    df_tmp = df_filt.copy()
+                    for c in [COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_INTEREST, COL_KENDALA_KLIEN]:
+                        if c not in df_tmp.columns:
+                            df_tmp[c] = ""
+
+                    df_tmp[COL_INTEREST] = df_tmp[COL_INTEREST].astype(str).fillna("").str.strip()
+                    df_interest = df_tmp[df_tmp[COL_INTEREST] == selected_interest].copy()
+
+                    cols_out = []
+                    for c in [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_INTEREST, COL_TEMPAT, COL_DESKRIPSI, COL_KENDALA_KLIEN]:
+                        if c in df_interest.columns:
+                            cols_out.append(c)
+
+                    df_out = df_interest[cols_out].copy() if cols_out else df_interest.copy()
+                    st.dataframe(df_out, use_container_width=True, hide_index=True)
+
+                    if HAS_OPENPYXL:
+                        df_export = df_out.copy()
+                        if COL_TIMESTAMP in df_export.columns and pd.api.types.is_datetime64_any_dtype(df_export[COL_TIMESTAMP]):
+                            df_export[COL_TIMESTAMP] = df_export[COL_TIMESTAMP].dt.strftime("%d-%m-%Y %H:%M:%S")
+
+                        excel_bytes = df_to_excel_bytes(
+                            df_export,
+                            sheet_name="Data_Interest",
+                            wrap_cols=[COL_DESKRIPSI, COL_TEMPAT, COL_KENDALA_KLIEN],
+                        )
                         safe_name = selected_interest.replace("%", "").replace(" ", "_").replace("/", "_").replace("(", "").replace(")", "")
                         st.download_button(
-                            "⬇️ Download CSV (sesuai filter)",
-                            data=csv_data,
-                            file_name=f"data_klien_{safe_name}.csv",
-                            mime="text/csv",
+                            "⬇️ Download Excel (sesuai filter)",
+                            data=excel_bytes,
+                            file_name=f"data_klien_{safe_name}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True
                         )
 
-                df_review = df_filt.sort_values(by=COL_TIMESTAMP, ascending=False)
+                    df_export_csv = df_out.copy()
+                    if COL_TIMESTAMP in df_export_csv.columns and pd.api.types.is_datetime64_any_dtype(df_export_csv[COL_TIMESTAMP]):
+                        df_export_csv[COL_TIMESTAMP] = df_export_csv[COL_TIMESTAMP].dt.strftime("%d-%m-%Y %H:%M:%S")
 
-                if not df_review.empty:
-                    for _, row in df_review.iterrows():
-                        with st.container(border=True):
-                            c_head1, c_head2 = st.columns([3, 1])
-                            with c_head1:
-                                st.markdown(f"### 👤 {row.get(COL_NAMA, '-')}")
-                                st.caption(f"📅 {row.get(COL_TIMESTAMP, '-')} | 🏷️ {row.get('Kategori', '-')}")
+                    csv_data = df_export_csv.to_csv(index=False).encode("utf-8")
+                    safe_name = selected_interest.replace("%", "").replace(" ", "_").replace("/", "_").replace("(", "").replace(")", "")
+                    st.download_button(
+                        "⬇️ Download CSV (sesuai filter)",
+                        data=csv_data,
+                        file_name=f"data_klien_{safe_name}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
 
-                            c_body, c_img = st.columns([3, 1])
-                            with c_body:
-                                st.markdown(f"**📍 Aktivitas/Lokasi:** {row.get(COL_TEMPAT, '-')}")
-                                st.markdown(f"**📝 Deskripsi:** {row.get(COL_DESKRIPSI, '-')}")
+            # Review cards
+            df_review = df_filt.sort_values(by=COL_TIMESTAMP, ascending=False).head(max_cards)
 
-                                nama_klien_val = row.get(COL_NAMA_KLIEN, "-") or "-"
-                                kontak_klien_val = row.get(COL_KONTAK_KLIEN, "-") or "-"
-                                interest_val = row.get(COL_INTEREST, "-") or "-"
+            if df_review.empty:
+                st.info("Belum ada data laporan pada rentang waktu ini.")
+            else:
+                for _, row in df_review.iterrows():
+                    with st.container(border=True):
+                        c_head1, c_head2 = st.columns([3, 1])
+                        with c_head1:
+                            st.markdown(f"### 👤 {row.get(COL_NAMA, '-')}")
+                            tsv = row.get(COL_TIMESTAMP, "-")
+                            tss = tsv.strftime("%d-%m-%Y %H:%M:%S") if hasattr(tsv, "strftime") else str(tsv)
+                            st.caption(f"📅 {tss} | 🏷️ {row.get('Kategori', '-')}")
 
-                                st.markdown(f"**👤 Klien:** {nama_klien_val}  |  **📞 No HP/WA:** {kontak_klien_val}")
-                                st.markdown(f"**📈 Interest:** {interest_val}")
+                        with c_head2:
+                            st.markdown("")
 
-                                st.divider()
-                                # ✅ Upgrade: 4 box biar kendala klien kebaca jelas
-                                col_a, col_b, col_c, col_d = st.columns(4)
-                                with col_a:
-                                    st.info(f"💡 **Hasil/Kesimpulan:**\n\n{row.get(COL_KESIMPULAN, '-')}")
-                                with col_b:
-                                    st.warning(f"🚧 **Kendala (Internal):**\n\n{row.get(COL_KENDALA, '-')}")
-                                with col_c:
-                                    st.warning(f"🧑‍💼 **Kendala Klien:**\n\n{row.get(COL_KENDALA_KLIEN, '-')}")
-                                with col_d:
-                                    st.error(f"📌 **Next Plan:**\n\n{row.get(COL_PENDING, '-')}")
+                        c_body, c_img = st.columns([3, 1])
+                        with c_body:
+                            st.markdown(f"**📍 Aktivitas/Lokasi:** {row.get(COL_TEMPAT, '-')}")
+                            st.markdown(f"**📝 Deskripsi:** {row.get(COL_DESKRIPSI, '-')}")
 
-                                st.divider()
-                                existing_feed = row.get(COL_FEEDBACK, "") or ""
+                            nama_klien_val = row.get(COL_NAMA_KLIEN, "-") or "-"
+                            kontak_klien_val = row.get(COL_KONTAK_KLIEN, "-") or "-"
+                            interest_val = row.get(COL_INTEREST, "-") or "-"
 
-                                with st.expander(f"💬 Beri Feedback untuk {row.get(COL_NAMA, '-')}", expanded=False):
-                                    unique_key = f"feed_{row.get(COL_NAMA, '-')}_{row.get(COL_TIMESTAMP, '-')}"
-                                    input_feed = st.text_area("Tulis Masukan/Arahan:", value=str(existing_feed), key=unique_key)
+                            st.markdown(f"**👤 Klien:** {nama_klien_val}  |  **📞 No HP/WA:** {kontak_klien_val}")
+                            st.markdown(f"**📈 Interest:** {interest_val}")
 
-                                    if st.button("Kirim Feedback 🚀", key=f"btn_{unique_key}"):
-                                        if input_feed:
-                                            ts_val = row.get(COL_TIMESTAMP)
-                                            if hasattr(ts_val, "strftime"):
-                                                ts_str = ts_val.strftime("%d-%m-%Y %H:%M:%S")
-                                            else:
-                                                ts_str = str(ts_val)
+                            st.divider()
+                            col_a, col_b, col_c, col_d = st.columns(4)
+                            with col_a:
+                                st.info(f"💡 **Hasil/Kesimpulan:**\n\n{row.get(COL_KESIMPULAN, '-')}")
+                            with col_b:
+                                st.warning(f"🚧 **Kendala (Internal):**\n\n{row.get(COL_KENDALA, '-')}")
+                            with col_c:
+                                st.warning(f"🧑‍💼 **Kendala Klien:**\n\n{row.get(COL_KENDALA_KLIEN, '-')}")
+                            with col_d:
+                                st.error(f"📌 **Next Plan:**\n\n{row.get(COL_PENDING, '-')}")
 
-                                            res, msg = kirim_feedback_admin(row.get(COL_NAMA, ""), ts_str, input_feed)
-                                            if res:
-                                                st.toast("Feedback terkirim!", icon="✅")
-                                            else:
-                                                st.error(msg)
+                            st.divider()
+                            existing_feed = row.get(COL_FEEDBACK, "") or ""
 
-                            with c_img:
-                                link_foto = str(row.get(COL_LINK_FOTO, ""))
-                                if "http" in link_foto:
-                                    url_asli = link_foto
-                                    direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
-                                    try:
-                                        st.image(direct_url, use_container_width=True)
-                                        st.caption("Bukti Foto")
-                                    except Exception:
-                                        st.caption("Gagal load foto")
-                else:
-                    st.info("Belum ada data laporan pada rentang waktu ini.")
+                            with st.expander("💬 Beri Feedback", expanded=False):
+                                unique_key = f"feed_{row.get(COL_NAMA, '-')}_{tss}"
+                                input_feed = st.text_area("Tulis Masukan/Arahan:", value=str(existing_feed), key=unique_key)
 
-            with tab_galeri:
-                st.caption("Menampilkan bukti foto/dokumen terbaru")
-                if COL_LINK_FOTO in df_filt.columns:
-                    df_foto = df_filt[
-                        df_filt[COL_LINK_FOTO].astype(str).str.contains("http", na=False, case=False)
-                    ].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
-                else:
-                    df_foto = pd.DataFrame()
+                                if st.button("Kirim Feedback 🚀", key=f"btn_{unique_key}", use_container_width=True):
+                                    if input_feed:
+                                        res, msg = kirim_feedback_admin(row.get(COL_NAMA, ""), tss, input_feed)
+                                        if res:
+                                            ui_toast("Feedback terkirim!", icon="✅")
+                                        else:
+                                            st.error(msg)
 
-                if not df_foto.empty:
-                    data_dict = df_foto.to_dict("records")
-                    cols = st.columns(4)
-                    for idx, row in enumerate(data_dict):
-                        with cols[idx % 4]:
-                            with st.container(border=True):
-                                url_asli = str(row.get(COL_LINK_FOTO, ""))
-                                nama = row.get(COL_NAMA, "-")
-                                tempat = row.get(COL_TEMPAT, "-")
+                        with c_img:
+                            link_foto = str(row.get(COL_LINK_FOTO, ""))
+                            if "http" in link_foto:
+                                url_asli = link_foto
                                 direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
                                 try:
                                     st.image(direct_url, use_container_width=True)
-                                    st.markdown(f"**{nama}**")
-                                    st.caption(f"📍 {tempat}")
+                                    st.caption("Bukti")
                                 except Exception:
-                                    st.error("Gagal load gambar")
-                                    st.link_button("Buka Link", url_asli)
-                else:
-                    st.info("Belum ada bukti yang terupload.")
+                                    st.caption("Gagal load bukti")
+                            else:
+                                st.caption("Tidak ada bukti")
 
-else:
-    st.error("Database Error.")
+    with tab_galeri:
+        with st.container(border=True):
+            st.caption("Menampilkan bukti foto/dokumen terbaru")
+            if COL_LINK_FOTO in df_filt.columns:
+                df_foto = df_filt[
+                    df_filt[COL_LINK_FOTO].astype(str).str.contains("http", na=False, case=False)
+                ].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
+            else:
+                df_foto = pd.DataFrame()
+
+            if not df_foto.empty:
+                data_dict = df_foto.to_dict("records")
+                cols = st.columns(4)
+                for idx, row in enumerate(data_dict):
+                    with cols[idx % 4]:
+                        with st.container(border=True):
+                            url_asli = str(row.get(COL_LINK_FOTO, ""))
+                            nama = row.get(COL_NAMA, "-")
+                            tempat = row.get(COL_TEMPAT, "-")
+                            direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                            try:
+                                st.image(direct_url, use_container_width=True)
+                                st.markdown(f"**{nama}**")
+                                st.caption(f"📍 {tempat}")
+                            except Exception:
+                                st.error("Gagal load gambar")
+                                st.markdown(f"[Buka Link]({url_asli})")
+            else:
+                st.info("Belum ada bukti yang terupload.")
