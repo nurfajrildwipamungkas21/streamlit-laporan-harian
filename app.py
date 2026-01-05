@@ -2139,7 +2139,7 @@ def render_header():
         cls = "sx-pill on" if on else "sx-pill off"
         return f"<span class='{cls}'><span class='sx-dot'></span>{label}</span>"
 
-    # Background hero = sportarium (atur posisi & zoom untuk presisi gedung)
+    # Background hero = sportarium
     hero_style = (
         f"--hero-bg: url('data:image/jpeg;base64,{bg_b64}'); "
         f"--hero-bg-pos: 50% 72%; "
@@ -2149,32 +2149,32 @@ def render_header():
     left_html = f"<img src='data:image/png;base64,{left_b64}' alt='Logo EO' />" if left_b64 else ""
     right_html = f"<img src='data:image/png;base64,{right_b64}' alt='Logo Training' />" if right_b64 else ""
 
-    # Logo holding mandiri di atas judul
     holding_html = (
         f"<img class='sx-holding-logo' src='data:image/png;base64,{holding_b64}' alt='Holding Logo' />"
         if holding_b64 else ""
     )
 
+    # PERBAIKAN DI SINI:
+    # Hapus semua indentasi agar HTML rapat ke kiri.
     html = f"""
-    <div class="sx-hero" style="{hero_style}">
-        <div class="sx-hero-grid">
-            <div class="sx-logo-card">{left_html}</div>
-
-            <div class="sx-hero-center">
-                {holding_html}
-                <div class="sx-title">🚀 {APP_TITLE}</div>
-                <div class="sx-subrow">
-                    <span>Realtime: {ts_now}</span>
-                    {pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
-                    {pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
-                </div>
-            </div>
-
-            <div class="sx-logo-card">{right_html}</div>
-        </div>
-    </div>
+<div class="sx-hero" style="{hero_style}">
+<div class="sx-hero-grid">
+<div class="sx-logo-card">{left_html}</div>
+<div class="sx-hero-center">
+{holding_html}
+<div class="sx-title">🚀 {APP_TITLE}</div>
+<div class="sx-subrow">
+<span>Realtime: {ts_now}</span>
+{pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
+{pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
+</div>
+</div>
+<div class="sx-logo-card">{right_html}</div>
+</div>
+</div>
     """
-    st.markdown(textwrap.dedent(html), unsafe_allow_html=True)
+    
+    st.markdown(html, unsafe_allow_html=True)
 
 
 
