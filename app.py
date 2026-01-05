@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta
@@ -14,6 +13,7 @@ import re
 import io
 import hashlib
 import hmac
+import base64
 
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
@@ -52,20 +52,56 @@ st.set_page_config(
 )
 
 # =========================================================
-# GLOBAL STYLE (Fun but Elegant, Professional UI)
+# GLOBAL STYLE (SpaceX x Muhammadiyah — Elegant, International)
 # =========================================================
 def inject_global_css():
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
+
+        :root{
+            --bg0:#020805;
+            --bg1:#04110b;
+            --bg2:#062015;
+
+            --cardA: rgba(255,255,255,0.06);
+            --cardB: rgba(255,255,255,0.045);
+            --border: rgba(255,255,255,0.10);
+
+            --text: rgba(255,255,255,0.92);
+            --muted: rgba(255,255,255,0.70);
+
+            --green:#16a34a;
+            --green2:#22c55e;
+            --teal:#14b8a6;
+            --gold:#facc15;
+            --amber:#f59e0b;
+            --danger:#ef4444;
+        }
+
         /* ---------- App background ---------- */
         .stApp {
             background:
-                radial-gradient(circle at 12% 10%, rgba(124, 58, 237, 0.35) 0%, rgba(124, 58, 237, 0.0) 45%),
-                radial-gradient(circle at 82% 12%, rgba(6, 182, 212, 0.28) 0%, rgba(6, 182, 212, 0.0) 42%),
-                radial-gradient(circle at 20% 90%, rgba(34, 197, 94, 0.18) 0%, rgba(34, 197, 94, 0.0) 38%),
-                linear-gradient(180deg, #0b1020 0%, #0f172a 50%, #111827 100%);
-            color: rgba(255,255,255,0.92);
+                radial-gradient(circle at 14% 12%, rgba(22, 163, 74, 0.20) 0%, rgba(22, 163, 74, 0.0) 46%),
+                radial-gradient(circle at 84% 14%, rgba(250, 204, 21, 0.16) 0%, rgba(250, 204, 21, 0.0) 42%),
+                radial-gradient(circle at 18% 92%, rgba(20, 184, 166, 0.12) 0%, rgba(20, 184, 166, 0.0) 40%),
+                linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 55%, var(--bg2) 100%);
+            color: var(--text);
+        }
+
+        /* Subtle starfield overlay (Space vibe) */
+        .stApp::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background:
+                radial-gradient(rgba(255,255,255,0.18) 0.8px, transparent 0.8px);
+            background-size: 68px 68px;
+            opacity: 0.10;
+            -webkit-mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
+            mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
         }
 
         /* Hide Streamlit default UI chrome (we use custom header) */
@@ -73,30 +109,30 @@ def inject_global_css():
         footer {visibility: hidden;}
         header {visibility: hidden;}
 
-        /* Sidebar polish */
-        section[data-testid="stSidebar"] > div {
-            background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(17, 24, 39, 0.92) 100%);
-            border-right: 1px solid rgba(255,255,255,0.08);
-        }
-        section[data-testid="stSidebar"] * {
-            color: rgba(255,255,255,0.92) !important;
-        }
-        section[data-testid="stSidebar"] hr {
-            border-color: rgba(255,255,255,0.08);
-        }
-
         /* Typography */
         h1, h2, h3, h4, h5, h6, p, label, span, div {
-            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
+            font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
+        }
+
+        /* Sidebar polish (SpaceX-like) */
+        section[data-testid="stSidebar"] > div {
+            background: linear-gradient(180deg, rgba(0,0,0,0.92) 0%, rgba(3,10,6,0.92) 60%, rgba(4,16,11,0.92) 100%);
+            border-right: 1px solid rgba(255,255,255,0.10);
+        }
+        section[data-testid="stSidebar"] * {
+            color: var(--text) !important;
+        }
+        section[data-testid="stSidebar"] hr {
+            border-color: rgba(255,255,255,0.10);
         }
 
         /* Card styling for containers with border=True */
         div[data-testid="stVerticalBlockBorderWrapper"] > div {
-            background: rgba(255,255,255,0.06);
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 16px;
-            padding: 1rem 1rem 0.6rem 1rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+            background: linear-gradient(180deg, var(--cardA) 0%, var(--cardB) 100%);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 1.05rem 1.05rem 0.75rem 1.05rem;
+            box-shadow: 0 16px 46px rgba(0,0,0,0.42);
             backdrop-filter: blur(10px);
         }
 
@@ -104,19 +140,20 @@ def inject_global_css():
         .stButton>button, .stDownloadButton>button {
             border-radius: 12px !important;
             border: 1px solid rgba(255,255,255,0.14) !important;
-            background: rgba(255,255,255,0.06) !important;
-            color: rgba(255,255,255,0.94) !important;
+            background: rgba(255,255,255,0.05) !important;
+            color: var(--text) !important;
             transition: all 0.15s ease-in-out;
         }
         .stButton>button:hover, .stDownloadButton>button:hover {
             transform: translateY(-1px);
-            border-color: rgba(255,255,255,0.25) !important;
-            background: rgba(255,255,255,0.10) !important;
+            border-color: rgba(250,204,21,0.35) !important;
+            background: rgba(255,255,255,0.08) !important;
         }
 
         /* Primary button (type=primary) */
         button[kind="primary"] {
-            background: linear-gradient(135deg, rgba(124,58,237,0.95), rgba(6,182,212,0.95)) !important;
+            background: linear-gradient(135deg, rgba(22,163,74,0.95), rgba(245,158,11,0.92)) !important;
+            color: rgba(6, 26, 17, 0.95) !important;
             border: none !important;
         }
         button[kind="primary"]:hover {
@@ -141,28 +178,145 @@ def inject_global_css():
             border: 1px solid rgba(255,255,255,0.10);
         }
 
-        /* Custom header block */
-        .hero-title {
-            font-size: 2.0rem;
-            font-weight: 800;
-            line-height: 1.1;
-            margin: 0;
-            letter-spacing: 0.2px;
+        /* =========================
+           HERO HEADER (Custom)
+           ========================= */
+        .sx-hero{
+            position: relative;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.12);
+            overflow: hidden;
+            padding: 18px 18px;
+            background:
+                radial-gradient(circle at 50% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.0) 52%),
+                linear-gradient(90deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.25) 50%, rgba(0,0,0,0.55) 100%);
+            box-shadow: 0 18px 60px rgba(0,0,0,0.45);
         }
-        .hero-subtitle {
-            margin-top: 0.25rem;
-            color: rgba(255,255,255,0.70);
+        .sx-hero::before{
+            content:"";
+            position:absolute;
+            inset:-14px;
+            background-image: var(--holding-bg);
+            background-repeat:no-repeat;
+            background-position: 50% 14%;
+            background-size: min(900px, 92vw) auto;
+            opacity: 0.24;
+            filter: saturate(1.10) contrast(1.06);
+            pointer-events:none;
+        }
+        .sx-hero::after{
+            content:"";
+            position:absolute;
+            inset:0;
+            background:
+                linear-gradient(180deg, rgba(2,8,5,0.15) 0%, rgba(2,8,5,0.52) 100%);
+            pointer-events:none;
+        }
+
+        .sx-hero-grid{
+            position: relative;
+            display: grid;
+            grid-template-columns: 240px 1fr 240px;
+            align-items: center;
+            gap: 14px;
+        }
+        @media (max-width: 1100px){
+            .sx-hero-grid{ grid-template-columns: 200px 1fr 200px; }
+        }
+        @media (max-width: 860px){
+            .sx-hero-grid{ grid-template-columns: 1fr; text-align:center; }
+        }
+
+        .sx-logo-card{
+            background: rgba(255,255,255,0.92);
+            border: 1px solid rgba(0,0,0,0.06);
+            border-radius: 16px;
+            padding: 10px 10px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            box-shadow: 0 10px 26px rgba(0,0,0,0.28);
+        }
+        .sx-logo-card img{
+            width: 100%;
+            max-width: 220px;
+            height: auto;
+            display:block;
+        }
+
+        .sx-hero-center{
+            text-align: center;
+        }
+        .sx-title{
+            font-size: 2.05rem;
+            font-weight: 800;
+            line-height: 1.12;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin: 0;
+        }
+        .sx-subrow{
+            margin-top: 0.45rem;
+            display:flex;
+            gap: 0.55rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            color: rgba(255,255,255,0.78);
             font-size: 0.95rem;
         }
-        .pill {
-            display: inline-block;
-            padding: 0.25rem 0.6rem;
+        .sx-pill{
+            display:inline-flex;
+            align-items:center;
+            gap: 0.35rem;
+            padding: 0.22rem 0.60rem;
             border-radius: 999px;
             border: 1px solid rgba(255,255,255,0.14);
             background: rgba(255,255,255,0.06);
-            color: rgba(255,255,255,0.85);
+            color: rgba(255,255,255,0.88);
             font-size: 0.80rem;
-            margin-right: 0.4rem;
+        }
+        .sx-pill.on{
+            border-color: rgba(34,197,94,0.55);
+            box-shadow: 0 0 0 2px rgba(34,197,94,0.10) inset;
+        }
+        .sx-pill.off{
+            border-color: rgba(239,68,68,0.55);
+            box-shadow: 0 0 0 2px rgba(239,68,68,0.10) inset;
+        }
+        .sx-dot{
+            width: 8px; height: 8px; border-radius: 999px; display:inline-block;
+            background: rgba(255,255,255,0.55);
+        }
+        .sx-pill.on .sx-dot{ background: rgba(34,197,94,0.95); }
+        .sx-pill.off .sx-dot{ background: rgba(239,68,68,0.95); }
+
+        /* =========================
+           Sidebar Nav (SpaceX-like)
+           ========================= */
+        .sx-nav{
+            margin-top: 0.25rem;
+        }
+        .sx-nav button{
+            width: 100% !important;
+            text-align: left !important;
+            border-radius: 12px !important;
+            padding: 0.60rem 0.80rem !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.10em !important;
+            font-size: 0.78rem !important;
+        }
+        .sx-nav button[kind="primary"]{
+            background: linear-gradient(90deg, rgba(22,163,74,0.95), rgba(245,158,11,0.90)) !important;
+            color: rgba(6,26,17,0.95) !important;
+        }
+
+        /* Small helpers */
+        .sx-section-title{
+            font-size: 0.82rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.70);
         }
         </style>
         """,
@@ -178,7 +332,7 @@ def ui_toast(message: str, icon=None):
     """Streamlit toast (fallback ke success jika tidak tersedia)."""
     if hasattr(st, "toast"):
         try:
-            ui_toast(message, icon=icon)
+            st.toast(message, icon=icon)
             return
         except Exception:
             pass
@@ -443,7 +597,7 @@ def parse_rupiah_to_int(value):
         return None
 
     # hilangkan spasi + penanda mata uang
-    s_lower = re.sub(r"\s+", "", s_lower)
+    s_lower = re.sub(r"\\s+", "", s_lower)
     s_lower = s_lower.replace("idr", "").replace("rp", "")
 
     # deteksi satuan
@@ -492,7 +646,7 @@ def parse_rupiah_to_int(value):
     try:
         base = to_float_locale(s_num)
     except Exception:
-        digits = re.sub(r"\D", "", s_num)
+        digits = re.sub(r"\\D", "", s_num)
         return int(digits) if digits else None
 
     if multiplier != 1:
@@ -533,12 +687,12 @@ def parse_payment_log_lines(log_text: str):
 
     for ln in raw_lines:
         # hapus numbering lama kalau ada: "12. ...."
-        mnum = re.match(r"^\s*\d+\.\s*(.*)$", ln)
+        mnum = re.match(r"^\\s*\\d+\\.\\s*(.*)$", ln)
         if mnum:
             ln = mnum.group(1).rstrip()
 
         # kalau format: "[ts] (actor) ...."
-        m = re.match(r"^\[(.*?)\]\s*\((.*?)\)\s*(.*)$", ln)
+        m = re.match(r"^\\[(.*?)\\]\\s*\\((.*?)\\)\\s*(.*)$", ln)
         if m:
             ts, actor, rest = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
             prefix = f"[{ts}] ({actor})"
@@ -562,7 +716,7 @@ def parse_payment_log_lines(log_text: str):
 def build_numbered_log(lines):
     """Buat output bernomor 1..N dari list baris (tanpa nomor)."""
     lines = [str(l).rstrip() for l in (lines or []) if safe_str(l, "").strip()]
-    return "\n".join([f"{i}. {line}" for i, line in enumerate(lines, 1)]).strip()
+    return "\\n".join([f"{i}. {line}" for i, line in enumerate(lines, 1)]).strip()
 
 
 def _fmt_payment_val_for_log(col_name: str, v):
@@ -575,7 +729,7 @@ def _fmt_payment_val_for_log(col_name: str, v):
     if col_name in {COL_JATUH_TEMPO, COL_TGL_EVENT}:
         d = normalize_date(v)
         return d.strftime("%Y-%m-%d") if d else "-"
-    s = safe_str(v, "-").replace("\n", " ").strip()
+    s = safe_str(v, "-").replace("\\n", " ").strip()
     return s if s else "-"
 
 
@@ -1075,10 +1229,10 @@ def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
 # TARGET / CHECKLIST HELPERS
 # =========================================================
 def clean_bulk_input(text_input):
-    lines = (text_input or "").split("\n")
+    lines = (text_input or "").split("\\n")
     cleaned_targets = []
     for line in lines:
-        cleaned = re.sub(r"^[\d\.\-\*\s]+", "", line).strip()
+        cleaned = re.sub(r"^[\\d\\.\\-\\*\\s]+", "", line).strip()
         if cleaned:
             cleaned_targets.append(cleaned)
     return cleaned_targets
@@ -1278,7 +1432,8 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
         if link_bukti and link_bukti != "-":
             update_text += f"[FOTO: {link_bukti}]"
 
-        final_note = f"{catatan_lama}\n{update_text}" if catatan_lama.strip() else update_text
+        final_note = f"{catatan_lama}\\n{update_text}" if catatan_lama.strip() else update_text
+        final_note = final_note.strip() if final_note.strip() else "-"
         final_note = final_note.strip() if final_note.strip() else "-"
 
         headers = ws.row_values(1)
@@ -1897,30 +2052,57 @@ def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marke
 
 
 # =========================================================
-# HEADER (LOGO LEFT/RIGHT)
+# HEADER (LOGO LEFT/RIGHT + HOLDING BACKGROUND)
 # =========================================================
 ASSET_DIR = Path(__file__).parent / "assets"
 LOGO_LEFT = ASSET_DIR / "log EO.png"
 LOGO_RIGHT = ASSET_DIR / "logo traine.png"
+LOGO_HOLDING = ASSET_DIR / "Logo-holding.png"
+
+def _img_to_base64(path: Path) -> str:
+    try:
+        if path and path.exists():
+            return base64.b64encode(path.read_bytes()).decode("utf-8")
+        return ""
+    except Exception:
+        return ""
 
 def render_header():
-    with st.container(border=True):
-        c1, c2, c3 = st.columns([1, 4, 1])
-        with c1:
-            if LOGO_LEFT.exists():
-                st.image(str(LOGO_LEFT), use_container_width=True)
-        with c2:
-            st.markdown(f"<div class='hero-title'>🚀 {APP_TITLE}</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='hero-subtitle'>Realtime: {datetime.now(tz=TZ_JKT).strftime('%d %B %Y %H:%M:%S')} &nbsp; "
-                f"<span class='pill'>GSheet: {'ON' if KONEKSI_GSHEET_BERHASIL else 'OFF'}</span>"
-                f"<span class='pill'>Dropbox: {'ON' if KONEKSI_DROPBOX_BERHASIL else 'OFF'}</span>"
-                f"</div>",
-                unsafe_allow_html=True
-            )
-        with c3:
-            if LOGO_RIGHT.exists():
-                st.image(str(LOGO_RIGHT), use_container_width=True)
+    ts_now = datetime.now(tz=TZ_JKT).strftime("%d %B %Y %H:%M:%S")
+
+    left_b64 = _img_to_base64(LOGO_LEFT)
+    right_b64 = _img_to_base64(LOGO_RIGHT)
+    holding_b64 = _img_to_base64(LOGO_HOLDING)
+
+    g_on = bool(KONEKSI_GSHEET_BERHASIL)
+    d_on = bool(KONEKSI_DROPBOX_BERHASIL)
+
+    def pill(label: str, on: bool):
+        cls = "sx-pill on" if on else "sx-pill off"
+        return f"<span class='{cls}'><span class='sx-dot'></span>{label}</span>"
+
+    holding_style = f"--holding-bg: url('data:image/png;base64,{holding_b64}');" if holding_b64 else "--holding-bg: none;"
+
+    left_html = f"<img src='data:image/png;base64,{left_b64}' alt='Logo EO' />" if left_b64 else ""
+    right_html = f"<img src='data:image/png;base64,{right_b64}' alt='Logo Training' />" if right_b64 else ""
+
+    html = f"""
+    <div class="sx-hero" style="{holding_style}">
+        <div class="sx-hero-grid">
+            <div class="sx-logo-card">{left_html}</div>
+            <div class="sx-hero-center">
+                <div class="sx-title">🚀 {APP_TITLE}</div>
+                <div class="sx-subrow">
+                    <span>Realtime: {ts_now}</span>
+                    {pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
+                    {pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
+                </div>
+            </div>
+            <div class="sx-logo-card">{right_html}</div>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # =========================================================
@@ -1938,14 +2120,18 @@ if not KONEKSI_DROPBOX_BERHASIL:
 if "is_admin" not in st.session_state:
     st.session_state["is_admin"] = False
 
+if "menu_nav" not in st.session_state:
+    st.session_state["menu_nav"] = "📝 Laporan Harian"
+
 # Render header
 render_header()
 
 # =========================================================
-# SIDEBAR NAV
+# SIDEBAR (SpaceX-inspired)
 # =========================================================
 with st.sidebar:
-    st.markdown("### Navigasi")
+    st.markdown("<div class='sx-section-title'>Navigation</div>", unsafe_allow_html=True)
+
     menu_items = [
         "📝 Laporan Harian",
         "🎯 Target & KPI",
@@ -1955,7 +2141,16 @@ with st.sidebar:
     if st.session_state["is_admin"]:
         menu_items.append("📊 Dashboard Admin")
 
-    menu_nav = st.radio("Pilih Menu:", menu_items, index=0)
+    # SpaceX-like nav buttons
+    st.markdown("<div class='sx-nav'>", unsafe_allow_html=True)
+    for i, item in enumerate(menu_items):
+        active = (st.session_state.get("menu_nav") == item)
+        btype = "primary" if active else "secondary"
+        if st.button(item, use_container_width=True, type=btype, key=f"nav_{i}"):
+            st.session_state["menu_nav"] = item
+            st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
     st.divider()
 
     # Admin login
@@ -1967,12 +2162,16 @@ with st.sidebar:
             if st.button("Login Admin", use_container_width=True):
                 if verify_admin_password(pwd):
                     st.session_state["is_admin"] = True
+                    # Jika baru login, refresh menu agar Dashboard muncul.
                     st.rerun()
                 else:
                     st.error("Password salah / belum dikonfigurasi!")
     else:
         if st.button("🔓 Logout Admin", use_container_width=True):
             st.session_state["is_admin"] = False
+            # Kalau sedang di dashboard, pindahkan ke laporan harian.
+            if st.session_state.get("menu_nav") == "📊 Dashboard Admin":
+                st.session_state["menu_nav"] = "📝 Laporan Harian"
             st.rerun()
 
     st.divider()
@@ -1981,14 +2180,17 @@ with st.sidebar:
     try:
         df_pay_sidebar = load_pembayaran_dp()
         overdue_s, due_soon_s = build_alert_pembayaran(df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
-        st.markdown("### Ringkasan Cepat")
+        st.markdown("<div class='sx-section-title'>Quick Stats</div>", unsafe_allow_html=True)
         st.metric("Overdue Payment", int(len(overdue_s)) if overdue_s is not None else 0)
         st.metric("Due ≤ 3 hari", int(len(due_soon_s)) if due_soon_s is not None else 0)
     except Exception:
         pass
 
     st.divider()
-    st.caption("Tips: gunakan menu di atas untuk berpindah modul.")
+    st.caption("Tip: navigasi ala SpaceX → ringkas, jelas, fokus.")
+
+
+menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
 
 # =========================================================
@@ -2363,7 +2565,7 @@ elif menu_nav == "🎯 Target & KPI":
             with st.form("add_team_admin", clear_on_submit=True):
                 team_name = st.text_input("Nama Team", placeholder="Contoh: Team Sales A")
                 team_posisi = st.text_input("Posisi/Divisi", placeholder="Contoh: Sales Lapangan / Digital Marketing")
-                anggota_text = st.text_area("Nama Anggota (satu per baris)", height=120, placeholder="Contoh:\nAndi\nBudi\nSusi")
+                anggota_text = st.text_area("Nama Anggota (satu per baris)", height=120, placeholder="Contoh:\\nAndi\\nBudi\\nSusi")
                 if st.form_submit_button("Tambah Team", use_container_width=True):
                     anggota_list = clean_bulk_input(anggota_text)
                     res, msg = tambah_team_baru(team_name, team_posisi, anggota_list)
@@ -2893,13 +3095,13 @@ elif menu_nav == "📊 Dashboard Admin":
                             st.divider()
                             col_a, col_b, col_c, col_d = st.columns(4)
                             with col_a:
-                                st.info(f"💡 **Hasil/Kesimpulan:**\n\n{row.get(COL_KESIMPULAN, '-')}")
+                                st.info(f"💡 **Hasil/Kesimpulan:**\\n\\n{row.get(COL_KESIMPULAN, '-')}")
                             with col_b:
-                                st.warning(f"🚧 **Kendala (Internal):**\n\n{row.get(COL_KENDALA, '-')}")
+                                st.warning(f"🚧 **Kendala (Internal):**\\n\\n{row.get(COL_KENDALA, '-')}")
                             with col_c:
-                                st.warning(f"🧑‍💼 **Kendala Klien:**\n\n{row.get(COL_KENDALA_KLIEN, '-')}")
+                                st.warning(f"🧑‍💼 **Kendala Klien:**\\n\\n{row.get(COL_KENDALA_KLIEN, '-')}")
                             with col_d:
-                                st.error(f"📌 **Next Plan:**\n\n{row.get(COL_PENDING, '-')}")
+                                st.error(f"📌 **Next Plan:**\\n\\n{row.get(COL_PENDING, '-')}")
 
                             st.divider()
                             existing_feed = row.get(COL_FEEDBACK, "") or ""
