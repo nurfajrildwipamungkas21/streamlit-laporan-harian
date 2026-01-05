@@ -208,14 +208,26 @@ def inject_global_css():
         .sx-hero::before{
             content:"";
             position:absolute;
-            inset:-14px;
-            background-image: var(--holding-bg);
+            inset:0; /* biar cover full hero */
+            background-image: var(--hero-bg);
             background-repeat:no-repeat;
-            background-position: 50% 14%;
-            background-size: min(900px, 92vw) auto;
-            opacity: 0.24;
-            filter: saturate(1.10) contrast(1.06);
+
+            /* “presisi” fokus gedung: tinggal adjust 2 variable ini */
+            background-position: var(--hero-bg-pos, 50% 72%);
+            background-size: var(--hero-bg-size, 140%); /* semakin besar = semakin zoom */
+
+            opacity: 0.28;
+            filter: saturate(1.05) contrast(1.08);
             pointer-events:none;
+        }
+        /* Logo Holding mandiri di atas judul */
+        .sx-holding-logo{
+            display:block;
+            margin: 0 auto 10px auto;
+            width: clamp(90px, 10vw, 140px);
+            height: auto;
+            opacity: 0.95;
+            filter: drop-shadow(0 10px 22px rgba(0,0,0,0.45));
         }
         .sx-hero::after{
             content:"";
@@ -2092,7 +2104,12 @@ def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marke
 ASSET_DIR = Path(__file__).parent / "assets"
 LOGO_LEFT = ASSET_DIR / "log EO.png"
 LOGO_RIGHT = ASSET_DIR / "logo traine.png"
+
+# Logo holding tetap dipakai, tapi jadi logo mandiri di atas judul
 LOGO_HOLDING = ASSET_DIR / "Logo-holding.png"
+
+# Background hero diganti jadi sportarium
+HERO_BG = ASSET_DIR / "sportarium.jpg"
 
 def _img_to_base64(path: Path) -> str:
     try:
@@ -2107,7 +2124,12 @@ def render_header():
 
     left_b64 = _img_to_base64(LOGO_LEFT)
     right_b64 = _img_to_base64(LOGO_RIGHT)
+
+    # Logo holding dipakai sebagai logo mandiri (PNG)
     holding_b64 = _img_to_base64(LOGO_HOLDING)
+
+    # Background hero pakai sportarium (JPG)
+    bg_b64 = _img_to_base64(HERO_BG)
 
     g_on = bool(KONEKSI_GSHEET_BERHASIL)
     d_on = bool(KONEKSI_DROPBOX_BERHASIL)
@@ -2116,16 +2138,29 @@ def render_header():
         cls = "sx-pill on" if on else "sx-pill off"
         return f"<span class='{cls}'><span class='sx-dot'></span>{label}</span>"
 
-    holding_style = f"--holding-bg: url('data:image/png;base64,{holding_b64}');" if holding_b64 else "--holding-bg: none;"
+    # Background hero = sportarium (atur posisi & zoom untuk presisi gedung)
+    hero_style = (
+        f"--hero-bg: url('data:image/jpeg;base64,{bg_b64}'); "
+        f"--hero-bg-pos: 50% 72%; "
+        f"--hero-bg-size: 140%;"
+    ) if bg_b64 else "--hero-bg: none;"
 
     left_html = f"<img src='data:image/png;base64,{left_b64}' alt='Logo EO' />" if left_b64 else ""
     right_html = f"<img src='data:image/png;base64,{right_b64}' alt='Logo Training' />" if right_b64 else ""
 
+    # Logo holding mandiri di atas judul
+    holding_html = (
+        f"<img class='sx-holding-logo' src='data:image/png;base64,{holding_b64}' alt='Holding Logo' />"
+        if holding_b64 else ""
+    )
+
     html = f"""
-    <div class="sx-hero" style="{holding_style}">
+    <div class="sx-hero" style="{hero_style}">
         <div class="sx-hero-grid">
             <div class="sx-logo-card">{left_html}</div>
+
             <div class="sx-hero-center">
+                {holding_html}
                 <div class="sx-title">🚀 {APP_TITLE}</div>
                 <div class="sx-subrow">
                     <span>Realtime: {ts_now}</span>
@@ -2133,6 +2168,7 @@ def render_header():
                     {pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
                 </div>
             </div>
+
             <div class="sx-logo-card">{right_html}</div>
         </div>
     </div>
