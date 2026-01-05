@@ -233,6 +233,9 @@ def inject_global_css():
             align-items: center;
             gap: 14px;
         }
+        
+        .sx-hero-grid > * { min-width: 0; }
+
         @media (max-width: 1100px){
             .sx-hero-grid{ grid-template-columns: 200px 1fr 200px; }
         }
@@ -240,22 +243,41 @@ def inject_global_css():
             .sx-hero-grid{ grid-template-columns: 1fr; text-align:center; }
         }
 
+        /* Pastikan hitungan ukuran konsisten antar browser */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        /* Kunci “slot” logo biar tinggi tidak berubah-ubah */
         .sx-logo-card{
             background: rgba(255,255,255,0.92);
             border: 1px solid rgba(0,0,0,0.06);
             border-radius: 16px;
-            padding: 10px 10px;
+
+            /* penting: buat area logo punya ukuran stabil */
+            width: 100%;
+            max-width: 240px;                 /* match kolom grid 240px */
+            height: clamp(120px, 12vw, 160px);/* stabil + responsif */
+            padding: 10px;
+
             display:flex;
             align-items:center;
             justify-content:center;
+
             box-shadow: 0 10px 26px rgba(0,0,0,0.28);
         }
+
+        /* Paksa gambar selalu “contain” dan center */
         .sx-logo-card img{
             width: 100%;
-            max-width: 220px;
-            height: auto;
-            display:block;
+            height: 100%;
+            max-width: 220px;     /* optional: tetap boleh */
+            max-height: 100%;
+
+            object-fit: contain;
+            object-position: center;
+
+            display: block;
         }
+
 
         .sx-hero-center{
             text-align: center;
