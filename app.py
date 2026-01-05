@@ -2126,9 +2126,11 @@ with col_tengah:
 
 with col_kanan:
     try:
-        st.image("assets/logo EO.png", use_container_width=True)
-    except Exception:
-        st.write("")
+        # Sesuaikan nama file dengan yang ada di folder assets ("log EO.png")
+        st.image("assets/log EO.png", use_container_width=True) 
+    except Exception as e:
+        # Tampilkan error sementara untuk debugging jika gambar masih tidak muncul
+        st.error(f"Gagal: {e}")
 
 try:
     df_pay_main = load_pembayaran_dp()
