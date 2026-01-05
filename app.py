@@ -14,6 +14,7 @@ import io
 import hashlib
 import hmac
 import base64
+import textwrap
 
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
@@ -2173,7 +2174,8 @@ def render_header():
         </div>
     </div>
     """
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(textwrap.dedent(html), unsafe_allow_html=True)
+
 
 
 # =========================================================
