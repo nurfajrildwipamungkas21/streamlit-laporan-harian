@@ -74,14 +74,106 @@ log = logging.getLogger("app")
 # =========================================================
 st.set_page_config(page_title="Sales & Marketing Action Center", page_icon="🚀", layout="wide")
 
+# =========================================================
+# CUSTOM STYLING (UI/UX Enhancement)
+# =========================================================
+# Theme: Dominan coklat kayu dengan font Poppins
 st.markdown(
     """
-<style>
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
-</style>
-""",
+    <style>
+    /* Import Google Font */
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+    /* Global styles */
+    html, body, [data-testid="stApp"] {
+        font-family: 'Poppins', sans-serif;
+        background-color: #4E342E; /* coklat kayu gelap */
+        color: #F5F5F5; /* teks terang */
+    }
+    .stApp { background-color: #4E342E; }
+
+    /* Hilangkan menu default */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Sidebar styling */
+    div[class*='stSidebar'] > div {
+        background-color: #5D4037 !important;
+        padding: 20px 10px;
+    }
+
+    /* Card/Container styling */
+    div[data-testid="stVerticalBlock"] > div, section.main > div {
+        background-color: #3E2723 !important;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 12px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+
+    /* Button styling */
+    button[kind="primary"], button[data-baseweb="button"] {
+        background-color: #8D6E63 !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 0.5rem 1rem !important;
+        font-weight: 600 !important;
+    }
+    button[kind="primary"]:hover, button[data-baseweb="button"]:hover {
+        background-color: #795548 !important;
+        color: #FFFFFF !important;
+    }
+
+    /* Secondary buttons (accordion etc.) */
+    button[kind="secondary"] {
+        background-color: #5D4037 !important;
+        color: #F5F5F5 !important;
+        border: none !important;
+        border-radius: 6px !important;
+    }
+    button[kind="secondary"]:hover {
+        background-color: #4E342E !important;
+        color: #F5F5F5 !important;
+    }
+
+    /* Input fields styling */
+    input, textarea, select, div[data-baseweb="input"] input {
+        background-color: #5D4037 !important;
+        color: #F5F5F5 !important;
+        border: 1px solid #4E342E !important;
+        border-radius: 4px !important;
+    }
+    textarea, div[data-baseweb="textarea"] textarea {
+        background-color: #5D4037 !important;
+        color: #F5F5F5 !important;
+        border: 1px solid #4E342E !important;
+        border-radius: 4px !important;
+    }
+    label {
+        color: #D7CCC8 !important;
+    }
+
+    /* Dataframe/table styling */
+    .dataframe {
+        background-color: #5D4037 !important;
+        color: #F5F5F5 !important;
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+        background: #4E342E;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #8D6E63;
+        border-radius: 10px;
+    }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
@@ -93,19 +185,15 @@ try:
 except Exception:
     TZ_JKT = None  # fallback (jarang terjadi)
 
-
 def _now() -> datetime:
     return datetime.now(tz=TZ_JKT) if TZ_JKT else datetime.now()
-
 
 def now_ts_str() -> str:
     """Timestamp konsisten untuk semua perubahan."""
     return _now().strftime("%d-%m-%Y %H:%M:%S")
 
-
 def today_jkt() -> date:
     return _now().date()
-
 
 # =========================================================
 # CONSTANTS
@@ -214,13 +302,11 @@ def safe_str(x: Any, default: str = "") -> str:
     except Exception:
         return default
 
-
 def normalize_bool(x: Any) -> bool:
     if isinstance(x, bool):
         return x
     s = safe_str(x, "").strip().upper()
     return s == "TRUE"
-
 
 def normalize_date(x: Any) -> Optional[date]:
     if x is None or (isinstance(x, float) and pd.isna(x)):
@@ -235,13 +321,11 @@ def normalize_date(x: Any) -> Optional[date]:
     except Exception:
         return None
 
-
 def get_actor_fallback(default: str = "-") -> str:
     for k in ["pelapor_main", "sidebar_user", "payment_editor_name"]:
         if k in st.session_state and safe_str(st.session_state.get(k), "").strip():
             return safe_str(st.session_state.get(k)).strip()
     return default
-
 
 # =========================================================
 # ADMIN PASSWORD (hash recommended)
@@ -275,7 +359,6 @@ def verify_admin_password(pwd_input: str) -> bool:
 
     return False
 
-
 def admin_secret_configured() -> bool:
     try:
         return bool(
@@ -284,7 +367,6 @@ def admin_secret_configured() -> bool:
         )
     except Exception:
         return False
-
 
 # =========================================================
 # CONNECTIONS (cache_resource biar stabil & cepat)
@@ -297,7 +379,6 @@ class Connections:
     dbx_ok: bool
     gs_error: str = ""
     dbx_error: str = ""
-
 
 @st.cache_resource(ttl=3600, show_spinner=False)
 def init_connections() -> Connections:
@@ -342,7 +423,6 @@ def init_connections() -> Connections:
         dbx_error = str(e)
 
     return Connections(spreadsheet=spreadsheet, dbx=dbx, gs_ok=gs_ok, dbx_ok=dbx_ok, gs_error=gs_error, dbx_error=dbx_error)
-
 
 CONN = init_connections()
 spreadsheet = CONN.spreadsheet
@@ -429,7 +509,6 @@ def parse_rupiah_to_int(value: Any) -> Optional[int]:
 
     return int(round(base))
 
-
 def format_rupiah_display(amount: Any) -> str:
     try:
         if amount is None or pd.isna(amount):
@@ -438,7 +517,6 @@ def format_rupiah_display(amount: Any) -> str:
         return "Rp " + f"{n:,}".replace(",", ".")
     except Exception:
         return str(amount)
-
 
 # =========================================================
 # AUDIT LOG HELPERS (PEMBAYARAN)
@@ -475,11 +553,9 @@ def parse_payment_log_lines(log_text: str) -> List[str]:
 
     return out
 
-
 def build_numbered_log(lines: Sequence[str]) -> str:
     lines2 = [str(l).rstrip() for l in (lines or []) if safe_str(l, "").strip()]
     return "\n".join([f"{i}. {line}" for i, line in enumerate(lines2, 1)]).strip()
-
 
 def _fmt_payment_val_for_log(col_name: str, v: Any) -> str:
     if col_name == COL_NOMINAL_BAYAR:
@@ -492,7 +568,6 @@ def _fmt_payment_val_for_log(col_name: str, v: Any) -> str:
         return d.strftime("%Y-%m-%d") if d else "-"
     s = safe_str(v, "-").replace("\n", " ").strip()
     return s if s else "-"
-
 
 def append_payment_ts_update(existing_log: str, ts: str, actor: str, changes: Sequence[str]) -> str:
     lines = parse_payment_log_lines(existing_log)
@@ -509,7 +584,6 @@ def append_payment_ts_update(existing_log: str, ts: str, actor: str, changes: Se
 
     return build_numbered_log(lines)
 
-
 # =========================================================
 # UI DISPLAY HELPERS (RUPIAH)
 # =========================================================
@@ -523,13 +597,11 @@ def payment_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
         )
     return dfv
 
-
 def on_change_pay_nominal():
     raw = st.session_state.get("pay_nominal", "")
     val = parse_rupiah_to_int(raw)
     if val is not None:
         st.session_state["pay_nominal"] = format_rupiah_display(val)
-
 
 def reset_payment_form_state():
     keys = [
@@ -558,7 +630,6 @@ def reset_payment_form_state():
                 st.session_state[k] = ""
         except Exception:
             pass
-
 
 # =========================================================
 # EXCEL EXPORT
@@ -626,13 +697,11 @@ def df_to_excel_bytes(
     wb.save(output)
     return output.getvalue()
 
-
 # =========================================================
 # GOOGLE SHEETS FORMATTING
 # =========================================================
 def _build_currency_number_format_rupiah() -> Dict[str, Any]:
     return {"type": "CURRENCY", "pattern": '"Rp" #,##0'}
-
 
 def auto_format_sheet(worksheet: gspread.Worksheet) -> None:
     """Auto-format sheet. (Tetap dipanggil setelah write agar tampilan rapi)"""
@@ -778,7 +847,6 @@ def auto_format_sheet(worksheet: gspread.Worksheet) -> None:
     except Exception as e:
         log.warning("Format Error: %s", e)
 
-
 def ensure_headers(worksheet: gspread.Worksheet, desired_headers: Sequence[str]) -> None:
     """Pastikan header sesuai dan urut."""
     try:
@@ -797,7 +865,6 @@ def ensure_headers(worksheet: gspread.Worksheet, desired_headers: Sequence[str])
     except Exception as e:
         log.warning("Ensure Header Error: %s", e)
 
-
 def get_ws(sheet_name: str, headers: Sequence[str], rows: int = 300) -> gspread.Worksheet:
     """Open/create worksheet + ensure headers."""
     try:
@@ -810,7 +877,6 @@ def get_ws(sheet_name: str, headers: Sequence[str], rows: int = 300) -> gspread.
         auto_format_sheet(ws)
         return ws
 
-
 @st.cache_resource(ttl=60, show_spinner=False)
 def get_or_create_worksheet(nama_worksheet: str) -> Optional[gspread.Worksheet]:
     """Sheet laporan harian per staf."""
@@ -818,7 +884,6 @@ def get_or_create_worksheet(nama_worksheet: str) -> Optional[gspread.Worksheet]:
         return get_ws(nama_worksheet, NAMA_KOLOM_STANDAR, rows=200)
     except Exception:
         return None
-
 
 # =========================================================
 # STAFF LIST
@@ -835,7 +900,6 @@ def get_daftar_staf_terbaru() -> List[str]:
     except Exception:
         return default_staf
 
-
 def tambah_staf_baru(nama_baru: str) -> Tuple[bool, str]:
     try:
         ws = get_ws(SHEET_CONFIG_NAMA, ["Daftar Nama Staf"], rows=100)
@@ -847,7 +911,6 @@ def tambah_staf_baru(nama_baru: str) -> Tuple[bool, str]:
         return True, "Berhasil tambah tim!"
     except Exception as e:
         return False, str(e)
-
 
 # =========================================================
 # TEAM CONFIG
@@ -864,7 +927,6 @@ def load_team_config() -> pd.DataFrame:
         return df[TEAM_COLUMNS].copy()
     except Exception:
         return pd.DataFrame(columns=TEAM_COLUMNS)
-
 
 def tambah_team_baru(nama_team: str, posisi: str, anggota_list: Sequence[str]) -> Tuple[bool, str]:
     try:
@@ -904,7 +966,6 @@ def tambah_team_baru(nama_team: str, posisi: str, anggota_list: Sequence[str]) -
     except Exception as e:
         return False, str(e)
 
-
 # =========================================================
 # DROPBOX UPLOAD
 # =========================================================
@@ -936,7 +997,6 @@ def upload_ke_dropbox(file_obj, nama_staf: str, kategori: str = "Umum") -> str:
     except Exception:
         return "-"
 
-
 # =========================================================
 # TARGET / CHECKLIST HELPERS
 # =========================================================
@@ -948,7 +1008,6 @@ def clean_bulk_input(text_input: str) -> List[str]:
         if cleaned:
             cleaned_targets.append(cleaned)
     return cleaned_targets
-
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_checklist(sheet_name: str, columns: Sequence[str]) -> pd.DataFrame:
@@ -967,7 +1026,6 @@ def load_checklist(sheet_name: str, columns: Sequence[str]) -> pd.DataFrame:
         return df[list(columns)].copy()
     except Exception:
         return pd.DataFrame(columns=list(columns))
-
 
 def save_checklist(sheet_name: str, df: pd.DataFrame, columns: Sequence[str]) -> bool:
     try:
@@ -995,7 +1053,6 @@ def save_checklist(sheet_name: str, df: pd.DataFrame, columns: Sequence[str]) ->
         return True
     except Exception:
         return False
-
 
 def apply_audit_checklist_changes(
     df_before: pd.DataFrame, df_after: pd.DataFrame, key_cols: Sequence[str], actor: str
@@ -1049,7 +1106,6 @@ def apply_audit_checklist_changes(
 
     return after
 
-
 def add_bulk_targets(sheet_name: str, base_row_data: Sequence[str], targets_list: Sequence[str]) -> bool:
     try:
         columns = TEAM_CHECKLIST_COLUMNS if sheet_name == SHEET_TARGET_TEAM else INDIV_CHECKLIST_COLUMNS
@@ -1082,7 +1138,6 @@ def add_bulk_targets(sheet_name: str, base_row_data: Sequence[str], targets_list
         return True
     except Exception:
         return False
-
 
 def update_evidence_row(
     sheet_name: str,
@@ -1151,7 +1206,6 @@ def update_evidence_row(
     except Exception as e:
         return False, f"Error: {e}"
 
-
 # =========================================================
 # FEEDBACK + DAILY REPORT
 # =========================================================
@@ -1199,7 +1253,6 @@ def kirim_feedback_admin(nama_staf: str, timestamp_key: str, isi_feedback: str) 
     except Exception as e:
         return False, f"Error: {e}"
 
-
 def simpan_laporan_harian_batch(list_of_rows: Sequence[Sequence[Any]], nama_staf: str) -> bool:
     try:
         ws = get_or_create_worksheet(nama_staf)
@@ -1212,7 +1265,6 @@ def simpan_laporan_harian_batch(list_of_rows: Sequence[Sequence[Any]], nama_staf
     except Exception as e:
         log.warning("Error saving daily report batch: %s", e)
         return False
-
 
 @st.cache_data(ttl=30, show_spinner=False)
 def get_reminder_pending(nama_staf: str) -> Optional[str]:
@@ -1231,7 +1283,6 @@ def get_reminder_pending(nama_staf: str) -> Optional[str]:
     except Exception:
         return None
 
-
 @st.cache_data(ttl=60, show_spinner=False)
 def load_all_reports(daftar_staf: Sequence[str]) -> pd.DataFrame:
     all_data: List[Dict[str, Any]] = []
@@ -1245,7 +1296,6 @@ def load_all_reports(daftar_staf: Sequence[str]) -> pd.DataFrame:
         except Exception:
             pass
     return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
-
 
 def render_hybrid_table(df_data: pd.DataFrame, unique_key: str, main_text_col: str) -> pd.DataFrame:
     use_aggrid_attempt = HAS_AGGRID
@@ -1311,7 +1361,6 @@ def render_hybrid_table(df_data: pd.DataFrame, unique_key: str, main_text_col: s
         use_container_width=True,
     )
 
-
 # =========================================================
 # CLOSING DEAL
 # =========================================================
@@ -1337,7 +1386,6 @@ def load_closing_deal() -> pd.DataFrame:
         return df[CLOSING_COLUMNS].copy()
     except Exception:
         return pd.DataFrame(columns=CLOSING_COLUMNS)
-
 
 def tambah_closing_deal(
     nama_group: str,
@@ -1368,7 +1416,6 @@ def tambah_closing_deal(
         return True, "Closing deal berhasil disimpan!"
     except Exception as e:
         return False, str(e)
-
 
 # =========================================================
 # PEMBAYARAN
@@ -1426,7 +1473,6 @@ def load_pembayaran_dp() -> pd.DataFrame:
     except Exception:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
-
 def save_pembayaran_dp(df: pd.DataFrame) -> bool:
     try:
         ws = get_ws(SHEET_PEMBAYARAN, PAYMENT_COLUMNS, rows=max(600, len(df) + 10))
@@ -1471,7 +1517,6 @@ def save_pembayaran_dp(df: pd.DataFrame) -> bool:
         return True
     except Exception:
         return False
-
 
 def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame, actor: str) -> pd.DataFrame:
     if df_after is None or df_after.empty:
@@ -1541,7 +1586,6 @@ def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame
 
     return after_idx.reset_index(drop=True)
 
-
 def tambah_pembayaran_dp(
     nama_group: str,
     nama_marketing: str,
@@ -1601,7 +1645,6 @@ def tambah_pembayaran_dp(
     except Exception as e:
         return False, str(e)
 
-
 def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3) -> Tuple[pd.DataFrame, pd.DataFrame]:
     if df is None or df.empty:
         return (pd.DataFrame(columns=df.columns if df is not None else PAYMENT_COLUMNS),
@@ -1621,7 +1664,6 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3) -> Tuple[pd
     overdue = df2[df2[COL_JATUH_TEMPO] < today].copy()
     due_soon = df2[(df2[COL_JATUH_TEMPO] >= today) & (df2[COL_JATUH_TEMPO] <= (today + timedelta(days=days_due_soon)))].copy()
     return overdue, due_soon
-
 
 def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marketing: str, actor: str = "-") -> Tuple[bool, str]:
     if not KONEKSI_DROPBOX_BERHASIL:
@@ -1671,7 +1713,6 @@ def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marke
     except Exception as e:
         return False, f"Error: {e}"
 
-
 def _save_catatan_for_rows(df_pay: pd.DataFrame, edited_view: pd.DataFrame, actor_final: str) -> bool:
     df_new = df_pay.copy()
     ts_now = now_ts_str()
@@ -1697,7 +1738,6 @@ def _save_catatan_for_rows(df_pay: pd.DataFrame, edited_view: pd.DataFrame, acto
             df_new.loc[mask, COL_UPDATED_BY] = actor_final
 
     return save_pembayaran_dp(df_new)
-
 
 # =========================================================
 # APP UI
@@ -2120,7 +2160,7 @@ with col_tengah:
     )
     # Caption Realtime juga rata tengah
     st.markdown(
-        f"<p style='text-align: center; color: gray;'>Realtime: {_now().strftime('%d %B %Y %H:%M:%S')}</p>", 
+        f"<p style='text-align: center; color: #D7CCC8;'>Realtime: {_now().strftime('%d %B %Y %H:%M:%S')}</p>", 
         unsafe_allow_html=True
     )
 
