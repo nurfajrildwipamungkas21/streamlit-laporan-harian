@@ -81,6 +81,8 @@ COL_LINK_FOTO = "Link Foto"
 COL_LINK_SOSMED = "Link Sosmed"
 COL_KESIMPULAN = "Kesimpulan"
 COL_KENDALA = "Kendala"
+# ✅ NEW: Kendala Klien (lebih spesifik daripada Kendala umum)
+COL_KENDALA_KLIEN = "Kendala Klien"
 COL_PENDING = "Next Plan (Pending)"
 COL_FEEDBACK = "Feedback Lead"
 COL_INTEREST = "Interest (%)"
@@ -90,7 +92,8 @@ COL_KONTAK_KLIEN = "No HP/WA"
 NAMA_KOLOM_STANDAR = [
     COL_TIMESTAMP, COL_NAMA, COL_TEMPAT, COL_DESKRIPSI,
     COL_LINK_FOTO, COL_LINK_SOSMED,
-    COL_KESIMPULAN, COL_KENDALA, COL_PENDING,
+    COL_KESIMPULAN, COL_KENDALA, COL_KENDALA_KLIEN,  # ✅ disisipkan di sini (agar tidak menggeser field lead)
+    COL_PENDING,
     COL_FEEDBACK,
     COL_INTEREST,
     COL_NAMA_KLIEN,
@@ -651,6 +654,7 @@ def auto_format_sheet(worksheet):
             long_text_cols = {
                 "Misi", "Target", "Deskripsi", "Bukti/Catatan", "Link Foto", "Link Sosmed",
                 "Tempat Dikunjungi", "Kesimpulan", "Kendala", "Next Plan (Pending)", "Feedback Lead",
+                COL_KENDALA_KLIEN,  # ✅ kendala klien
                 COL_NAMA_KLIEN,
                 TEAM_COL_NAMA_TEAM, TEAM_COL_POSISI, TEAM_COL_ANGGOTA,
                 COL_GROUP, COL_MARKETING, COL_BIDANG,
@@ -744,13 +748,21 @@ def auto_format_sheet(worksheet):
 
 
 def ensure_headers(worksheet, desired_headers):
-    """Pastikan header sesuai; jika belum, set ulang lalu auto format."""
+    """
+    Pastikan header sesuai urutan standar.
+    - Jika kolom kurang, resize.
+    - Set ulang baris header sesuai desired_headers (agar urutan kolom match dengan list data yang kita append).
+    """
     try:
         if worksheet.col_count < len(desired_headers):
             worksheet.resize(cols=len(desired_headers))
 
         headers = worksheet.row_values(1)
-        need_reset = (not headers) or (len(headers) < len(desired_headers)) or any(h not in headers for h in desired_headers)
+        need_reset = (
+            not headers
+            or (len(headers) < len(desired_headers))
+            or (headers[:len(desired_headers)] != desired_headers)
+        )
         if need_reset:
             worksheet.update(range_name="A1", values=[desired_headers], value_input_option="USER_ENTERED")
             auto_format_sheet(worksheet)
@@ -763,8 +775,14 @@ def ensure_headers(worksheet, desired_headers):
 # =========================================================
 @st.cache_resource(ttl=60)
 def get_or_create_worksheet(nama_worksheet):
+    """
+    ✅ Upgrade: setiap kali worksheet diambil, pastikan header selalu up-to-date.
+    Ini yang membuat kolom baru (mis. Kendala Klien) otomatis muncul tanpa nunggu Submit.
+    """
     try:
-        return spreadsheet.worksheet(nama_worksheet)
+        ws = spreadsheet.worksheet(nama_worksheet)
+        ensure_headers(ws, NAMA_KOLOM_STANDAR)  # ✅ penting
+        return ws
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=nama_worksheet, rows=100, cols=len(NAMA_KOLOM_STANDAR))
         ws.append_row(NAMA_KOLOM_STANDAR, value_input_option="USER_ENTERED")
@@ -1203,12 +1221,8 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         if ws is None:
             return False
 
-        current_header = ws.row_values(1)
-        need_update = (len(current_header) < len(NAMA_KOLOM_STANDAR)) or any(c not in current_header for c in NAMA_KOLOM_STANDAR)
-
-        if need_update:
-            ws.resize(cols=len(NAMA_KOLOM_STANDAR))
-            ws.update(range_name="A1", values=[NAMA_KOLOM_STANDAR], value_input_option="USER_ENTERED")
+        # ✅ Pastikan header selalu sesuai standar (termasuk kolom baru "Kendala Klien")
+        ensure_headers(ws, NAMA_KOLOM_STANDAR)
 
         ws.append_rows(list_of_rows, value_input_option="USER_ENTERED")
         auto_format_sheet(ws)
@@ -1500,11 +1514,6 @@ def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame
     """
     Update Timestamp Update (Log) & Updated By hanya untuk baris yang berubah.
     Kunci: Timestamp Input (COL_TS_BAYAR).
-
-    Log format rapih & bernomor:
-      1. <timestamp input awal / legacy>
-      2. [ts] (actor) FieldA: old → new
-      3.  FieldB: old → new
     """
     if df_after is None or df_after.empty:
         return df_after
@@ -2482,18 +2491,25 @@ if KONEKSI_GSHEET_BERHASIL:
             st.markdown("#### 🏁 Kesimpulan Harian")
             st.caption("Bagian ini penting agar progress besok lebih terarah.")
 
-            col_ref_1, col_ref_2 = st.columns(2)
+            # ✅ Upgrade: tambah field khusus kendala dari klien
+            col_ref_1, col_ref_2, col_ref_3 = st.columns(3)
             with col_ref_1:
                 input_kesimpulan = st.text_area(
                     "💡 Kesimpulan / Apa yang dicapai hari ini?",
-                    height=100,
+                    height=110,
                     placeholder="Contoh: Klien setuju, tapi minta diskon. / Konten sudah jadi 3 feeds."
                 )
             with col_ref_2:
                 input_kendala = st.text_area(
-                    "🚧 Kendala / Masalah?",
-                    height=100,
+                    "🚧 Kendala / Masalah (Internal)?",
+                    height=110,
                     placeholder="Contoh: Hujan deras jadi telat. / Laptop agak lemot render video."
+                )
+            with col_ref_3:
+                input_kendala_klien = st.text_area(
+                    "🧑‍💼 Kendala dari Klien?",
+                    height=110,
+                    placeholder="Contoh: Klien minta revisi berkali-kali / Budget dipotong / Minta tempo pembayaran."
                 )
 
             input_interest = st.radio(
@@ -2533,6 +2549,7 @@ if KONEKSI_GSHEET_BERHASIL:
 
                         val_kesimpulan = input_kesimpulan.strip() if str(input_kesimpulan).strip() else "-"
                         val_kendala = input_kendala.strip() if str(input_kendala).strip() else "-"
+                        val_kendala_klien = input_kendala_klien.strip() if str(input_kendala_klien).strip() else "-"  # ✅ NEW
                         val_pending = input_pending.strip() if str(input_pending).strip() else "-"
                         val_feedback = ""
                         val_interest = input_interest if input_interest else "-"
@@ -2546,7 +2563,8 @@ if KONEKSI_GSHEET_BERHASIL:
                                 rows.append([
                                     ts, nama_pelapor, final_lokasi, desc,
                                     url, sosmed_link if sosmed_link else "-",
-                                    val_kesimpulan, val_kendala, val_pending,
+                                    val_kesimpulan, val_kendala, val_kendala_klien,  # ✅ NEW
+                                    val_pending,
                                     val_feedback, val_interest,
                                     val_nama_klien, val_kontak_klien
                                 ])
@@ -2554,7 +2572,8 @@ if KONEKSI_GSHEET_BERHASIL:
                             rows.append([
                                 ts, nama_pelapor, final_lokasi, main_deskripsi,
                                 "-", sosmed_link if sosmed_link else "-",
-                                val_kesimpulan, val_kendala, val_pending,
+                                val_kesimpulan, val_kendala, val_kendala_klien,  # ✅ NEW
+                                val_pending,
                                 val_feedback, val_interest,
                                 val_nama_klien, val_kontak_klien
                             ])
@@ -2676,7 +2695,7 @@ if KONEKSI_GSHEET_BERHASIL:
                         df_interest = df_tmp[df_tmp[COL_INTEREST] == selected_interest].copy()
 
                         cols_out = []
-                        for c in [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_INTEREST, COL_TEMPAT, COL_DESKRIPSI]:
+                        for c in [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_INTEREST, COL_TEMPAT, COL_DESKRIPSI, COL_KENDALA_KLIEN]:
                             if c in df_interest.columns:
                                 cols_out.append(c)
 
@@ -2691,7 +2710,7 @@ if KONEKSI_GSHEET_BERHASIL:
                             excel_bytes = df_to_excel_bytes(
                                 df_export,
                                 sheet_name="Data_Interest",
-                                wrap_cols=[COL_DESKRIPSI, COL_TEMPAT],
+                                wrap_cols=[COL_DESKRIPSI, COL_TEMPAT, COL_KENDALA_KLIEN],
                             )
                             safe_name = selected_interest.replace("%", "").replace(" ", "_").replace("/", "_").replace("(", "").replace(")", "")
                             st.download_button(
@@ -2739,13 +2758,16 @@ if KONEKSI_GSHEET_BERHASIL:
                                 st.markdown(f"**📈 Interest:** {interest_val}")
 
                                 st.divider()
-                                col_a, col_b, col_c = st.columns(3)
+                                # ✅ Upgrade: 4 box biar kendala klien kebaca jelas
+                                col_a, col_b, col_c, col_d = st.columns(4)
                                 with col_a:
                                     st.info(f"💡 **Hasil/Kesimpulan:**\n\n{row.get(COL_KESIMPULAN, '-')}")
                                 with col_b:
-                                    st.warning(f"🚧 **Kendala:**\n\n{row.get(COL_KENDALA, '-')}")
+                                    st.warning(f"🚧 **Kendala (Internal):**\n\n{row.get(COL_KENDALA, '-')}")
                                 with col_c:
-                                    st.error(f"📌 **Next Plan (Reminder):**\n\n{row.get(COL_PENDING, '-')}")
+                                    st.warning(f"🧑‍💼 **Kendala Klien:**\n\n{row.get(COL_KENDALA_KLIEN, '-')}")
+                                with col_d:
+                                    st.error(f"📌 **Next Plan:**\n\n{row.get(COL_PENDING, '-')}")
 
                                 st.divider()
                                 existing_feed = row.get(COL_FEEDBACK, "") or ""
