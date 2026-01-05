@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta
@@ -14,6 +15,7 @@ import io
 import hashlib
 import hmac
 import base64
+from textwrap import dedent
 
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
@@ -24,19 +26,19 @@ try:
     from openpyxl.utils.dataframe import dataframe_to_rows
     from openpyxl.utils import get_column_letter
     HAS_OPENPYXL = True
-except ImportError:
+except Exception:
     HAS_OPENPYXL = False
 
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
     HAS_AGGRID = True
-except ImportError:
+except Exception:
     HAS_AGGRID = False
 
 try:
     import plotly.express as px
     HAS_PLOTLY = True
-except ImportError:
+except Exception:
     HAS_PLOTLY = False
 
 
@@ -51,328 +53,374 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
+# =========================================================
+# HTML / CSS HELPERS
+# =========================================================
+def html_block(s: str) -> str:
+    """Normalize multi-line HTML/CSS so it won't render as a Markdown code block."""
+    return dedent(s).strip("\n")
+
+
 # =========================================================
 # GLOBAL STYLE (SpaceX x Muhammadiyah — Elegant, International)
 # =========================================================
 def inject_global_css():
     st.markdown(
-        """
-        <style>
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
+        html_block(
+            """
+            <style>
+            @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0');
 
-        :root{
-            --bg0:#020805;
-            --bg1:#04110b;
-            --bg2:#062015;
+            :root{
+                --bg0:#020805;
+                --bg1:#04110b;
+                --bg2:#062015;
 
-            --cardA: rgba(255,255,255,0.06);
-            --cardB: rgba(255,255,255,0.045);
-            --border: rgba(255,255,255,0.10);
+                --cardA: rgba(255,255,255,0.06);
+                --cardB: rgba(255,255,255,0.045);
+                --border: rgba(255,255,255,0.10);
 
-            --text: rgba(255,255,255,0.92);
-            --muted: rgba(255,255,255,0.70);
+                --text: rgba(255,255,255,0.92);
+                --muted: rgba(255,255,255,0.70);
 
-            --green:#16a34a;
-            --green2:#22c55e;
-            --teal:#14b8a6;
-            --gold:#facc15;
-            --amber:#f59e0b;
-            --danger:#ef4444;
-        }
+                --green:#16a34a;
+                --green2:#22c55e;
+                --teal:#14b8a6;
+                --gold:#facc15;
+                --amber:#f59e0b;
+                --danger:#ef4444;
+            }
 
-        /* ---------- App background ---------- */
-        .stApp {
-            background:
-                radial-gradient(circle at 14% 12%, rgba(22, 163, 74, 0.20) 0%, rgba(22, 163, 74, 0.0) 46%),
-                radial-gradient(circle at 84% 14%, rgba(250, 204, 21, 0.16) 0%, rgba(250, 204, 21, 0.0) 42%),
-                radial-gradient(circle at 18% 92%, rgba(20, 184, 166, 0.12) 0%, rgba(20, 184, 166, 0.0) 40%),
-                linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 55%, var(--bg2) 100%);
-            color: var(--text);
-        }
+            /* ---------- App background ---------- */
+            .stApp {
+                background:
+                    radial-gradient(circle at 14% 12%, rgba(22, 163, 74, 0.20) 0%, rgba(22, 163, 74, 0.0) 46%),
+                    radial-gradient(circle at 84% 14%, rgba(250, 204, 21, 0.16) 0%, rgba(250, 204, 21, 0.0) 42%),
+                    radial-gradient(circle at 18% 92%, rgba(20, 184, 166, 0.12) 0%, rgba(20, 184, 166, 0.0) 40%),
+                    linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 55%, var(--bg2) 100%);
+                color: var(--text);
+            }
 
-        /* Subtle starfield overlay (Space vibe) */
-        .stApp::before {
-            content: "";
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            background:
-                radial-gradient(rgba(255,255,255,0.18) 0.8px, transparent 0.8px);
-            background-size: 68px 68px;
-            opacity: 0.10;
-            -webkit-mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
-            mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
-        }
+            /* Subtle starfield overlay (Space vibe) */
+            .stApp::before {
+                content: "";
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                background:
+                    radial-gradient(rgba(255,255,255,0.18) 0.8px, transparent 0.8px);
+                background-size: 68px 68px;
+                opacity: 0.10;
+                -webkit-mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
+                mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
+            }
 
-        /* Hide Streamlit default UI chrome (we use custom header) */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
+            /* Hide Streamlit default UI chrome (we use custom header) */
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
 
-        /* Typography */
-        html, body, [class*="st-"], h1, h2, h3, h4, h5, h6, p, label, span, div {
-            font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif !important;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-            text-rendering: geometricPrecision;
-        }
+            /* Typography (avoid breaking Material Icons: fixed below) */
+            html, body, [class*="st-"], h1, h2, h3, h4, h5, h6, p, label, div {
+                font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif !important;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+                text-rendering: geometricPrecision;
+            }
 
-        /* =========================
-           Text selection (blok teks) - konsisten Edge/Chrome/Firefox
-           NOTE: dibuat high-contrast agar terlihat jelas di background gelap.
-           ========================= */
-        ::selection{
-            background: rgba(250,204,21,0.58) !important;  /* gold highlight */
-            color: rgba(2,8,5,0.98) !important;           /* very dark text */
-            text-shadow: none !important;
-        }
-        ::-moz-selection{
-            background: rgba(250,204,21,0.58) !important;
-            color: rgba(2,8,5,0.98) !important;
-            text-shadow: none !important;
-        }
-        input::selection, textarea::selection, [contenteditable="true"]::selection{
-            background: rgba(250,204,21,0.58) !important;
-            color: rgba(2,8,5,0.98) !important;
-            -webkit-text-fill-color: rgba(2,8,5,0.98) !important;
-        }
-        input::-moz-selection, textarea::-moz-selection, [contenteditable="true"]::-moz-selection{
-            background: rgba(250,204,21,0.58) !important;
-            color: rgba(2,8,5,0.98) !important;
-        }
+            /* ✅ Fix "keyboard_arrow_right" text showing in Chrome/Edge:
+               our global font override breaks Material Symbols.
+               Force icon spans to use Material Symbols fonts. */
+            .material-icons,
+            .material-symbols-outlined,
+            .material-symbols-rounded,
+            .material-symbols-sharp,
+            span.material-icons,
+            span.material-symbols-outlined,
+            span.material-symbols-rounded,
+            span.material-symbols-sharp {
+                font-family: "Material Symbols Rounded","Material Symbols Outlined","Material Symbols Sharp","Material Icons" !important;
+                font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+                letter-spacing: normal !important;
+                text-transform: none !important;
+            }
 
-        /* Sidebar polish (SpaceX-like) */
-        section[data-testid="stSidebar"] > div {
-            background: linear-gradient(180deg, rgba(0,0,0,0.92) 0%, rgba(3,10,6,0.92) 60%, rgba(4,16,11,0.92) 100%);
-            border-right: 1px solid rgba(255,255,255,0.10);
-        }
-        section[data-testid="stSidebar"] * {
-            color: var(--text) !important;
-        }
-        section[data-testid="stSidebar"] hr {
-            border-color: rgba(255,255,255,0.10);
-        }
+            /* =========================
+               Text selection (blok teks)
+               ========================= */
+            ::selection{
+                background: rgba(250,204,21,0.58) !important;
+                color: rgba(2,8,5,0.98) !important;
+                text-shadow: none !important;
+            }
+            ::-moz-selection{
+                background: rgba(250,204,21,0.58) !important;
+                color: rgba(2,8,5,0.98) !important;
+                text-shadow: none !important;
+            }
+            input::selection, textarea::selection, [contenteditable="true"]::selection{
+                background: rgba(250,204,21,0.58) !important;
+                color: rgba(2,8,5,0.98) !important;
+                -webkit-text-fill-color: rgba(2,8,5,0.98) !important;
+            }
+            input::-moz-selection, textarea::-moz-selection, [contenteditable="true"]::-moz-selection{
+                background: rgba(250,204,21,0.58) !important;
+                color: rgba(2,8,5,0.98) !important;
+            }
 
-        /* Card styling for containers with border=True */
-        div[data-testid="stVerticalBlockBorderWrapper"] > div {
-            background: linear-gradient(180deg, var(--cardA) 0%, var(--cardB) 100%);
-            border: 1px solid var(--border);
-            border-radius: 18px;
-            padding: 1.05rem 1.05rem 0.75rem 1.05rem;
-            box-shadow: 0 16px 46px rgba(0,0,0,0.42);
-            backdrop-filter: blur(10px);
-        }
+            /* Sidebar polish (SpaceX-like) */
+            section[data-testid="stSidebar"] > div {
+                background: linear-gradient(180deg, rgba(0,0,0,0.92) 0%, rgba(3,10,6,0.92) 60%, rgba(4,16,11,0.92) 100%);
+                border-right: 1px solid rgba(255,255,255,0.10);
+            }
+            section[data-testid="stSidebar"] * {
+                color: var(--text) !important;
+            }
+            section[data-testid="stSidebar"] hr {
+                border-color: rgba(255,255,255,0.10);
+            }
 
-        /* Buttons */
-        .stButton>button, .stDownloadButton>button {
-            border-radius: 12px !important;
-            border: 1px solid rgba(255,255,255,0.14) !important;
-            background: rgba(255,255,255,0.05) !important;
-            color: var(--text) !important;
-            transition: all 0.15s ease-in-out;
-        }
-        .stButton>button:hover, .stDownloadButton>button:hover {
-            transform: translateY(-1px);
-            border-color: rgba(250,204,21,0.35) !important;
-            background: rgba(255,255,255,0.08) !important;
-        }
+            /* Card styling for containers with border=True */
+            div[data-testid="stVerticalBlockBorderWrapper"] > div {
+                background: linear-gradient(180deg, var(--cardA) 0%, var(--cardB) 100%);
+                border: 1px solid var(--border);
+                border-radius: 18px;
+                padding: 1.05rem 1.05rem 0.75rem 1.05rem;
+                box-shadow: 0 16px 46px rgba(0,0,0,0.42);
+                backdrop-filter: blur(10px);
+            }
 
-        /* Primary button (type=primary) */
-        button[kind="primary"] {
-            background: linear-gradient(135deg, rgba(22,163,74,0.95), rgba(245,158,11,0.92)) !important;
-            color: rgba(6, 26, 17, 0.95) !important;
-            border: none !important;
-        }
-        button[kind="primary"]:hover {
-            filter: brightness(1.05);
-        }
+            /* Buttons */
+            .stButton>button, .stDownloadButton>button {
+                border-radius: 12px !important;
+                border: 1px solid rgba(255,255,255,0.14) !important;
+                background: rgba(255,255,255,0.05) !important;
+                color: var(--text) !important;
+                transition: all 0.15s ease-in-out;
+            }
+            .stButton>button:hover, .stDownloadButton>button:hover {
+                transform: translateY(-1px);
+                border-color: rgba(250,204,21,0.35) !important;
+                background: rgba(255,255,255,0.08) !important;
+            }
 
-        /* Inputs */
-        .stTextInput input, .stTextArea textarea, .stNumberInput input {
-            border-radius: 12px !important;
-        }
-        .stDateInput input {
-            border-radius: 12px !important;
-        }
-        .stSelectbox div[data-baseweb="select"] > div {
-            border-radius: 12px !important;
-        }
+            /* Primary button (type=primary) */
+            button[kind="primary"] {
+                background: linear-gradient(135deg, rgba(22,163,74,0.95), rgba(245,158,11,0.92)) !important;
+                color: rgba(6, 26, 17, 0.95) !important;
+                border: none !important;
+            }
+            button[kind="primary"]:hover {
+                filter: brightness(1.05);
+            }
 
-        /* Dataframes / tables */
-        div[data-testid="stDataFrame"] {
-            border-radius: 14px;
-            overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.10);
-        }
+            /* Inputs */
+            .stTextInput input, .stTextArea textarea, .stNumberInput input {
+                border-radius: 12px !important;
+            }
+            .stDateInput input {
+                border-radius: 12px !important;
+            }
+            .stSelectbox div[data-baseweb="select"] > div {
+                border-radius: 12px !important;
+            }
 
-        /* =========================
-           TOP BRANDING (UMB watermark + clean header bar)
-           Target: Logo holding tampil FULL, transparan, tidak terpotong,
-           dan posisinya berada di area paling atas (di atas logo Mentari Sejuk).
-           ========================= */
-        .sx-topwrap{
-            margin: 0.25rem 0 0.75rem 0;
-        }
-        .sx-watermark-wrap{
-            width: 100%;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            padding: 0.25rem 0.25rem 0.15rem 0.25rem;
-        }
-        .sx-watermark-wrap img{
-            width: min(1180px, 100%);
-            height: auto;
-            opacity: 0.18;  /* transparan, watermark */
-            filter: saturate(1.08) contrast(1.06);
-            pointer-events:none;
-            user-select:none;
-        }
-        @media (max-width: 760px){
-            .sx-watermark-wrap img{ width: min(920px, 100%); opacity: 0.16; }
-        }
+            /* Dataframes / tables */
+            div[data-testid="stDataFrame"] {
+                border-radius: 14px;
+                overflow: hidden;
+                border: 1px solid rgba(255,255,255,0.10);
+            }
 
-        .sx-headerbar{
-            position: relative;
-            border-radius: 18px;
-            border: 1px solid rgba(255,255,255,0.12);
-            overflow: hidden;
-            padding: 14px 16px;
-            background:
-                radial-gradient(circle at 50% 0%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.0) 60%),
-                linear-gradient(180deg, rgba(0,0,0,0.58) 0%, rgba(0,0,0,0.25) 100%);
-            box-shadow: 0 18px 60px rgba(0,0,0,0.45);
-            backdrop-filter: blur(10px);
-        }
+            /* =========================
+               TOP BRANDING (UMB watermark + clean header bar)
+               ========================= */
+            .sx-topwrap{
+                margin: 0.25rem 0 0.75rem 0;
+            }
+            .sx-watermark-wrap{
+                width: 100%;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                padding: 0.25rem 0.25rem 0.15rem 0.25rem;
+            }
+            .sx-watermark-wrap img{
+                width: min(1180px, 100%);
+                height: auto;
+                opacity: 0.18;
+                filter: saturate(1.08) contrast(1.06);
+                pointer-events:none;
+                user-select:none;
+            }
+            @media (max-width: 760px){
+                .sx-watermark-wrap img{ width: min(920px, 100%); opacity: 0.16; }
+            }
 
-        .sx-header-grid{
-            display: grid;
-            grid-template-columns: 220px 1fr 220px;
-            align-items: center;
-            gap: 14px;
-        }
-        .sx-header-grid > * { min-width: 0; }
+            .sx-headerbar{
+                position: relative;
+                border-radius: 18px;
+                border: 1px solid rgba(255,255,255,0.12);
+                overflow: hidden;
+                padding: 14px 16px;
+                background:
+                    radial-gradient(circle at 50% 0%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.0) 60%),
+                    linear-gradient(180deg, rgba(0,0,0,0.58) 0%, rgba(0,0,0,0.25) 100%);
+                box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+                backdrop-filter: blur(10px);
+            }
 
-        @media (max-width: 1100px){
-            .sx-header-grid{ grid-template-columns: 190px 1fr 190px; }
-        }
-        @media (max-width: 860px){
-            .sx-header-grid{ grid-template-columns: 1fr; text-align:center; }
-        }
+            .sx-header-grid{
+                display: grid;
+                grid-template-columns: 220px 1fr 220px;
+                align-items: center;
+                gap: 14px;
+            }
+            .sx-header-grid > * { min-width: 0; }
 
-        .sx-brand-slot{
-            display:flex;
-            align-items:center;
-            justify-content:flex-start;
-        }
-        .sx-brand-slot.right{ justify-content:flex-end; }
-        @media (max-width: 860px){
-            .sx-brand-slot, .sx-brand-slot.right{ justify-content:center; }
-        }
+            @media (max-width: 1100px){
+                .sx-header-grid{ grid-template-columns: 190px 1fr 190px; }
+            }
+            @media (max-width: 860px){
+                .sx-header-grid{ grid-template-columns: 1fr; text-align:center; }
+            }
 
-        .sx-brand-logo{
-            width: 100%;
-            max-width: 240px;
-            height: clamp(92px, 10vw, 130px);
-            padding: 10px;
-            border-radius: 16px;
-            background: rgba(255,255,255,0.07);
-            border: 1px solid rgba(255,255,255,0.12);
-            box-shadow: 0 10px 26px rgba(0,0,0,0.28);
-            display:flex;
-            align-items:center;
-            justify-content:center;
-        }
-        .sx-brand-logo img{
-            width: 100%;
-            height: 100%;
-            max-width: 220px;
-            object-fit: contain;
-            object-position: center;
-            display:block;
-            filter: drop-shadow(0 8px 18px rgba(0,0,0,0.30));
-        }
+            .sx-brand-slot{
+                display:flex;
+                align-items:center;
+                justify-content:flex-start;
+            }
+            .sx-brand-slot.right{ justify-content:flex-end; }
+            @media (max-width: 860px){
+                .sx-brand-slot, .sx-brand-slot.right{ justify-content:center; }
+            }
 
-        .sx-hero-center{
-            text-align: center;
-        }
-        .sx-title{
-            font-size: 2.05rem;
-            font-weight: 800;
-            line-height: 1.12;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            margin: 0;
-        }
-        .sx-subrow{
-            margin-top: 0.45rem;
-            display:flex;
-            gap: 0.55rem;
-            flex-wrap: wrap;
-            justify-content: center;
-            align-items: center;
-            color: rgba(255,255,255,0.78);
-            font-size: 0.95rem;
-        }
-        .sx-pill{
-            display:inline-flex;
-            align-items:center;
-            gap: 0.35rem;
-            padding: 0.22rem 0.60rem;
-            border-radius: 999px;
-            border: 1px solid rgba(255,255,255,0.14);
-            background: rgba(255,255,255,0.06);
-            color: rgba(255,255,255,0.88);
-            font-size: 0.80rem;
-        }
-        .sx-pill.on{
-            border-color: rgba(34,197,94,0.55);
-            box-shadow: 0 0 0 2px rgba(34,197,94,0.10) inset;
-        }
-        .sx-pill.off{
-            border-color: rgba(239,68,68,0.55);
-            box-shadow: 0 0 0 2px rgba(239,68,68,0.10) inset;
-        }
-        .sx-dot{
-            width: 8px; height: 8px; border-radius: 999px; display:inline-block;
-            background: rgba(255,255,255,0.55);
-        }
-        .sx-pill.on .sx-dot{ background: rgba(34,197,94,0.95); }
-        .sx-pill.off .sx-dot{ background: rgba(239,68,68,0.95); }
+            .sx-brand-logo{
+                width: 100%;
+                max-width: 240px;
+                height: clamp(92px, 10vw, 130px);
+                padding: 10px;
+                border-radius: 16px;
+                background: rgba(255,255,255,0.07);
+                border: 1px solid rgba(255,255,255,0.12);
+                box-shadow: 0 10px 26px rgba(0,0,0,0.28);
+                display:flex;
+                align-items:center;
+                justify-content:center;
+            }
+            .sx-brand-logo img{
+                width: 100%;
+                height: 100%;
+                max-width: 220px;
+                object-fit: contain;
+                object-position: center;
+                display:block;
+                filter: drop-shadow(0 8px 18px rgba(0,0,0,0.30));
+            }
 
-        /* =========================
-           Sidebar Nav (SpaceX-like)
-           ========================= */
-        .sx-nav{
-            margin-top: 0.25rem;
-        }
-        .sx-nav button{
-            width: 100% !important;
-            text-align: left !important;
-            border-radius: 12px !important;
-            padding: 0.60rem 0.80rem !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.10em !important;
-            font-size: 0.78rem !important;
-        }
-        .sx-nav button[kind="primary"]{
-            background: linear-gradient(90deg, rgba(22,163,74,0.95), rgba(245,158,11,0.90)) !important;
-            color: rgba(6,26,17,0.95) !important;
-        }
+            .sx-hero-center{
+                text-align: center;
+            }
+            .sx-title{
+                font-size: 2.05rem;
+                font-weight: 800;
+                line-height: 1.12;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                margin: 0;
+            }
+            .sx-subrow{
+                margin-top: 0.45rem;
+                display:flex;
+                gap: 0.55rem;
+                flex-wrap: wrap;
+                justify-content: center;
+                align-items: center;
+                color: rgba(255,255,255,0.78);
+                font-size: 0.95rem;
+            }
+            .sx-pill{
+                display:inline-flex;
+                align-items:center;
+                gap: 0.35rem;
+                padding: 0.22rem 0.60rem;
+                border-radius: 999px;
+                border: 1px solid rgba(255,255,255,0.14);
+                background: rgba(255,255,255,0.06);
+                color: rgba(255,255,255,0.88);
+                font-size: 0.80rem;
+            }
+            .sx-pill.on{
+                border-color: rgba(34,197,94,0.55);
+                box-shadow: 0 0 0 2px rgba(34,197,94,0.10) inset;
+            }
+            .sx-pill.off{
+                border-color: rgba(239,68,68,0.55);
+                box-shadow: 0 0 0 2px rgba(239,68,68,0.10) inset;
+            }
+            .sx-dot{
+                width: 8px; height: 8px; border-radius: 999px; display:inline-block;
+                background: rgba(255,255,255,0.55);
+            }
+            .sx-pill.on .sx-dot{ background: rgba(34,197,94,0.95); }
+            .sx-pill.off .sx-dot{ background: rgba(239,68,68,0.95); }
 
-        /* Small helpers */
-        .sx-section-title{
-            font-size: 0.82rem;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: rgba(255,255,255,0.70);
-        }
-        </style>
-        """,
+            /* =========================
+               Sidebar Nav (SpaceX-like)
+               ========================= */
+            .sx-nav{
+                margin-top: 0.25rem;
+            }
+            .sx-nav button{
+                width: 100% !important;
+                text-align: left !important;
+                border-radius: 12px !important;
+                padding: 0.60rem 0.80rem !important;
+                text-transform: uppercase !important;
+                letter-spacing: 0.10em !important;
+                font-size: 0.78rem !important;
+            }
+            .sx-nav button[kind="primary"]{
+                background: linear-gradient(90deg, rgba(22,163,74,0.95), rgba(245,158,11,0.90)) !important;
+                color: rgba(6,26,17,0.95) !important;
+            }
+
+            /* Small helpers */
+            .sx-section-title{
+                font-size: 0.82rem;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                color: rgba(255,255,255,0.70);
+            }
+
+            /* Section watermark (Sportarium) */
+            .sx-section-watermark{
+                width: 100%;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                padding: 0.85rem 0 0.15rem 0;
+                margin-top: 0.35rem;
+            }
+            .sx-section-watermark img{
+                width: min(980px, 100%);
+                max-height: 170px;
+                height: auto;
+                opacity: 0.13;
+                filter: saturate(1.05) contrast(1.05);
+                pointer-events:none;
+                user-select:none;
+            }
+            </style>
+            """
+        ),
         unsafe_allow_html=True
     )
 
 inject_global_css()
+
 
 # =========================================================
 # COMPAT HELPERS (toast / link button)
@@ -583,8 +631,35 @@ def admin_secret_configured() -> bool:
 
 
 # =========================================================
-# CONNECTIONS
+# CONNECTIONS (CACHED for better performance / smooth reruns)
 # =========================================================
+@st.cache_resource(show_spinner=False)
+def _connect_gsheet():
+    if "gcp_service_account" not in st.secrets:
+        raise RuntimeError("Kredensial `gcp_service_account` tidak ditemukan di Streamlit Secrets.")
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    if "private_key" in creds_dict:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    gc = gspread.authorize(creds)
+    return gc.open(NAMA_GOOGLE_SHEET)
+
+
+@st.cache_resource(show_spinner=False)
+def _connect_dropbox():
+    if "dropbox" not in st.secrets or "access_token" not in st.secrets["dropbox"]:
+        raise RuntimeError("Token Dropbox tidak ditemukan di Streamlit Secrets.")
+    dbx0 = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
+    dbx0.users_get_current_account()
+    return dbx0
+
+
 KONEKSI_GSHEET_BERHASIL = False
 KONEKSI_DROPBOX_BERHASIL = False
 spreadsheet = None
@@ -592,34 +667,20 @@ dbx = None
 
 # 1) Google Sheets
 try:
-    if "gcp_service_account" in st.secrets:
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        if "private_key" in creds_dict:
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        gc = gspread.authorize(creds)
-        spreadsheet = gc.open(NAMA_GOOGLE_SHEET)
-        KONEKSI_GSHEET_BERHASIL = True
-    else:
-        st.error("GSheet Error: Kredensial tidak ditemukan.")
+    spreadsheet = _connect_gsheet()
+    KONEKSI_GSHEET_BERHASIL = True
 except Exception as e:
     st.error(f"GSheet Error: {e}")
 
 # 2) Dropbox
 try:
-    if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
-        dbx = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
-        dbx.users_get_current_account()
-        KONEKSI_DROPBOX_BERHASIL = True
+    dbx = _connect_dropbox()
+    KONEKSI_DROPBOX_BERHASIL = True
 except AuthError:
     st.error("Dropbox Error: Token Autentikasi tidak valid.")
 except Exception as e:
-    st.error(f"Dropbox Error: {e}")
+    # Don't hard-stop the app; just disable uploads
+    st.warning(f"Dropbox non-aktif: {e}")
 
 
 # =========================================================
@@ -819,14 +880,6 @@ def payment_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return dfv
 
 
-def on_change_pay_nominal():
-    """Auto-format input nominal ke 'Rp 15.000.000' (untuk UI)."""
-    raw = st.session_state.get("pay_nominal", "")
-    val = parse_rupiah_to_int(raw)
-    if val is not None:
-        st.session_state["pay_nominal"] = format_rupiah_display(val)
-
-
 def reset_payment_form_state():
     """Reset field input pembayaran (agar terasa seperti clear_on_submit)."""
     keys = [
@@ -949,7 +1002,6 @@ def maybe_auto_format_sheet(worksheet, force: bool = False):
             auto_format_sheet(worksheet)
             st.session_state["_fmt_sheet_last"][key] = now
     except Exception:
-        # Never break app due to formatting.
         pass
 
 
@@ -1101,7 +1153,7 @@ def ensure_headers(worksheet, desired_headers):
 # =========================================================
 # WORKSHEET GET/CREATE + STAFF LIST
 # =========================================================
-@st.cache_resource(ttl=600)
+@st.cache_resource(ttl=600, show_spinner=False)
 def _get_or_create_ws_cached(nama_worksheet: str):
     """Get/create worksheet object (cached)."""
     try:
@@ -1126,7 +1178,7 @@ def get_or_create_worksheet(nama_worksheet):
     return ws
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=120, show_spinner=False)
 def get_daftar_staf_terbaru():
     default_staf = ["Saya"]
     if not KONEKSI_GSHEET_BERHASIL:
@@ -1171,7 +1223,7 @@ def tambah_staf_baru(nama_baru):
 # =========================================================
 # TEAM CONFIG
 # =========================================================
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=120, show_spinner=False)
 def load_team_config():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=TEAM_COLUMNS)
@@ -1287,7 +1339,7 @@ def clean_bulk_input(text_input):
     return cleaned_targets
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=120, show_spinner=False)
 def load_checklist(sheet_name, columns):
     try:
         try:
@@ -1578,7 +1630,7 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         return False
 
 
-@st.cache_data(ttl=45)
+@st.cache_data(ttl=45, show_spinner=False)
 def get_reminder_pending(nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
@@ -1596,7 +1648,7 @@ def get_reminder_pending(nama_staf):
         return None
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=120, show_spinner=False)
 def load_all_reports(daftar_staf):
     all_data = []
     for nama in daftar_staf:
@@ -1680,7 +1732,7 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 # =========================================================
 # CLOSING DEAL
 # =========================================================
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=120, show_spinner=False)
 def load_closing_deal():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=CLOSING_COLUMNS)
@@ -1756,7 +1808,7 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
 # =========================================================
 # PEMBAYARAN
 # =========================================================
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=120, show_spinner=False)
 def load_pembayaran_dp():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
@@ -2104,25 +2156,62 @@ def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marke
 # HEADER (TOP WATERMARK + LOGO LEFT/RIGHT)
 # =========================================================
 ASSET_DIR = Path(__file__).parent / "assets"
-LOGO_LEFT = ASSET_DIR / "log EO.png"
-LOGO_RIGHT = ASSET_DIR / "logo traine.png"
-LOGO_HOLDING = ASSET_DIR / "Logo-holding.png"
+
+def _find_asset(*candidates: str) -> Path | None:
+    for name in candidates:
+        p = ASSET_DIR / name
+        if p.exists():
+            return p
+    return None
+
+LOGO_LEFT = _find_asset("log EO.png", "log EO.PNG", "logo_eo.png", "logo eo.png")
+LOGO_RIGHT = _find_asset("logo traine.png", "logo traine.PNG", "logo_traine.png", "logo training.png")
+LOGO_HOLDING = _find_asset("Logo-holding.png", "logo-holding.png", "Logo_holding.png", "logo holding.png")
+SPORTARIUM_WATERMARK = _find_asset("sportarium.png", "sportarium.jpg", "sportarium.jpeg", "sportarium.webp")
 
 
-def _img_to_base64(path: Path) -> str:
+@st.cache_data(ttl=3600, show_spinner=False)
+def _file_to_base64(path_str: str) -> str:
     try:
-        if path and path.exists():
-            return base64.b64encode(path.read_bytes()).decode("utf-8")
-        return ""
+        p = Path(path_str)
+        if p.exists():
+            return base64.b64encode(p.read_bytes()).decode("utf-8")
     except Exception:
+        pass
+    return ""
+
+
+def _img_to_base64(path: Path | None) -> str:
+    if not path:
         return ""
+    return _file_to_base64(str(path))
+
+
+def render_section_watermark():
+    """Watermark Sportarium di bagian bawah section/card tertentu."""
+    if not SPORTARIUM_WATERMARK:
+        return
+    b64 = _img_to_base64(SPORTARIUM_WATERMARK)
+    if not b64:
+        return
+    ext = SPORTARIUM_WATERMARK.suffix.lower().replace(".", "") or "png"
+    mime = "jpeg" if ext in {"jpg", "jpeg"} else ext
+    st.markdown(
+        html_block(
+            f"""
+            <div class="sx-section-watermark">
+                <img src="data:image/{mime};base64,{b64}" alt="Sportarium Watermark" />
+            </div>
+            """
+        ),
+        unsafe_allow_html=True
+    )
 
 
 def render_header():
     """
     Header baru (lebih konsisten lintas browser):
-    - Logo holding (UMB) tampil FULL & transparan di posisi PALING ATAS (bukan di dalam box title),
-      jadi tidak kepotong.
+    - Logo holding tampil FULL & transparan di posisi PALING ATAS.
     - Bar bawah berisi: logo kiri, judul, status koneksi, logo kanan.
     """
     ts_now = datetime.now(tz=TZ_JKT).strftime("%d %B %Y %H:%M:%S")
@@ -2170,14 +2259,14 @@ def render_header():
         </div>
     </div>
     """
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(html_block(html), unsafe_allow_html=True)
 
 
 # =========================================================
 # APP UI
 # =========================================================
 if not KONEKSI_GSHEET_BERHASIL:
-    st.error("Database Error.")
+    st.error("Database Error (Google Sheet tidak terhubung).")
     st.stop()
 
 # Small banner for Dropbox status
@@ -2230,14 +2319,12 @@ with st.sidebar:
             if st.button("Login Admin", use_container_width=True):
                 if verify_admin_password(pwd):
                     st.session_state["is_admin"] = True
-                    # Jika baru login, refresh menu agar Dashboard muncul.
                     st.rerun()
                 else:
                     st.error("Password salah / belum dikonfigurasi!")
     else:
         if st.button("🔓 Logout Admin", use_container_width=True):
             st.session_state["is_admin"] = False
-            # Kalau sedang di dashboard, pindahkan ke laporan harian.
             if st.session_state.get("menu_nav") == "📊 Dashboard Admin":
                 st.session_state["menu_nav"] = "📝 Laporan Harian"
             st.rerun()
@@ -2297,7 +2384,7 @@ if menu_nav == "📝 Laporan Harian":
 
     st.divider()
 
-    # Daily input form (using form helps smoothness)
+    # Daily input form
     with st.container(border=True):
         st.markdown("### 📝 Input Laporan Harian (Activity)")
         st.caption("Gunakan form ini untuk mencatat aktivitas harian. Data akan tersimpan ke Google Sheet dan bukti (opsional) ke Dropbox.")
@@ -2472,6 +2559,9 @@ if menu_nav == "📝 Laporan Harian":
         else:
             st.info("Kosong")
 
+        # ✅ Add sportarium watermark (professional footer)
+        render_section_watermark()
+
 
 # =========================================================
 # MENU: TARGET & KPI
@@ -2503,58 +2593,64 @@ elif menu_nav == "🎯 Target & KPI":
                 st.error("Gagal simpan perubahan.")
 
         st.divider()
-        st.markdown("### ➕ Tambah Target Team (Bulk)")
 
-        with st.form("form_add_team_targets", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                tgl_mulai = st.date_input("Tgl Mulai", value=datetime.now(tz=TZ_JKT).date())
-            with c2:
-                tgl_selesai = st.date_input("Tgl Selesai", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7))
-            with c3:
-                status_default = st.checkbox("Sudah Done?", value=False)
+        with st.container(border=True):
+            st.markdown("### ➕ Tambah Target Team (Bulk)")
 
-            bulk = st.text_area("Daftar Misi (satu baris per misi)", height=140, placeholder="1. Kunjungan 10 klien\\n2. Buat 3 konten IG\\n- Follow up leads")
-            submitted_bulk = st.form_submit_button("Tambah Target Team", type="primary")
+            with st.form("form_add_team_targets", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    tgl_mulai = st.date_input("Tgl Mulai", value=datetime.now(tz=TZ_JKT).date())
+                with c2:
+                    tgl_selesai = st.date_input("Tgl Selesai", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7))
+                with c3:
+                    status_default = st.checkbox("Sudah Done?", value=False)
 
-        if submitted_bulk:
-            targets = clean_bulk_input(bulk)
-            if not targets:
-                st.error("Daftar misi kosong.")
-            else:
-                base = ["", tgl_mulai.strftime("%Y-%m-%d"), tgl_selesai.strftime("%Y-%m-%d"), status_default, "-", "", ""]
-                ok = add_bulk_targets(SHEET_TARGET_TEAM, base, targets)
-                if ok:
-                    st.success(f"Berhasil menambahkan {len(targets)} target team.")
-                    st.cache_data.clear()
-                    st.rerun()
+                bulk = st.text_area("Daftar Misi (satu baris per misi)", height=140, placeholder="1. Kunjungan 10 klien\\n2. Buat 3 konten IG\\n- Follow up leads")
+                submitted_bulk = st.form_submit_button("Tambah Target Team", type="primary")
+
+            if submitted_bulk:
+                targets = clean_bulk_input(bulk)
+                if not targets:
+                    st.error("Daftar misi kosong.")
                 else:
-                    st.error("Gagal menambahkan target.")
+                    base = ["", tgl_mulai.strftime("%Y-%m-%d"), tgl_selesai.strftime("%Y-%m-%d"), status_default, "-", "", ""]
+                    ok = add_bulk_targets(SHEET_TARGET_TEAM, base, targets)
+                    if ok:
+                        st.success(f"Berhasil menambahkan {len(targets)} target team.")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("Gagal menambahkan target.")
 
         st.divider()
-        st.markdown("### 🧾 Update Bukti Target Team (Upload)")
-        if not KONEKSI_DROPBOX_BERHASIL:
-            st.warning("Dropbox non-aktif → upload bukti dimatikan.")
 
-        if not df_team.empty:
-            pilihan_misi = st.selectbox("Pilih Misi", df_team["Misi"].tolist(), key="pilih_misi_team")
-            note = st.text_input("Catatan / bukti singkat", key="note_team")
-            file_team = st.file_uploader("Upload Bukti (Team)", key="file_team", disabled=not KONEKSI_DROPBOX_BERHASIL)
-            if st.button("Upload & Update Bukti Team", use_container_width=True):
-                ok, msg = update_evidence_row(
-                    SHEET_TARGET_TEAM,
-                    pilihan_misi,
-                    note,
-                    file_team,
-                    user_folder_name=actor,
-                    kategori_folder="Target_Team"
-                )
-                if ok:
-                    st.success(msg)
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.error(msg)
+        with st.container(border=True):
+            st.markdown("### 🧾 Update Bukti Target Team (Upload)")
+            if not KONEKSI_DROPBOX_BERHASIL:
+                st.warning("Dropbox non-aktif → upload bukti dimatikan.")
+
+            if not df_team.empty:
+                pilihan_misi = st.selectbox("Pilih Misi", df_team["Misi"].tolist(), key="pilih_misi_team")
+                note = st.text_input("Catatan / bukti singkat", key="note_team")
+                file_team = st.file_uploader("Upload Bukti (Team)", key="file_team", disabled=not KONEKSI_DROPBOX_BERHASIL)
+                if st.button("Upload & Update Bukti Team", use_container_width=True):
+                    ok, msg = update_evidence_row(
+                        SHEET_TARGET_TEAM,
+                        pilihan_misi,
+                        note,
+                        file_team,
+                        user_folder_name=actor,
+                        kategori_folder="Target_Team"
+                    )
+                    if ok:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+            render_section_watermark()
 
     # ---------------- INDIVIDU
     with tab_individu:
@@ -2577,70 +2673,78 @@ elif menu_nav == "🎯 Target & KPI":
                 st.error("Gagal simpan perubahan.")
 
         st.divider()
-        st.markdown("### ➕ Tambah Target Individu (Bulk)")
-        staff_list = get_daftar_staf_terbaru()
 
-        with st.form("form_add_ind_targets", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                nama_ind = st.selectbox("Nama", staff_list, key="nama_ind_bulk")
-            with c2:
-                tgl_mulai2 = st.date_input("Tgl Mulai", value=datetime.now(tz=TZ_JKT).date(), key="tgl_mulai_ind")
-            with c3:
-                tgl_selesai2 = st.date_input("Tgl Selesai", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7), key="tgl_selesai_ind")
+        with st.container(border=True):
+            st.markdown("### ➕ Tambah Target Individu (Bulk)")
+            staff_list = get_daftar_staf_terbaru()
 
-            status_default2 = st.checkbox("Sudah Done?", value=False, key="status_default2")
-            bulk2 = st.text_area("Daftar Target (satu baris per target)", height=140, placeholder="1. Closing 1 klien\\n2. Follow up 20 leads", key="bulk2")
-            submitted_bulk2 = st.form_submit_button("Tambah Target Individu", type="primary")
+            with st.form("form_add_ind_targets", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    nama_ind = st.selectbox("Nama", staff_list, key="nama_ind_bulk")
+                with c2:
+                    tgl_mulai2 = st.date_input("Tgl Mulai", value=datetime.now(tz=TZ_JKT).date(), key="tgl_mulai_ind")
+                with c3:
+                    tgl_selesai2 = st.date_input("Tgl Selesai", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7), key="tgl_selesai_ind")
 
-        if submitted_bulk2:
-            targets2 = clean_bulk_input(bulk2)
-            if not targets2:
-                st.error("Daftar target kosong.")
-            else:
-                base = [nama_ind, "", tgl_mulai2.strftime("%Y-%m-%d"), tgl_selesai2.strftime("%Y-%m-%d"), status_default2, "-", "", ""]
-                ok = add_bulk_targets(SHEET_TARGET_INDIVIDU, base, targets2)
-                if ok:
-                    st.success(f"Berhasil menambahkan {len(targets2)} target individu.")
-                    st.cache_data.clear()
-                    st.rerun()
+                status_default2 = st.checkbox("Sudah Done?", value=False, key="status_default2")
+                bulk2 = st.text_area("Daftar Target (satu baris per target)", height=140, placeholder="1. Closing 1 klien\\n2. Follow up 20 leads", key="bulk2")
+                submitted_bulk2 = st.form_submit_button("Tambah Target Individu", type="primary")
+
+            if submitted_bulk2:
+                targets2 = clean_bulk_input(bulk2)
+                if not targets2:
+                    st.error("Daftar target kosong.")
                 else:
-                    st.error("Gagal menambahkan target.")
-
-        st.divider()
-        st.markdown("### 🧾 Update Bukti Target Individu (Upload)")
-        if not KONEKSI_DROPBOX_BERHASIL:
-            st.warning("Dropbox non-aktif → upload bukti dimatikan.")
-
-        if not df_ind.empty:
-            # filter by nama
-            nama_filter = st.selectbox("Filter Nama", ["(Semua)"] + sorted(df_ind["Nama"].unique().tolist()), key="filter_nama_ind")
-            df_show = df_ind.copy()
-            if nama_filter != "(Semua)":
-                df_show = df_show[df_show["Nama"] == nama_filter].copy()
-            targets_list = df_show["Target"].tolist()
-
-            if targets_list:
-                pilihan_target = st.selectbox("Pilih Target", targets_list, key="pilih_target_ind")
-                note2 = st.text_input("Catatan / bukti singkat", key="note_ind")
-                file_ind = st.file_uploader("Upload Bukti (Individu)", key="file_ind", disabled=not KONEKSI_DROPBOX_BERHASIL)
-                if st.button("Upload & Update Bukti Individu", use_container_width=True):
-                    ok, msg = update_evidence_row(
-                        SHEET_TARGET_INDIVIDU,
-                        pilihan_target,
-                        note2,
-                        file_ind,
-                        user_folder_name=actor,
-                        kategori_folder="Target_Individu"
-                    )
+                    base = [nama_ind, "", tgl_mulai2.strftime("%Y-%m-%d"), tgl_selesai2.strftime("%Y-%m-%d"), status_default2, "-", "", ""]
+                    ok = add_bulk_targets(SHEET_TARGET_INDIVIDU, base, targets2)
                     if ok:
-                        st.success(msg)
+                        st.success(f"Berhasil menambahkan {len(targets2)} target individu.")
                         st.cache_data.clear()
                         st.rerun()
                     else:
-                        st.error(msg)
+                        st.error("Gagal menambahkan target.")
+
+        st.divider()
+
+        with st.container(border=True):
+            st.markdown("### 🧾 Update Bukti Target Individu (Upload)")
+            if not KONEKSI_DROPBOX_BERHASIL:
+                st.warning("Dropbox non-aktif → upload bukti dimatikan.")
+
+            if not df_ind.empty:
+                # filter by nama
+                nama_filter = st.selectbox("Filter Nama", ["(Semua)"] + sorted(df_ind["Nama"].unique().tolist()), key="filter_nama_ind")
+                df_show = df_ind.copy()
+                if nama_filter != "(Semua)":
+                    df_show = df_show[df_show["Nama"] == nama_filter].copy()
+                targets_list = df_show["Target"].tolist()
+
+                if targets_list:
+                    pilihan_target = st.selectbox("Pilih Target", targets_list, key="pilih_target_ind")
+                    note2 = st.text_input("Catatan / bukti singkat", key="note_ind")
+                    file_ind = st.file_uploader("Upload Bukti (Individu)", key="file_ind", disabled=not KONEKSI_DROPBOX_BERHASIL)
+                    if st.button("Upload & Update Bukti Individu", use_container_width=True):
+                        ok, msg = update_evidence_row(
+                            SHEET_TARGET_INDIVIDU,
+                            pilihan_target,
+                            note2,
+                            file_ind,
+                            user_folder_name=actor,
+                            kategori_folder="Target_Individu"
+                        )
+                        if ok:
+                            st.success(msg)
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                else:
+                    st.info("Tidak ada target untuk filter ini.")
             else:
-                st.info("Tidak ada target untuk filter ini.")
+                st.info("Belum ada target individu.")
+
+            render_section_watermark()
 
 
 # =========================================================
@@ -2714,6 +2818,8 @@ elif menu_nav == "🤝 Closing Deal":
                 except Exception:
                     pass
 
+            render_section_watermark()
+
         else:
             st.info("Kosong")
 
@@ -2748,6 +2854,8 @@ elif menu_nav == "💳 Pembayaran":
     # Add payment
     with st.container(border=True):
         st.markdown("### ➕ Input Pembayaran Baru")
+        st.caption("Catatan: demi stabilitas Streamlit Form, input nominal tidak lagi memakai callback on_change (menghindari error).")
+
         with st.form("form_pembayaran", clear_on_submit=False):
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -2756,11 +2864,15 @@ elif menu_nav == "💳 Pembayaran":
             with c2:
                 st.date_input("Tanggal Event (Opsional)", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7), key="pay_event_date")
                 jenis_opsi = st.selectbox("Jenis Pembayaran", ["Down Payment (DP)", "Termin", "Pelunasan", "Lainnya"], key="pay_jenis_opt")
-                jenis_custom = ""
                 if jenis_opsi == "Lainnya":
-                    jenis_custom = st.text_input("Jenis Pembayaran (Custom)", key="pay_jenis_custom")
+                    st.text_input("Jenis Pembayaran (Custom)", key="pay_jenis_custom")
             with c3:
-                st.text_input("Nominal (Rupiah)", placeholder="Contoh: Rp 5.000.000 / 5jt", key="pay_nominal", on_change=on_change_pay_nominal)
+                st.text_input(
+                    "Nominal (Rupiah)",
+                    placeholder="Contoh: Rp 5.000.000 / 5jt / 5,5jt",
+                    key="pay_nominal",
+                    help="Anda bisa isi: 5000000, 5jt, Rp 5.000.000, 5,5jt"
+                )
                 st.date_input("Batas Waktu Bayar (Jatuh Tempo)", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7), key="pay_due_date")
                 st.checkbox("Status: Sudah Dibayar?", value=False, key="pay_status")
 
@@ -2817,13 +2929,10 @@ elif menu_nav == "💳 Pembayaran":
 
             # Convert back for save
             df_new = edited.copy()
-            # nominal back to int
             if COL_NOMINAL_BAYAR in df_new.columns:
                 df_new[COL_NOMINAL_BAYAR] = df_new[COL_NOMINAL_BAYAR].apply(parse_rupiah_to_int)
-            # status back to bool
             if COL_STATUS_BAYAR in df_new.columns:
                 df_new[COL_STATUS_BAYAR] = df_new[COL_STATUS_BAYAR].apply(normalize_bool)
-            # jatuh tempo back to date
             if COL_JATUH_TEMPO in df_new.columns:
                 df_new[COL_JATUH_TEMPO] = df_new[COL_JATUH_TEMPO].apply(normalize_date)
 
@@ -2874,6 +2983,8 @@ elif menu_nav == "💳 Pembayaran":
                         use_container_width=True
                     )
 
+            render_section_watermark()
+
 # =========================================================
 # MENU: DASHBOARD ADMIN
 # =========================================================
@@ -2909,6 +3020,8 @@ elif menu_nav == "📊 Dashboard Admin":
                             use_container_width=True
                         )
 
+                render_section_watermark()
+
         # ---------------- Feedback
         with tab2:
             st.markdown("### 💬 Kirim Feedback Team Lead")
@@ -2924,7 +3037,6 @@ elif menu_nav == "📊 Dashboard Admin":
             if df_rows.empty:
                 st.info("Data staf ini masih kosong.")
             else:
-                # tampilkan opsi timestamp
                 ts_list = df_rows.get(COL_TIMESTAMP, pd.Series(dtype=str)).astype(str).tolist()
                 ts_pick = st.selectbox("Pilih Timestamp Laporan", ts_list[::-1], key="fb_ts_pick")
                 isi = st.text_area("Isi Feedback", height=120, placeholder="Contoh: Next time tolong tambah foto bukti. Follow up klien jam 10.", key="fb_text")
@@ -2938,6 +3050,8 @@ elif menu_nav == "📊 Dashboard Admin":
                         st.rerun()
                     else:
                         st.error(msg)
+
+                render_section_watermark()
 
         # ---------------- Config team
         with tab3:
@@ -2965,6 +3079,7 @@ elif menu_nav == "📊 Dashboard Admin":
                 else:
                     st.error(msg)
 
+            render_section_watermark()
 
         # ---------------- Staff management
         with tab4:
@@ -3010,7 +3125,6 @@ elif menu_nav == "📊 Dashboard Admin":
                         if ok:
                             added += 1
                         else:
-                            # "Nama sudah ada" tidak perlu dianggap error berat
                             if "sudah ada" not in str(msg).lower():
                                 errs.append(f"{n}: {msg}")
 
@@ -3023,7 +3137,7 @@ elif menu_nav == "📊 Dashboard Admin":
                     if errs:
                         st.warning("Sebagian nama gagal ditambahkan:\n- " + "\n- ".join(errs))
 
+            render_section_watermark()
 
 else:
     st.info("Menu belum tersedia.")
-
