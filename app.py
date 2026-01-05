@@ -114,6 +114,19 @@ def inject_global_css():
             font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
         }
 
+        /* =========================
+        Text selection (blok teks)
+        ========================= */
+        .stApp ::selection{
+            color: #ffffff !important;                 /* warna teks saat diblok */
+            background: rgba(22,163,74,0.35) !important; /* warna background highlight */
+        }
+        .stApp ::-moz-selection{
+            color: #ffffff !important;
+            background: rgba(22,163,74,0.35) !important;
+        }
+
+
         /* Sidebar polish (SpaceX-like) */
         section[data-testid="stSidebar"] > div {
             background: linear-gradient(180deg, rgba(0,0,0,0.92) 0%, rgba(3,10,6,0.92) 60%, rgba(4,16,11,0.92) 100%);
