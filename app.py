@@ -13,6 +13,7 @@ import re
 import io
 import hashlib
 import hmac
+import textwrap
 import base64
 
 # =========================================================
@@ -54,9 +55,10 @@ st.set_page_config(
 # =========================================================
 # GLOBAL STYLE (SpaceX x Muhammadiyah — Elegant, International)
 # =========================================================
+
 def inject_global_css():
     st.markdown(
-        """
+        textwrap.dedent("""
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
 
@@ -368,7 +370,7 @@ def inject_global_css():
             color: rgba(255,255,255,0.70);
         }
         </style>
-        """,
+        """).strip(),
         unsafe_allow_html=True
     )
 
@@ -2142,7 +2144,7 @@ def render_header():
     right_html = f"<img src='data:image/png;base64,{right_b64}' alt='Logo Training' />" if right_b64 else ""
     holding_html = f"<img src='data:image/png;base64,{holding_b64}' alt='Logo Holding (UMB)' />" if holding_b64 else ""
 
-    html = f"""
+    html = textwrap.dedent(f"""
     <div class="sx-topwrap">
         <div class="sx-watermark-wrap">
             {holding_html}
@@ -2169,7 +2171,8 @@ def render_header():
             </div>
         </div>
     </div>
-    """
+    """).strip()
+
     st.markdown(html, unsafe_allow_html=True)
 
 
