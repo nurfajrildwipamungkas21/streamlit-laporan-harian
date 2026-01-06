@@ -2006,10 +2006,16 @@ def _img_to_base64(path: Path) -> str:
 def render_header():
     ts_now = datetime.now(tz=TZ_JKT).strftime("%d %B %Y %H:%M:%S")
 
-    left_b64 = _img_to_base64(LOGO_LEFT)
-    right_b64 = _img_to_base64(LOGO_RIGHT)
-    holding_b64 = _img_to_base64(LOGO_HOLDING) # Logo UMB
-    bg_b64 = _img_to_base64(HERO_BG)
+    # 1. Pastikan variabel ini memuat gambar yang BENAR
+    # Logo Kiri (Mentari EO)
+    left_b64 = _img_to_base64(LOGO_LEFT)  
+    # Logo Kanan (Mentari Training)
+    right_b64 = _img_to_base64(LOGO_RIGHT) 
+    # Logo Atas (PT UMB)
+    holding_b64 = _img_to_base64(LOGO_HOLDING) 
+    # Background Utama (Gedung Sportarium)
+    # PENTING: Pastikan HERO_BG mengarah ke 'sportarium.jpg', bukan ke file logo.
+    bg_b64 = _img_to_base64(HERO_BG) 
 
     g_on = bool(KONEKSI_GSHEET_BERHASIL)
     d_on = bool(KONEKSI_DROPBOX_BERHASIL)
@@ -2018,50 +2024,51 @@ def render_header():
         cls = "sx-pill on" if on else "sx-pill off"
         return f"<span class='{cls}'><span class='sx-dot'></span>{label}</span>"
 
-    # Style background hero (Sportarium)
+    # 2. PERBAIKAN CSS BACKGROUND:
+    # Saya ganti '140%' menjadi 'cover'.
+    # 'cover' artinya gambar akan menutup area dengan rapi tanpa zoom berlebihan.
+    # Jika bg_b64 kosong, background jadi transparan (none).
     hero_style = (
         f"--hero-bg: url('data:image/jpeg;base64,{bg_b64}'); "
-        f"--hero-bg-pos: 50% 72%; "
-        f"--hero-bg-size: 140%;"
+        f"--hero-bg-pos: center center; "
+        f"--hero-bg-size: cover;" 
     ) if bg_b64 else "--hero-bg: none;"
 
-    # Logo Kiri & Kanan (Mentari Sejuk)
     left_html = f"<img src='data:image/png;base64,{left_b64}' alt='Logo EO' />" if left_b64 else ""
     right_html = f"<img src='data:image/png;base64,{right_b64}' alt='Logo Training' />" if right_b64 else ""
 
-    # --- BAGIAN BARU: Logo Holding di Paling Atas ---
-    # Kita buat div terpisah di luar card utama
+    # Logo Holding (PT UMB) - Paling Atas
     top_logo_html = ""
     if holding_b64:
         top_logo_html = f"""
-        <div style="display: flex; justify-content: center; margin-bottom: 25px; padding-top: 10px;">
+        <div style="display: flex; justify-content: center; margin-bottom: 20px; padding-top: 10px;">
             <img src='data:image/png;base64,{holding_b64}' 
                  alt='Holding Logo'
-                 style="height: 100px; width: auto; object-fit: contain; filter: drop-shadow(0 5px 15px rgba(0,0,0,0.5));" />
+                 style="height: 85px; width: auto; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));" />
         </div>
         """
 
-    # Susunan HTML: Logo Atas -> Baru kemudian Hero Card
     html = f"""
 {top_logo_html}
 <div class="sx-hero" style="{hero_style}">
-<div class="sx-hero-grid">
-<div class="sx-logo-card">{left_html}</div>
-<div class="sx-hero-center">
-<div class="sx-title">🚀 {APP_TITLE}</div>
-<div class="sx-subrow">
-<span>Realtime: {ts_now}</span>
-{pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
-{pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
-</div>
-</div>
-<div class="sx-logo-card">{right_html}</div>
-</div>
+    <div class="sx-hero-grid">
+        <div class="sx-logo-card">{left_html}</div>
+        
+        <div class="sx-hero-center">
+            <div class="sx-title">🚀 {APP_TITLE}</div>
+            <div class="sx-subrow">
+                <span>Realtime: {ts_now}</span>
+                {pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
+                {pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
+            </div>
+        </div>
+
+        <div class="sx-logo-card">{right_html}</div>
+    </div>
 </div>
     """
     
     st.markdown(html, unsafe_allow_html=True)
-
 
 
 # =========================================================
