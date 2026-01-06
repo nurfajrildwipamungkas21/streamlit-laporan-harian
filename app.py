@@ -2419,7 +2419,12 @@ def _get_query_nav():
     try:
         # streamlit baru
         if hasattr(st, "query_params"):
-            return st.query_params.get("nav", None)
+            v = st.query_params.get("nav", None)
+            # ✅ normalisasi: kalau list, ambil elemen pertama
+            if isinstance(v, (list, tuple)):
+                return v[0] if v else None
+            return v
+
         # streamlit lama
         qp = st.experimental_get_query_params()
         return (qp.get("nav", [None])[0])
@@ -2430,7 +2435,7 @@ def set_nav(nav_key: str):
     nav_key = nav_key if nav_key in NAV_MAP else "home"
     try:
         if hasattr(st, "query_params"):
-            st.query_params["nav"] = nav_key
+            st.query_params["nav"] = [nav_key]   # ✅ konsisten dengan format list
         else:
             st.experimental_set_query_params(nav=nav_key)
     except Exception:
