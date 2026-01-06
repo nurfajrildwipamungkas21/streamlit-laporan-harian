@@ -2364,27 +2364,29 @@ def render_header():
 </div>
     """
     
-st.markdown(html, unsafe_allow_html=True)
-    def render_home_mobile():
-st.markdown("## 🧭 Menu Utama")
-st.caption("Pilih fitur seperti shortcut ala aplikasi mobile.")
+    st.markdown(html, unsafe_allow_html=True)
 
-features = [
-    {"key": "report",  "icon": "📝", "title": "Laporan Harian", "sub": "Input aktivitas + reminder"},
-    {"key": "kpi",     "icon": "🎯", "title": "Target & KPI",   "sub": "Checklist team & individu"},
-    {"key": "closing", "icon": "🤝", "title": "Closing Deal",   "sub": "Catat deal + export"},
-    {"key": "payment", "icon": "💳", "title": "Pembayaran",     "sub": "DP/Termin/Pelunasan + jatuh tempo"},
-    {"key": "admin",   "icon": "🔐", "title": "Akses Admin",    "sub": "Dashboard + kontrol (butuh login)"},
-]
 
-cols = st.columns(2, gap="medium")
-for i, f in enumerate(features):
-    with cols[i % 2]:
-        with st.container(border=True):
-            st.markdown(f"### {f['icon']} {f['title']}")
-            st.caption(f["sub"])
-            if st.button("Buka", use_container_width=True, key=f"home_open_{f['key']}"):
-                set_nav(f["key"])
+def render_home_mobile():
+    st.markdown("## 🧭 Menu Utama")
+    st.caption("Pilih fitur seperti shortcut ala aplikasi mobile.")
+
+    features = [
+        {"key": "report",  "icon": "📝", "title": "Laporan Harian", "sub": "Input aktivitas + reminder"},
+        {"key": "kpi",     "icon": "🎯", "title": "Target & KPI",   "sub": "Checklist team & individu"},
+        {"key": "closing", "icon": "🤝", "title": "Closing Deal",   "sub": "Catat deal + export"},
+        {"key": "payment", "icon": "💳", "title": "Pembayaran",     "sub": "DP/Termin/Pelunasan + jatuh tempo"},
+        {"key": "admin",   "icon": "🔐", "title": "Akses Admin",    "sub": "Dashboard + kontrol (butuh login)"},
+    ]
+
+    cols = st.columns(2, gap="medium")
+    for i, f in enumerate(features):
+        with cols[i % 2]:
+            with st.container(border=True):
+                st.markdown(f"### {f['icon']} {f['title']}")
+                st.caption(f["sub"])
+                if st.button("Buka", use_container_width=True, key=f"home_open_{f['key']}"):
+                    set_nav(f["key"])
 
 
 
