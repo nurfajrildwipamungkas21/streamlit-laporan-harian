@@ -2889,25 +2889,179 @@ elif menu_nav == "🎯 Target & KPI":
                         st.cache_data.clear()
                         st.rerun()
 
-# 3. MENU: CLOSING DEAL
+# =========================================================
+# MENU: CLOSING DEAL (FIXED & RESTORED)
+# =========================================================
 elif menu_nav == "🤝 Closing Deal":
+    # --- LOGIKA MOBILE (HP) ---
     if IS_MOBILE:
-        render_closing_mobile()
+        st.markdown("### 🤝 Closing Deal (Mobile)")
+        
+        with st.expander("➕ Input Deal Baru", expanded=True):
+            with st.form("mob_form_closing"):
+                # Tambahkan Input Group yang hilang sebelumnya
+                cd_group = st.text_input("Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada")
+                cd_marketing = st.selectbox("Nama Marketing", get_daftar_staf_terbaru())
+                cd_tgl = st.date_input("Tanggal Event")
+                cd_bidang = st.text_input("Bidang", placeholder="F&B / Wedding / dll")
+                cd_nilai = st.text_input("Nilai (Rp)", placeholder="Contoh: 15jt")
+                
+                if st.form_submit_button("Simpan Deal", type="primary", use_container_width=True):
+                    with st.spinner("Menyimpan data..."):
+                        # Panggil fungsi dengan 5 argumen lengkap
+                        res, msg = tambah_closing_deal(cd_group, cd_marketing, cd_tgl, cd_bidang, cd_nilai)
+                        
+                    if res:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        
+        st.divider()
+        st.markdown("#### 📋 Riwayat Closing (5 Terakhir)")
+        
+        df_cd = load_closing_deal()
+        
+        if not df_cd.empty:
+            df_display = df_cd.sort_index(ascending=False).head(5) 
+            
+            for _, row in df_display.iterrows():
+                with st.container(border=True):
+                    val_disp = format_rupiah_display(row.get(COL_NILAI_KONTRAK))
+                    st.markdown(f"💰 **{val_disp}**")
+                    st.caption(f"👤 {row.get(COL_MARKETING,'-')} | 📅 {row.get(COL_TGL_EVENT,'-')}")
+                    st.text(f"Group: {row.get(COL_GROUP,'-')} | Bidang: {row.get(COL_BIDANG,'-')}")
+            
+            sisa_data = len(df_cd) - 5
+            if sisa_data > 0:
+                st.caption(f"ℹ️ {sisa_data} data lama disembunyikan. Buka di Laptop untuk lihat semua.")
+        else:
+            st.info("Belum ada data.")
+
+    # --- LOGIKA DESKTOP (PC/LAPTOP) ---
     else:
-        # --- LOGIC DESKTOP (Existing) ---
         st.markdown("## 🤝 Closing Deal")
+        st.caption("Pencatatan sales closing (Kontrak/Event).")
+
+        # 1. FORM INPUT LENGKAP (5 KOLOM)
         with st.container(border=True):
             st.markdown("### ➕ Input Closing Deal")
-            with st.form("form_closing_desk"):
-                c1, c2 = st.columns(2)
-                nm = c1.text_input("Marketing")
-                val = c2.text_input("Nilai")
-                if st.form_submit_button("Simpan"):
-                    tambah_closing_deal("-", nm, datetime.now(), "Umum", val)
-                    st.success("Tersimpan")
+            with st.form("form_closing_desk_full", clear_on_submit=True):
+                # Baris 1: Group, Marketing, Tanggal
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    inp_group = st.text_input("Nama Group (Opsional)", placeholder="Kosongkan jika personal")
+                with c2:
+                    inp_marketing = st.text_input("Nama Marketing (Wajib)", placeholder="Nama Sales")
+                with c3:
+                    inp_tgl_event = st.date_input("Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
+                
+                # Baris 2: Bidang, Nilai
+                c4, c5 = st.columns([1, 1])
+                with c4:
+                    inp_bidang = st.text_input("Bidang / Jenis Event", placeholder="Contoh: Gathering / Training / Wedding")
+                with c5:
+                    inp_nilai = st.text_input("Nilai Kontrak (Rupiah)", placeholder="Contoh: 15.000.000 / 15jt")
+                
+                if st.form_submit_button("✅ Simpan Closing Deal", type="primary", use_container_width=True):
+                    if not inp_marketing or not inp_nilai:
+                        st.error("Nama Marketing dan Nilai Kontrak wajib diisi!")
+                    else:
+                        # Panggil fungsi save
+                        res, msg = tambah_closing_deal(inp_group, inp_marketing, inp_tgl_event, inp_bidang, inp_nilai)
+                        if res:
+                            st.success(msg)
+                            ui_toast("Closing deal tersimpan!", icon="✅")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(msg)
         
-        st.markdown("### 📋 Data")
-        st.dataframe(load_closing_deal(), use_container_width=True)
+        # 2. TABEL DATA & EXPORT
+        st.divider()
+        st.markdown("### 📋 Riwayat Closing Deal")
+        
+        df_cd = load_closing_deal()
+        
+        if not df_cd.empty:
+            # Summary Metrics di atas tabel
+            tot_nilai = df_cd[COL_NILAI_KONTRAK].sum() if COL_NILAI_KONTRAK in df_cd.columns else 0
+            
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Closing (Deal)", len(df_cd))
+            m2.metric("Total Nilai Kontrak", format_rupiah_display(tot_nilai))
+            m3.metric("Bulan Ini", f"{len(df_cd)} deal") # Placeholder logic sederhana
+
+            # Tampilkan Tabel
+            df_show = df_cd.copy()
+            if COL_NILAI_KONTRAK in df_show.columns:
+                df_show[COL_NILAI_KONTRAK] = df_show[COL_NILAI_KONTRAK].apply(lambda x: format_rupiah_display(x))
+            
+            st.dataframe(
+                df_show, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    COL_NILAI_KONTRAK: st.column_config.TextColumn("Nilai Kontrak", width="medium"),
+                    COL_TGL_EVENT: st.column_config.DateColumn("Tanggal Event", format="DD/MM/YYYY")
+                }
+            )
+            
+            # Tombol Download Excel/CSV
+            col_ex, col_csv = st.columns([1, 1])
+            with col_ex:
+                if HAS_OPENPYXL:
+                    xbytes = df_to_excel_bytes(
+                        df_cd, 
+                        sheet_name="Closing_Deal",
+                        right_align_cols=[COL_NILAI_KONTRAK],
+                        number_format_cols={COL_NILAI_KONTRAK: '"Rp" #,##0'}
+                    )
+                    if xbytes:
+                        st.download_button(
+                            "⬇️ Download Excel (Closing)", 
+                            data=xbytes, 
+                            file_name="closing_deal.xlsx", 
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                            use_container_width=True
+                        )
+            
+            with col_csv:
+                csv_data = df_cd.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "⬇️ Download CSV", 
+                    data=csv_data, 
+                    file_name="closing_deal.csv", 
+                    mime="text/csv", 
+                    use_container_width=True
+                )
+
+            # Chart Sederhana (Jika Plotly ada)
+            if HAS_PLOTLY and not df_cd.empty:
+                try:
+                    st.markdown("#### 📊 Grafik Performa")
+                    df_plot = df_cd.copy()
+                    df_plot[COL_NILAI_KONTRAK] = df_plot[COL_NILAI_KONTRAK].fillna(0).astype(int)
+                    
+                    fig = px.bar(
+                        df_plot, 
+                        x=COL_MARKETING, 
+                        y=COL_NILAI_KONTRAK, 
+                        color=COL_BIDANG, 
+                        title="Nilai Kontrak per Marketing (Breakdown Bidang)",
+                        labels={COL_NILAI_KONTRAK: "Total Nilai (Rp)", COL_MARKETING: "Nama Marketing"}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception:
+                    pass
+
+        else:
+            st.info("Belum ada data closing deal yang tersimpan.")
+            
+        render_section_watermark()
 
 # =========================================================
 # MENU: PEMBAYARAN (FULL FEATURE RESTORED)
