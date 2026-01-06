@@ -2125,11 +2125,7 @@ def render_header():
 
     left_b64 = _img_to_base64(LOGO_LEFT)
     right_b64 = _img_to_base64(LOGO_RIGHT)
-
-    # Logo holding dipakai sebagai logo mandiri (PNG)
-    holding_b64 = _img_to_base64(LOGO_HOLDING)
-
-    # Background hero pakai sportarium (JPG)
+    holding_b64 = _img_to_base64(LOGO_HOLDING) # Logo UMB
     bg_b64 = _img_to_base64(HERO_BG)
 
     g_on = bool(KONEKSI_GSHEET_BERHASIL)
@@ -2139,29 +2135,36 @@ def render_header():
         cls = "sx-pill on" if on else "sx-pill off"
         return f"<span class='{cls}'><span class='sx-dot'></span>{label}</span>"
 
-    # Background hero = sportarium
+    # Style background hero (Sportarium)
     hero_style = (
         f"--hero-bg: url('data:image/jpeg;base64,{bg_b64}'); "
         f"--hero-bg-pos: 50% 72%; "
         f"--hero-bg-size: 140%;"
     ) if bg_b64 else "--hero-bg: none;"
 
+    # Logo Kiri & Kanan (Mentari Sejuk)
     left_html = f"<img src='data:image/png;base64,{left_b64}' alt='Logo EO' />" if left_b64 else ""
     right_html = f"<img src='data:image/png;base64,{right_b64}' alt='Logo Training' />" if right_b64 else ""
 
-    holding_html = (
-        f"<img class='sx-holding-logo' src='data:image/png;base64,{holding_b64}' alt='Holding Logo' />"
-        if holding_b64 else ""
-    )
+    # --- BAGIAN BARU: Logo Holding di Paling Atas ---
+    # Kita buat div terpisah di luar card utama
+    top_logo_html = ""
+    if holding_b64:
+        top_logo_html = f"""
+        <div style="display: flex; justify-content: center; margin-bottom: 25px; padding-top: 10px;">
+            <img src='data:image/png;base64,{holding_b64}' 
+                 alt='Holding Logo'
+                 style="height: 100px; width: auto; object-fit: contain; filter: drop-shadow(0 5px 15px rgba(0,0,0,0.5));" />
+        </div>
+        """
 
-    # PERBAIKAN DI SINI:
-    # Hapus semua indentasi agar HTML rapat ke kiri.
+    # Susunan HTML: Logo Atas -> Baru kemudian Hero Card
     html = f"""
+{top_logo_html}
 <div class="sx-hero" style="{hero_style}">
 <div class="sx-hero-grid">
 <div class="sx-logo-card">{left_html}</div>
 <div class="sx-hero-center">
-{holding_html}
 <div class="sx-title">🚀 {APP_TITLE}</div>
 <div class="sx-subrow">
 <span>Realtime: {ts_now}</span>
