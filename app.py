@@ -65,11 +65,20 @@ def inject_global_css():
             --bg0:#020805;
             --bg1:#04110b;
             --bg2:#062015;
+
             --cardA: rgba(255,255,255,0.06);
             --cardB: rgba(255,255,255,0.045);
             --border: rgba(255,255,255,0.10);
+
             --text: rgba(255,255,255,0.92);
             --muted: rgba(255,255,255,0.70);
+
+            --green:#16a34a;
+            --green2:#22c55e;
+            --teal:#14b8a6;
+            --gold:#facc15;
+            --amber:#f59e0b;
+            --danger:#ef4444;
         }
 
         /* ---------- App background ---------- */
@@ -82,67 +91,46 @@ def inject_global_css():
             color: var(--text);
         }
 
-        /* Subtle starfield overlay */
+        /* Subtle starfield overlay (Space vibe) */
         .stApp::before {
             content: "";
             position: fixed;
             inset: 0;
             pointer-events: none;
-            background: radial-gradient(rgba(255,255,255,0.18) 0.8px, transparent 0.8px);
+            background:
+                radial-gradient(rgba(255,255,255,0.18) 0.8px, transparent 0.8px);
             background-size: 68px 68px;
             opacity: 0.10;
+            -webkit-mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
             mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
         }
 
-        /* Hide Footer & MainMenu (titik tiga kanan atas), TAPI Header jangan di-hidden total */
+        /* Hide Streamlit default UI chrome (we use custom header) */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
-        
-        /* =========================
-           CUSTOM HEADER & TOGGLE BUTTON
-           ========================= */
-        
-        /* Buat Header Transparan (supaya background app tetap terlihat) */
-        header[data-testid="stHeader"] {
-            background-color: transparent !important;
-            border-bottom: none !important;
-            z-index: 99999; /* Pastikan selalu di atas */
-        }
-
-        /* Styling Tombol Hamburger (☰) biar kayak tombol Pop-Up Keren */
-        header[data-testid="stHeader"] > button[title="View fullscreen"]{
-             display: none; /* Sembunyikan tombol fullscreen bawaan biar bersih */
-        }
-
-        /* Tombol Navigasi (Hamburger) */
-        button[kind="header"] {
-            background-color: rgba(255, 255, 255, 0.05) !important;
-            border: 1px solid rgba(255, 255, 255, 0.15) !important;
-            color: #ffffff !important;
-            border-radius: 8px !important;
-            transition: all 0.3s ease;
-            margin-top: 10px; /* Sedikit turun biar gak nempel atas */
-        }
-
-        button[kind="header"]:hover {
-            background-color: rgba(22, 163, 74, 0.6) !important; /* Warna hijau saat hover */
-            border-color: rgba(22, 163, 74, 0.8) !important;
-            transform: scale(1.1);
-        }
-        
-        /* Ikon panah (chevron) saat sidebar terbuka */
-        section[data-testid="stSidebar"] button[kind="header"] {
-             margin-top: 10px;
-        }
+        header {visibility: hidden;}
 
         /* Typography */
         h1, h2, h3, h4, h5, h6, p, label, span, div {
-            font-family: "Space Grotesk", sans-serif;
+            font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
         }
 
-        /* Sidebar polish */
+        /* =========================
+        Text selection (blok teks)
+        ========================= */
+        .stApp ::selection{
+            color: #ffffff !important;                 /* warna teks saat diblok */
+            background: rgba(22,163,74,0.35) !important; /* warna background highlight */
+        }
+        .stApp ::-moz-selection{
+            color: #ffffff !important;
+            background: rgba(22,163,74,0.35) !important;
+        }
+
+
+        /* Sidebar polish (SpaceX-like) */
         section[data-testid="stSidebar"] > div {
-            background: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(3,10,6,0.95) 60%, rgba(4,16,11,0.95) 100%);
+            background: linear-gradient(180deg, rgba(0,0,0,0.92) 0%, rgba(3,10,6,0.92) 60%, rgba(4,16,11,0.92) 100%);
             border-right: 1px solid rgba(255,255,255,0.10);
         }
         section[data-testid="stSidebar"] * {
@@ -152,17 +140,17 @@ def inject_global_css():
             border-color: rgba(255,255,255,0.10);
         }
 
-        /* Cards */
+        /* Card styling for containers with border=True */
         div[data-testid="stVerticalBlockBorderWrapper"] > div {
             background: linear-gradient(180deg, var(--cardA) 0%, var(--cardB) 100%);
             border: 1px solid var(--border);
             border-radius: 18px;
-            padding: 1.05rem;
-            backdrop-filter: blur(10px);
+            padding: 1.05rem 1.05rem 0.75rem 1.05rem;
             box-shadow: 0 16px 46px rgba(0,0,0,0.42);
+            backdrop-filter: blur(10px);
         }
 
-        /* Buttons Standard */
+        /* Buttons */
         .stButton>button, .stDownloadButton>button {
             border-radius: 12px !important;
             border: 1px solid rgba(255,255,255,0.14) !important;
@@ -176,7 +164,7 @@ def inject_global_css():
             background: rgba(255,255,255,0.08) !important;
         }
 
-        /* Primary button */
+        /* Primary button (type=primary) */
         button[kind="primary"] {
             background: linear-gradient(135deg, rgba(22,163,74,0.95), rgba(245,158,11,0.92)) !important;
             color: rgba(6, 26, 17, 0.95) !important;
@@ -187,18 +175,26 @@ def inject_global_css():
         }
 
         /* Inputs */
-        .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input, .stSelectbox div[data-baseweb="select"] > div {
+        .stTextInput input, .stTextArea textarea, .stNumberInput input {
             border-radius: 12px !important;
         }
-        
-        /* Dataframes */
+        .stDateInput input {
+            border-radius: 12px !important;
+        }
+        .stSelectbox div[data-baseweb="select"] > div {
+            border-radius: 12px !important;
+        }
+
+        /* Dataframes / tables */
         div[data-testid="stDataFrame"] {
             border-radius: 14px;
             overflow: hidden;
             border: 1px solid rgba(255,255,255,0.10);
         }
 
-        /* HERO & LOGO Styles (Dari update sebelumnya) */
+        /* =========================
+           HERO HEADER (Custom)
+           ========================= */
         .sx-hero{
             position: relative;
             border-radius: 20px;
@@ -211,50 +207,171 @@ def inject_global_css():
             box-shadow: 0 18px 60px rgba(0,0,0,0.45);
         }
         .sx-hero::before{
-            content:""; position:absolute; inset:0; 
-            background-image: var(--hero-bg); background-repeat:no-repeat;
+            content:"";
+            position:absolute;
+            inset:0; /* biar cover full hero */
+            background-image: var(--hero-bg);
+            background-repeat:no-repeat;
+
+            /* “presisi” fokus gedung: tinggal adjust 2 variable ini */
             background-position: var(--hero-bg-pos, 50% 72%);
-            background-size: var(--hero-bg-size, 140%);
-            opacity: 0.28; filter: saturate(1.05) contrast(1.08); pointer-events:none;
+            background-size: var(--hero-bg-size, 140%); /* semakin besar = semakin zoom */
+
+            opacity: 0.28;
+            filter: saturate(1.05) contrast(1.08);
+            pointer-events:none;
         }
+        /* Logo Holding mandiri di atas judul */
+        .sx-holding-logo{
+            display:block;
+            margin: 0 auto 10px auto;
+            width: clamp(90px, 10vw, 140px);
+            height: auto;
+            opacity: 0.95;
+            filter: drop-shadow(0 10px 22px rgba(0,0,0,0.45));
+        }
+        .sx-hero::after{
+            content:"";
+            position:absolute;
+            inset:0;
+            background:
+                linear-gradient(180deg, rgba(2,8,5,0.15) 0%, rgba(2,8,5,0.52) 100%);
+            pointer-events:none;
+        }
+
         .sx-hero-grid{
-            position: relative; display: grid; grid-template-columns: 240px 1fr 240px;
-            align-items: center; gap: 14px;
+            position: relative;
+            display: grid;
+            grid-template-columns: 240px 1fr 240px;
+            align-items: center;
+            gap: 14px;
         }
-        .sx-hero-grid > * { min-width: 0; }
-        @media (max-width: 1100px){ .sx-hero-grid{ grid-template-columns: 200px 1fr 200px; } }
-        @media (max-width: 860px){ .sx-hero-grid{ grid-template-columns: 1fr; text-align:center; } }
         
+        .sx-hero-grid > * { min-width: 0; }
+
+        @media (max-width: 1100px){
+            .sx-hero-grid{ grid-template-columns: 200px 1fr 200px; }
+        }
+        @media (max-width: 860px){
+            .sx-hero-grid{ grid-template-columns: 1fr; text-align:center; }
+        }
+
+        /* Pastikan hitungan ukuran konsisten antar browser */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        /* Kunci “slot” logo biar tinggi tidak berubah-ubah */
         .sx-logo-card{
-            background: rgba(255,255,255,0.92); border: 1px solid rgba(0,0,0,0.06);
-            border-radius: 16px; width: 100%; max-width: 240px; 
-            height: clamp(120px, 12vw, 160px); padding: 10px;
-            display:flex; align-items:center; justify-content:center;
+            background: rgba(255,255,255,0.92);
+            border: 1px solid rgba(0,0,0,0.06);
+            border-radius: 16px;
+
+            /* penting: buat area logo punya ukuran stabil */
+            width: 100%;
+            max-width: 240px;                 /* match kolom grid 240px */
+            height: clamp(120px, 12vw, 160px);/* stabil + responsif */
+            padding: 10px;
+
+            display:flex;
+            align-items:center;
+            justify-content:center;
+
             box-shadow: 0 10px 26px rgba(0,0,0,0.28);
         }
+
+        /* Paksa gambar selalu “contain” dan center */
         .sx-logo-card img{
-            width: 100%; height: 100%; object-fit: contain; object-position: center; display: block;
+            width: 100%;
+            height: 100%;
+            max-width: 220px;     /* optional: tetap boleh */
+            max-height: 100%;
+
+            object-fit: contain;
+            object-position: center;
+
+            display: block;
         }
-        .sx-hero-center{ text-align: center; }
-        .sx-title{ font-size: 2.05rem; font-weight: 800; line-height: 1.12; letter-spacing: 0.06em; text-transform: uppercase; margin: 0; }
-        .sx-subrow{ margin-top: 0.45rem; display:flex; gap: 0.55rem; flex-wrap: wrap; justify-content: center; align-items: center; color: rgba(255,255,255,0.78); font-size: 0.95rem; }
-        .sx-pill{ display:inline-flex; align-items:center; gap: 0.35rem; padding: 0.22rem 0.60rem; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.88); font-size: 0.80rem; }
-        .sx-pill.on{ border-color: rgba(34,197,94,0.55); box-shadow: 0 0 0 2px rgba(34,197,94,0.10) inset; }
-        .sx-pill.off{ border-color: rgba(239,68,68,0.55); box-shadow: 0 0 0 2px rgba(239,68,68,0.10) inset; }
-        .sx-dot{ width: 8px; height: 8px; border-radius: 999px; display:inline-block; background: rgba(255,255,255,0.55); }
+
+
+        .sx-hero-center{
+            text-align: center;
+        }
+        .sx-title{
+            font-size: 2.05rem;
+            font-weight: 800;
+            line-height: 1.12;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin: 0;
+        }
+        .sx-subrow{
+            margin-top: 0.45rem;
+            display:flex;
+            gap: 0.55rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            color: rgba(255,255,255,0.78);
+            font-size: 0.95rem;
+        }
+        .sx-pill{
+            display:inline-flex;
+            align-items:center;
+            gap: 0.35rem;
+            padding: 0.22rem 0.60rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.06);
+            color: rgba(255,255,255,0.88);
+            font-size: 0.80rem;
+        }
+        .sx-pill.on{
+            border-color: rgba(34,197,94,0.55);
+            box-shadow: 0 0 0 2px rgba(34,197,94,0.10) inset;
+        }
+        .sx-pill.off{
+            border-color: rgba(239,68,68,0.55);
+            box-shadow: 0 0 0 2px rgba(239,68,68,0.10) inset;
+        }
+        .sx-dot{
+            width: 8px; height: 8px; border-radius: 999px; display:inline-block;
+            background: rgba(255,255,255,0.55);
+        }
         .sx-pill.on .sx-dot{ background: rgba(34,197,94,0.95); }
         .sx-pill.off .sx-dot{ background: rgba(239,68,68,0.95); }
 
-        /* Sidebar Nav Buttons */
-        .sx-nav{ margin-top: 0.25rem; }
-        .sx-nav button{ width: 100% !important; text-align: left !important; border-radius: 12px !important; padding: 0.60rem 0.80rem !important; text-transform: uppercase !important; letter-spacing: 0.10em !important; font-size: 0.78rem !important; }
-        .sx-nav button[kind="primary"]{ background: linear-gradient(90deg, rgba(22,163,74,0.95), rgba(245,158,11,0.90)) !important; color: rgba(6,26,17,0.95) !important; }
-        .sx-section-title{ font-size: 0.82rem; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.70); }
+        /* =========================
+           Sidebar Nav (SpaceX-like)
+           ========================= */
+        .sx-nav{
+            margin-top: 0.25rem;
+        }
+        .sx-nav button{
+            width: 100% !important;
+            text-align: left !important;
+            border-radius: 12px !important;
+            padding: 0.60rem 0.80rem !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.10em !important;
+            font-size: 0.78rem !important;
+        }
+        .sx-nav button[kind="primary"]{
+            background: linear-gradient(90deg, rgba(22,163,74,0.95), rgba(245,158,11,0.90)) !important;
+            color: rgba(6,26,17,0.95) !important;
+        }
 
+        /* Small helpers */
+        .sx-section-title{
+            font-size: 0.82rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.70);
+        }
         </style>
         """,
         unsafe_allow_html=True
     )
+
+inject_global_css()
 
 # =========================================================
 # COMPAT HELPERS (toast / link button)
