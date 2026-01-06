@@ -1725,7 +1725,8 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
         use_container_width=True
     )
 
-    def render_laporan_harian_mobile():
+
+def render_laporan_harian_mobile():
     st.markdown("## 📝 Laporan Harian")
 
     # tombol balik
