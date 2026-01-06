@@ -1175,7 +1175,7 @@ def get_or_create_worksheet(nama_worksheet):
     return ws
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def get_daftar_staf_terbaru():
     default_staf = ["Saya"]
     if not KONEKSI_GSHEET_BERHASIL:
@@ -1211,7 +1211,7 @@ def tambah_staf_baru(nama_baru):
             return False, "Nama sudah ada!"
 
         ws.append_row([nama_baru], value_input_option="USER_ENTERED")
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True, "Berhasil tambah tim!"
     except Exception as e:
         return False, str(e)
@@ -1220,7 +1220,7 @@ def tambah_staf_baru(nama_baru):
 # =========================================================
 # TEAM CONFIG
 # =========================================================
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_team_config():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=TEAM_COLUMNS)
@@ -1285,7 +1285,7 @@ def tambah_team_baru(nama_team, posisi, anggota_list):
             return False, "Semua anggota sudah terdaftar di team tersebut."
 
         ws.append_rows(rows_to_add, value_input_option="USER_ENTERED")
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True, f"Berhasil tambah team '{nama_team}' ({len(rows_to_add)} anggota)."
     except Exception as e:
         return False, str(e)
@@ -1336,7 +1336,7 @@ def clean_bulk_input(text_input):
     return cleaned_targets
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_checklist(sheet_name, columns):
     try:
         try:
@@ -1390,7 +1390,7 @@ def save_checklist(sheet_name, df, columns):
         data_to_save = [df_save.columns.values.tolist()] + df_save.values.tolist()
 
         ws.update(range_name="A1", values=data_to_save, value_input_option="USER_ENTERED")
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True
     except Exception:
         return False
@@ -1483,7 +1483,7 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
             rows_to_add.append(new_row)
 
         ws.append_rows(rows_to_add, value_input_option="USER_ENTERED")
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True
     except Exception:
         return False
@@ -1559,7 +1559,7 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
 
         ws.batch_update(updates, value_input_option="USER_ENTERED")
 
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True, "Berhasil update!"
     except Exception as e:
         return False, f"Error: {e}"
@@ -1619,7 +1619,7 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         ws.append_rows(list_of_rows, value_input_option="USER_ENTERED")
 
         # ✅ Optimasi: jangan format tiap submit (throttled)
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
 
         return True
     except Exception as e:
@@ -1627,7 +1627,7 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         return False
 
 
-@st.cache_data(ttl=45)
+@st.cache_data(ttl=3600)
 def get_reminder_pending(nama_staf):
     try:
         ws = get_or_create_worksheet(nama_staf)
@@ -1645,7 +1645,7 @@ def get_reminder_pending(nama_staf):
         return None
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_all_reports(daftar_staf):
     all_data = []
     for nama in daftar_staf:
@@ -1800,6 +1800,7 @@ def render_laporan_harian_mobile():
         st.caption("Pastikan data sudah benar, lalu submit.")
 
         if st.button("✅ Submit Laporan", type="primary", use_container_width=True):
+            with st.spinner("Sedang menyimpan..."):
             # ambil data dari session
             kategori_aktivitas = st.session_state.get("m_kategori", "")
             is_kunjungan = str(kategori_aktivitas).startswith("🚗")
@@ -1866,7 +1867,7 @@ def render_laporan_harian_mobile():
 # =========================================================
 # CLOSING DEAL
 # =========================================================
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_closing_deal():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=CLOSING_COLUMNS)
@@ -1933,7 +1934,7 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
 
         ws.append_row([nama_group, nama_marketing, tgl_str, bidang, int(nilai_int)], value_input_option="USER_ENTERED")
 
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True, "Closing deal berhasil disimpan!"
     except Exception as e:
         return False, str(e)
@@ -1942,7 +1943,7 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
 # =========================================================
 # PEMBAYARAN
 # =========================================================
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_pembayaran_dp():
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
@@ -2043,7 +2044,7 @@ def save_pembayaran_dp(df: pd.DataFrame) -> bool:
         data_to_save = [df_save.columns.values.tolist()] + df_save.values.tolist()
 
         ws.update(range_name="A1", values=data_to_save, value_input_option="USER_ENTERED")
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True
     except Exception:
         return False
@@ -2194,7 +2195,7 @@ def tambah_pembayaran_dp(
             value_input_option="USER_ENTERED"
         )
 
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True, "Pembayaran berhasil disimpan!"
     except Exception as e:
         return False, str(e)
@@ -2280,7 +2281,7 @@ def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marke
             updates.append({"range": cell_by, "values": [[actor_final]]})
 
         ws.batch_update(updates, value_input_option="USER_ENTERED")
-        maybe_auto_format_sheet(ws)
+        # maybe_auto_format_sheet(ws)
         return True, "Bukti pembayaran berhasil di-update!"
     except Exception as e:
         return False, f"Error: {e}"
@@ -2473,6 +2474,9 @@ if IS_MOBILE and menu_nav == HOME_NAV:
 # SIDEBAR (SpaceX-inspired)
 # =========================================================
 with st.sidebar:
+    if st.button("🔄 Refresh Data", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
     st.markdown("<div class='sx-section-title'>Navigation</div>", unsafe_allow_html=True)
 
     menu_items = [
@@ -2614,7 +2618,10 @@ def render_closing_mobile():
             cd_nilai = st.text_input("Nilai (Rp)", placeholder="Contoh: 15jt")
             
             if st.form_submit_button("Simpan Deal", type="primary", use_container_width=True):
-                res, msg = tambah_closing_deal("-", cd_marketing, cd_tgl, cd_bidang, cd_nilai)
+                # [OPTIMASI 1]: Tambahkan spinner agar user tau proses sedang berjalan
+                with st.spinner("Menyimpan data..."):
+                    res, msg = tambah_closing_deal("-", cd_marketing, cd_tgl, cd_bidang, cd_nilai)
+                    
                 if res:
                     st.success(msg)
                     st.cache_data.clear()
@@ -2624,17 +2631,26 @@ def render_closing_mobile():
                     st.error(msg)
     
     st.divider()
-    st.markdown("#### 📋 Riwayat Closing")
+    st.markdown("#### 📋 Riwayat Closing (5 Terakhir)")
+    
+    # Load data hanya saat diperlukan
     df_cd = load_closing_deal()
+    
     if not df_cd.empty:
-        # Tampilkan card style
-        df_cd = df_cd.sort_index(ascending=False).head(10) # Ambil 10 terakhir
-        for _, row in df_cd.iterrows():
+        # [OPTIMASI 2]: Ubah head(10) jadi head(5) agar rendering di HP enteng
+        df_display = df_cd.sort_index(ascending=False).head(5) 
+        
+        for _, row in df_display.iterrows():
             with st.container(border=True):
                 nominal = format_rupiah_display(row[COL_NILAI_KONTRAK])
                 st.markdown(f"💰 **{nominal}**")
                 st.caption(f"👤 {row[COL_MARKETING]} | 📅 {row[COL_TGL_EVENT]}")
                 st.text(f"Bidang: {row[COL_BIDANG]}")
+        
+        # [OPTIMASI 3]: Beritahu user jika ada data yang disembunyikan
+        sisa_data = len(df_cd) - 5
+        if sisa_data > 0:
+            st.caption(f"ℹ️ {sisa_data} data lama disembunyikan agar aplikasi cepat. Buka di Laptop/PC untuk lihat semua.")
     else:
         st.info("Belum ada data.")
 
@@ -2650,7 +2666,10 @@ def render_payment_mobile():
             p_status = st.checkbox("Sudah Dibayar?")
             
             if st.form_submit_button("Simpan", type="primary", use_container_width=True):
-                res, msg = tambah_pembayaran_dp("-", p_marketing, datetime.now(), p_jenis, p_nominal, p_jatuh_tempo, p_status, None, "-")
+                # [OPTIMASI 4]: Spinner untuk feedback visual
+                with st.spinner("Memproses pembayaran..."):
+                    res, msg = tambah_pembayaran_dp("-", p_marketing, datetime.now(), p_jenis, p_nominal, p_jatuh_tempo, p_status, None, "-")
+                    
                 if res:
                     st.success(msg)
                     st.cache_data.clear()
@@ -2662,14 +2681,18 @@ def render_payment_mobile():
     st.divider()
     st.markdown("#### ⚠️ Alert Jatuh Tempo")
     df_pay = load_pembayaran_dp()
+    
     if not df_pay.empty:
         overdue, due_soon = build_alert_pembayaran(df_pay)
+        
+        # [OPTIMASI 5]: Batasi tinggi tabel alert agar tidak memanjang ke bawah
         if not overdue.empty:
             st.error(f"{len(overdue)} Overdue!")
-            st.dataframe(overdue[[COL_MARKETING, COL_NOMINAL_BAYAR]], use_container_width=True)
+            st.dataframe(overdue[[COL_MARKETING, COL_NOMINAL_BAYAR]], use_container_width=True, height=150)
+            
         if not due_soon.empty:
             st.warning(f"{len(due_soon)} Due Soon")
-            st.dataframe(due_soon[[COL_MARKETING, COL_NOMINAL_BAYAR]], use_container_width=True)
+            st.dataframe(due_soon[[COL_MARKETING, COL_NOMINAL_BAYAR]], use_container_width=True, height=150)
             
         st.markdown("#### 📋 5 Data Terakhir")
         st.dataframe(df_pay.tail(5), use_container_width=True)
