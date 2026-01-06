@@ -2535,6 +2535,28 @@ with st.sidebar:
 
 menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
+menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
+
+# [MULAI KODE TAMBAHAN: FIX NAVIGASI MOBILE]
+# Ini akan memunculkan tombol Back & Menu Bawah untuk Closing, KPI, Payment, dll.
+if IS_MOBILE and menu_nav != "📝 Laporan Harian":
+    # 1. Tombol Kembali ke Beranda
+    if st.button("⬅️ Kembali ke Beranda", use_container_width=True, key="global_mobile_back"):
+        set_nav("home")
+    
+    # 2. Bottom Navigation Bar (Menu Bawah)
+    st.markdown("""
+    <div class="mobile-bottom-nav">
+      <a href="?nav=home">🏠</a>
+      <a href="?nav=report">📝</a>
+      <a href="?nav=kpi">🎯</a>
+      <a href="?nav=closing">🤝</a>
+      <a href="?nav=payment">💳</a>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.divider()
+
 
 # =========================================================
 # MENU: LAPORAN HARIAN
