@@ -2375,6 +2375,26 @@ def render_header():
     
     st.markdown(html, unsafe_allow_html=True)
 
+def render_section_watermark():
+    """
+    Menampilkan watermark Sportarium di bagian bawah halaman/tab.
+    Menggunakan file HERO_BG (sportarium.jpg) dengan style CSS .sx-section-watermark.
+    """
+    # Menggunakan aset global HERO_BG yang sudah didefinisikan di atas
+    if not HERO_BG or not HERO_BG.exists():
+        return
+
+    b64 = _img_to_base64(HERO_BG)
+    if not b64:
+        return
+
+    # Render HTML dengan class CSS yang sudah ada di inject_global_css
+    html = f"""
+    <div class="sx-section-watermark">
+        <img src="data:image/jpeg;base64,{b64}" alt="Sportarium Watermark" />
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 def render_home_mobile():
     st.markdown("## 🧭 Menu Utama")
