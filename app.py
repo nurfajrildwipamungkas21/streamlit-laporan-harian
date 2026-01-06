@@ -1795,73 +1795,81 @@ def render_laporan_harian_mobile():
         st.text_input("📞 No HP/WA Klien", key="kontak_klien_input")
         st.text_input("📌 Next Plan / Pending (Reminder Besok)", key="m_pending")
 
-    # ===== TAB 4: Submit =====
+# ===== TAB 4: Submit =====
     with tab4:
         st.caption("Pastikan data sudah benar, lalu submit.")
 
         if st.button("✅ Submit Laporan", type="primary", use_container_width=True):
-            with st.spinner("Sedang menyimpan..."):
-            # ambil data dari session
-            kategori_aktivitas = st.session_state.get("m_kategori", "")
-            is_kunjungan = str(kategori_aktivitas).startswith("🚗")
-            lokasi_input = st.session_state.get("m_lokasi", "") if is_kunjungan else kategori_aktivitas
-            main_deskripsi = st.session_state.get("m_deskripsi", "")
-            sosmed_link = st.session_state.get("m_sosmed", "") if "Digital Marketing" in str(kategori_aktivitas) else ""
+            # [OPTIMASI]: Gunakan spinner agar user tahu sistem sedang bekerja
+            with st.spinner("Sedang mengupload & menyimpan..."):
+                
+                # --- PROSES (Dipindah ke dalam spinner) ---
+                kategori_aktivitas = st.session_state.get("m_kategori", "")
+                is_kunjungan = str(kategori_aktivitas).startswith("🚗")
+                lokasi_input = st.session_state.get("m_lokasi", "") if is_kunjungan else kategori_aktivitas
+                main_deskripsi = st.session_state.get("m_deskripsi", "")
+                sosmed_link = st.session_state.get("m_sosmed", "") if "Digital Marketing" in str(kategori_aktivitas) else ""
 
-            fotos = st.session_state.get("m_fotos", None)
+                fotos = st.session_state.get("m_fotos", None)
 
-            # validasi ringkas
-            if is_kunjungan and not str(lokasi_input).strip():
-                st.error("Lokasi kunjungan wajib diisi.")
-                return
-            if (not fotos) and (not str(main_deskripsi).strip()):
-                st.error("Deskripsi wajib diisi.")
-                return
+                # Validasi ringkas
+                if is_kunjungan and not str(lokasi_input).strip():
+                    st.error("Lokasi kunjungan wajib diisi.")
+                    st.stop() # Hentikan proses jika invalid
+                
+                if (not fotos) and (not str(main_deskripsi).strip()):
+                    st.error("Deskripsi wajib diisi.")
+                    st.stop() # Hentikan proses jika invalid
 
-            ts = now_ts_str()
+                ts = now_ts_str()
 
-            val_kesimpulan = (st.session_state.get("m_kesimpulan") or "-").strip() or "-"
-            val_kendala = (st.session_state.get("m_kendala") or "-").strip() or "-"
-            val_kendala_klien = (st.session_state.get("m_kendala_klien") or "-").strip() or "-"
-            val_pending = (st.session_state.get("m_pending") or "-").strip() or "-"
-            val_feedback = ""
-            val_interest = st.session_state.get("interest_persen") or "-"
-            val_nama_klien = (st.session_state.get("nama_klien_input") or "-").strip() or "-"
-            val_kontak_klien = (st.session_state.get("kontak_klien_input") or "-").strip() or "-"
+                val_kesimpulan = (st.session_state.get("m_kesimpulan") or "-").strip() or "-"
+                val_kendala = (st.session_state.get("m_kendala") or "-").strip() or "-"
+                val_kendala_klien = (st.session_state.get("m_kendala_klien") or "-").strip() or "-"
+                val_pending = (st.session_state.get("m_pending") or "-").strip() or "-"
+                val_feedback = ""
+                val_interest = st.session_state.get("interest_persen") or "-"
+                val_nama_klien = (st.session_state.get("nama_klien_input") or "-").strip() or "-"
+                val_kontak_klien = (st.session_state.get("kontak_klien_input") or "-").strip() or "-"
 
-            rows = []
-            final_lokasi = lokasi_input if is_kunjungan else kategori_aktivitas
+                rows = []
+                final_lokasi = lokasi_input if is_kunjungan else kategori_aktivitas
 
-            # jika ada foto: bisa buat 1 row per file (seperti desktop), tapi deskripsinya singkat
-            if fotos and KONEKSI_DROPBOX_BERHASIL:
-                for i, f in enumerate(fotos):
-                    url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
-                    desc = st.session_state.get(f"m_desc_{i}", "") or main_deskripsi or "-"
+                # Proses Upload (Berat)
+                if fotos and KONEKSI_DROPBOX_BERHASIL:
+                    for i, f in enumerate(fotos):
+                        url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
+                        desc = st.session_state.get(f"m_desc_{i}", "") or main_deskripsi or "-"
+                        rows.append([
+                            ts, nama_pelapor, final_lokasi, desc,
+                            url, sosmed_link if sosmed_link else "-",
+                            val_kesimpulan, val_kendala, val_kendala_klien,
+                            val_pending, val_feedback, val_interest,
+                            val_nama_klien, val_kontak_klien
+                        ])
+                else:
                     rows.append([
-                        ts, nama_pelapor, final_lokasi, desc,
-                        url, sosmed_link if sosmed_link else "-",
+                        ts, nama_pelapor, final_lokasi, main_deskripsi,
+                        "-", sosmed_link if sosmed_link else "-",
                         val_kesimpulan, val_kendala, val_kendala_klien,
                         val_pending, val_feedback, val_interest,
                         val_nama_klien, val_kontak_klien
                     ])
-            else:
-                rows.append([
-                    ts, nama_pelapor, final_lokasi, main_deskripsi,
-                    "-", sosmed_link if sosmed_link else "-",
-                    val_kesimpulan, val_kendala, val_kendala_klien,
-                    val_pending, val_feedback, val_interest,
-                    val_nama_klien, val_kontak_klien
-                ])
 
-            ok = simpan_laporan_harian_batch(rows, nama_pelapor)
+                # Proses Simpan ke GSheet (Berat)
+                ok = simpan_laporan_harian_batch(rows, nama_pelapor)
+
+            # --- SELESAI (Keluar dari spinner) ---
             if ok:
                 st.success(f"✅ Laporan tersimpan! Reminder besok: **{val_pending}**")
                 ui_toast("Laporan tersimpan!", icon="✅")
+                
+                # [PENTING] Clear cache & jeda sedikit sebelum pindah halaman
                 st.cache_data.clear()
-                # balik ke Beranda biar terasa app-like
+                time.sleep(1) 
                 set_nav("home")
             else:
-                st.error("Gagal simpan.")
+                st.error("Gagal simpan. Cek koneksi internet.")
 
 
 # =========================================================
