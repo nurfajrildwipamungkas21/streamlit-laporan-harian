@@ -2535,11 +2535,11 @@ menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 # MENU: LAPORAN HARIAN
 # =========================================================
 if menu_nav == "📝 Laporan Harian":
- if IS_MOBILE:
- render_laporan_harian_mobile()
- st.stop()
- # ===== DESKTOP (kode lama tetap jalan, tidak diubah) =====
- staff_list = get_daftar_staf_terbaru()
+    if IS_MOBILE:
+        render_laporan_harian_mobile()
+        st.stop()
+
+    # ===== DESKTOP (kode lama tetap jalan, tidak diubah) =====
     staff_list = get_daftar_staf_terbaru()
 
     # Top cards: Reminder & last feedback
@@ -2553,6 +2553,7 @@ if menu_nav == "📝 Laporan Harian":
                 st.warning(f"🔔 Pending terakhir: **{pending_msg}**")
             else:
                 st.info("Tidak ada pendingan dari laporan terakhir.")
+
     with col_b:
         with st.container(border=True):
             st.markdown("#### 💌 Feedback Team Lead (Terakhir)")
