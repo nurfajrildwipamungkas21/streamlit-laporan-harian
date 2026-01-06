@@ -119,14 +119,13 @@ def inject_global_css():
         Text selection (blok teks)
         ========================= */
         .stApp ::selection{
-            color: #ffffff !important;                 /* warna teks saat diblok */
-            background: rgba(22,163,74,0.35) !important; /* warna background highlight */
+            color: #ffffff !important;
+            background: rgba(22,163,74,0.35) !important;
         }
         .stApp ::-moz-selection{
             color: #ffffff !important;
             background: rgba(22,163,74,0.35) !important;
         }
-
 
         /* Sidebar polish (SpaceX-like) */
         section[data-testid="stSidebar"] > div {
@@ -209,19 +208,15 @@ def inject_global_css():
         .sx-hero::before{
             content:"";
             position:absolute;
-            inset:0; /* biar cover full hero */
+            inset:0;
             background-image: var(--hero-bg);
             background-repeat:no-repeat;
-
-            /* “presisi” fokus gedung: tinggal adjust 2 variable ini */
             background-position: var(--hero-bg-pos, 50% 72%);
-            background-size: var(--hero-bg-size, 140%); /* semakin besar = semakin zoom */
-
+            background-size: var(--hero-bg-size, 140%);
             opacity: 0.28;
             filter: saturate(1.05) contrast(1.08);
             pointer-events:none;
         }
-        /* Logo Holding mandiri di atas judul */
         .sx-holding-logo{
             display:block;
             margin: 0 auto 10px auto;
@@ -246,7 +241,7 @@ def inject_global_css():
             align-items: center;
             gap: 14px;
         }
-        
+
         .sx-hero-grid > * { min-width: 0; }
 
         @media (max-width: 1100px){
@@ -256,41 +251,31 @@ def inject_global_css():
             .sx-hero-grid{ grid-template-columns: 1fr; text-align:center; }
         }
 
-        /* Pastikan hitungan ukuran konsisten antar browser */
         *, *::before, *::after { box-sizing: border-box; }
 
-        /* Kunci “slot” logo biar tinggi tidak berubah-ubah */
         .sx-logo-card{
             background: rgba(255,255,255,0.92);
             border: 1px solid rgba(0,0,0,0.06);
             border-radius: 16px;
-
-            /* penting: buat area logo punya ukuran stabil */
             width: 100%;
-            max-width: 240px;                 /* match kolom grid 240px */
-            height: clamp(120px, 12vw, 160px);/* stabil + responsif */
+            max-width: 240px;
+            height: clamp(120px, 12vw, 160px);
             padding: 10px;
-
             display:flex;
             align-items:center;
             justify-content:center;
-
             box-shadow: 0 10px 26px rgba(0,0,0,0.28);
         }
 
-        /* Paksa gambar selalu “contain” dan center */
         .sx-logo-card img{
             width: 100%;
             height: 100%;
-            max-width: 220px;     /* optional: tetap boleh */
+            max-width: 220px;
             max-height: 100%;
-
             object-fit: contain;
             object-position: center;
-
             display: block;
         }
-
 
         .sx-hero-center{
             text-align: center;
@@ -359,19 +344,64 @@ def inject_global_css():
             color: rgba(6,26,17,0.95) !important;
         }
 
-        /* Small helpers */
         .sx-section-title{
             font-size: 0.82rem;
             letter-spacing: 0.12em;
             text-transform: uppercase;
             color: rgba(255,255,255,0.70);
         }
+
+        /* ==================================================
+           MOBILE ONLY (<=768px) - tidak mengubah desktop
+           ================================================== */
+        @media (max-width: 768px){
+          /* Sidebar disembunyikan di HP */
+          section[data-testid="stSidebar"] { display: none !important; }
+
+          /* Padding konten dipersempit */
+          .block-container { padding-left: 1rem !important; padding-right: 1rem !important; }
+
+          /* Hero dibuat lebih ringkas */
+          .sx-title { font-size: 1.35rem !important; }
+          .sx-hero-grid { grid-template-columns: 1fr !important; }
+
+          /* Logo kiri/kanan dimatikan di HP biar tidak makan tempat */
+          .sx-logo-card { display:none !important; }
+          @media (max-width: 768px){
+  .mobile-bottom-nav{
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 10px 12px;
+    background: rgba(0,0,0,0.75);
+    border-top: 1px solid rgba(255,255,255,0.12);
+    display: flex;
+    justify-content: space-around;
+    gap: 8px;
+    z-index: 9999;
+    backdrop-filter: blur(10px);
+  }
+  .mobile-bottom-nav a{
+    text-decoration:none;
+    color: rgba(255,255,255,0.92);
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06);
+    font-size: 14px;
+  }
+  /* biar konten tidak ketutup bottom nav */
+  .block-container{ padding-bottom: 80px !important; }
+}
+
+        }
+
         </style>
         """,
         unsafe_allow_html=True
     )
 
 inject_global_css()
+
 
 # =========================================================
 # COMPAT HELPERS (toast / link button)
@@ -479,6 +509,26 @@ TZ_JKT = ZoneInfo("Asia/Jakarta")
 
 # Formatting throttling (avoid heavy batch formatting too frequently)
 FORMAT_THROTTLE_SECONDS = 300  # 5 minutes
+
+# =========================================================
+# MOBILE DETECTION (safe, tidak mengubah desktop)
+# =========================================================
+def is_mobile_device() -> bool:
+    """
+    Deteksi via User-Agent. Hanya dipakai untuk membedakan UI HP vs Desktop.
+    Jika st.context tidak tersedia, fallback = False (anggap desktop).
+    """
+    try:
+        ua = ""
+        if hasattr(st, "context") and hasattr(st.context, "headers"):
+            headers = st.context.headers
+            ua = (headers.get("user-agent") or headers.get("User-Agent") or "").lower()
+        return any(k in ua for k in ["android", "iphone", "ipad", "mobile"])
+    except Exception:
+        return False
+
+IS_MOBILE = is_mobile_device()
+
 
 
 # =========================================================
@@ -1675,6 +1725,142 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
         use_container_width=True
     )
 
+    def render_laporan_harian_mobile():
+    st.markdown("## 📝 Laporan Harian")
+
+    # tombol balik
+    if st.button("⬅️ Kembali ke Beranda", use_container_width=True):
+        set_nav("home")
+
+    staff_list = get_daftar_staf_terbaru()
+
+    # tetap pakai key pelapor_main agar actor log tetap konsisten
+    nama_pelapor = st.selectbox("Nama Pelapor", staff_list, key="pelapor_main")
+
+    pending_msg = get_reminder_pending(nama_pelapor)
+    if pending_msg:
+        st.warning(f"🔔 Pending terakhir: **{pending_msg}**")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["📌 Aktivitas", "🏁 Kesimpulan", "📇 Kontak", "✅ Submit"])
+
+    # ===== TAB 1: Aktivitas =====
+    with tab1:
+        kategori_aktivitas = st.radio(
+            "Jenis Aktivitas",
+            ["🚗 Sales (Kunjungan Lapangan)", "💻 Digital Marketing / Konten / Ads", "📞 Telesales / Follow Up", "🏢 Lainnya"],
+            horizontal=False,
+            key="m_kategori"
+        )
+        is_kunjungan = kategori_aktivitas.startswith("🚗")
+
+        if "Digital Marketing" in kategori_aktivitas:
+            st.text_input("Link Konten / Ads / Drive (Opsional)", key="m_sosmed")
+
+        if is_kunjungan:
+            st.text_input("📍 Nama Klien / Lokasi Kunjungan (Wajib)", key="m_lokasi")
+        else:
+            st.text_input("Jenis Tugas", value=kategori_aktivitas, disabled=True, key="m_tugas")
+
+        fotos = st.file_uploader(
+            "Upload Bukti (opsional)",
+            accept_multiple_files=True,
+            disabled=not KONEKSI_DROPBOX_BERHASIL,
+            key="m_fotos"
+        )
+
+        # 1 deskripsi saja agar ringkas (bisa detail per file via expander)
+        st.text_area("Deskripsi Aktivitas (Wajib)", height=120, key="m_deskripsi")
+
+        with st.expander("Detail deskripsi per file (opsional)", expanded=False):
+            if fotos:
+                for i, f in enumerate(fotos):
+                    st.text_input(f"Ket. {f.name}", key=f"m_desc_{i}")
+
+    # ===== TAB 2: Kesimpulan =====
+    with tab2:
+        st.text_area("💡 Kesimpulan hari ini", height=100, key="m_kesimpulan")
+        st.text_area("🚧 Kendala internal", height=90, key="m_kendala")
+        st.text_area("🧑‍💼 Kendala klien", height=90, key="m_kendala_klien")
+
+    # ===== TAB 3: Kontak =====
+    with tab3:
+        st.radio(
+            "📈 Tingkat Interest",
+            ["Under 50% (A)", "50-75% (B)", "75%-100%"],
+            horizontal=False,
+            key="interest_persen"
+        )
+        st.text_input("👤 Nama Klien", key="nama_klien_input")
+        st.text_input("📞 No HP/WA Klien", key="kontak_klien_input")
+        st.text_input("📌 Next Plan / Pending (Reminder Besok)", key="m_pending")
+
+    # ===== TAB 4: Submit =====
+    with tab4:
+        st.caption("Pastikan data sudah benar, lalu submit.")
+
+        if st.button("✅ Submit Laporan", type="primary", use_container_width=True):
+            # ambil data dari session
+            kategori_aktivitas = st.session_state.get("m_kategori", "")
+            is_kunjungan = str(kategori_aktivitas).startswith("🚗")
+            lokasi_input = st.session_state.get("m_lokasi", "") if is_kunjungan else kategori_aktivitas
+            main_deskripsi = st.session_state.get("m_deskripsi", "")
+            sosmed_link = st.session_state.get("m_sosmed", "") if "Digital Marketing" in str(kategori_aktivitas) else ""
+
+            fotos = st.session_state.get("m_fotos", None)
+
+            # validasi ringkas
+            if is_kunjungan and not str(lokasi_input).strip():
+                st.error("Lokasi kunjungan wajib diisi.")
+                return
+            if (not fotos) and (not str(main_deskripsi).strip()):
+                st.error("Deskripsi wajib diisi.")
+                return
+
+            ts = now_ts_str()
+
+            val_kesimpulan = (st.session_state.get("m_kesimpulan") or "-").strip() or "-"
+            val_kendala = (st.session_state.get("m_kendala") or "-").strip() or "-"
+            val_kendala_klien = (st.session_state.get("m_kendala_klien") or "-").strip() or "-"
+            val_pending = (st.session_state.get("m_pending") or "-").strip() or "-"
+            val_feedback = ""
+            val_interest = st.session_state.get("interest_persen") or "-"
+            val_nama_klien = (st.session_state.get("nama_klien_input") or "-").strip() or "-"
+            val_kontak_klien = (st.session_state.get("kontak_klien_input") or "-").strip() or "-"
+
+            rows = []
+            final_lokasi = lokasi_input if is_kunjungan else kategori_aktivitas
+
+            # jika ada foto: bisa buat 1 row per file (seperti desktop), tapi deskripsinya singkat
+            if fotos and KONEKSI_DROPBOX_BERHASIL:
+                for i, f in enumerate(fotos):
+                    url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
+                    desc = st.session_state.get(f"m_desc_{i}", "") or main_deskripsi or "-"
+                    rows.append([
+                        ts, nama_pelapor, final_lokasi, desc,
+                        url, sosmed_link if sosmed_link else "-",
+                        val_kesimpulan, val_kendala, val_kendala_klien,
+                        val_pending, val_feedback, val_interest,
+                        val_nama_klien, val_kontak_klien
+                    ])
+            else:
+                rows.append([
+                    ts, nama_pelapor, final_lokasi, main_deskripsi,
+                    "-", sosmed_link if sosmed_link else "-",
+                    val_kesimpulan, val_kendala, val_kendala_klien,
+                    val_pending, val_feedback, val_interest,
+                    val_nama_klien, val_kontak_klien
+                ])
+
+            ok = simpan_laporan_harian_batch(rows, nama_pelapor)
+            if ok:
+                st.success(f"✅ Laporan tersimpan! Reminder besok: **{val_pending}**")
+                ui_toast("Laporan tersimpan!", icon="✅")
+                st.cache_data.clear()
+                # balik ke Beranda biar terasa app-like
+                set_nav("home")
+            else:
+                st.error("Gagal simpan.")
+
 
 # =========================================================
 # CLOSING DEAL
@@ -2177,7 +2363,27 @@ def render_header():
 </div>
     """
     
-    st.markdown(html, unsafe_allow_html=True)
+st.markdown(html, unsafe_allow_html=True)
+    def render_home_mobile():
+st.markdown("## 🧭 Menu Utama")
+st.caption("Pilih fitur seperti shortcut ala aplikasi mobile.")
+
+features = [
+    {"key": "report",  "icon": "📝", "title": "Laporan Harian", "sub": "Input aktivitas + reminder"},
+    {"key": "kpi",     "icon": "🎯", "title": "Target & KPI",   "sub": "Checklist team & individu"},
+    {"key": "closing", "icon": "🤝", "title": "Closing Deal",   "sub": "Catat deal + export"},
+    {"key": "payment", "icon": "💳", "title": "Pembayaran",     "sub": "DP/Termin/Pelunasan + jatuh tempo"},
+    {"key": "admin",   "icon": "🔐", "title": "Akses Admin",    "sub": "Dashboard + kontrol (butuh login)"},
+]
+
+cols = st.columns(2, gap="medium")
+for i, f in enumerate(features):
+    with cols[i % 2]:
+        with st.container(border=True):
+            st.markdown(f"### {f['icon']} {f['title']}")
+            st.caption(f["sub"])
+            if st.button("Buka", use_container_width=True, key=f"home_open_{f['key']}"):
+                set_nav(f["key"])
 
 
 
@@ -2192,15 +2398,68 @@ if not KONEKSI_GSHEET_BERHASIL:
 if not KONEKSI_DROPBOX_BERHASIL:
     st.warning("⚠️ Dropbox non-aktif. Fitur upload foto/bukti dimatikan.")
 
+# =========================================================
+# ROUTER NAV (untuk mobile ala "Facebook shortcut")
+# =========================================================
+HOME_NAV = "🏠 Beranda"
+
+NAV_MAP = {
+    "home": HOME_NAV,
+    "report": "📝 Laporan Harian",
+    "kpi": "🎯 Target & KPI",
+    "closing": "🤝 Closing Deal",
+    "payment": "💳 Pembayaran",
+    "admin": "📊 Dashboard Admin",
+}
+
+def _get_query_nav():
+    try:
+        # streamlit baru
+        if hasattr(st, "query_params"):
+            return st.query_params.get("nav", None)
+        # streamlit lama
+        qp = st.experimental_get_query_params()
+        return (qp.get("nav", [None])[0])
+    except Exception:
+        return None
+
+def set_nav(nav_key: str):
+    nav_key = nav_key if nav_key in NAV_MAP else "home"
+    try:
+        if hasattr(st, "query_params"):
+            st.query_params["nav"] = nav_key
+        else:
+            st.experimental_set_query_params(nav=nav_key)
+    except Exception:
+        pass
+    st.session_state["menu_nav"] = NAV_MAP[nav_key]
+    st.rerun()
+
+
 # Session defaults
 if "is_admin" not in st.session_state:
     st.session_state["is_admin"] = False
 
 if "menu_nav" not in st.session_state:
-    st.session_state["menu_nav"] = "📝 Laporan Harian"
+    # Mobile masuk Beranda, Desktop tetap ke Laporan Harian (tidak berubah)
+    st.session_state["menu_nav"] = HOME_NAV if IS_MOBILE else "📝 Laporan Harian"
+
+# Sinkronkan kalau URL ada ?nav=...
+nav_from_url = _get_query_nav()
+if nav_from_url in NAV_MAP:
+    st.session_state["menu_nav"] = NAV_MAP[nav_from_url]
+
 
 # Render header
 render_header()
+
+# MOBILE: tampilkan Beranda sebagai landing page
+menu_nav = st.session_state.get("menu_nav", HOME_NAV if IS_MOBILE else "📝 Laporan Harian")
+
+if IS_MOBILE and menu_nav == HOME_NAV:
+    render_home_mobile()
+    st.stop()
+
 
 # =========================================================
 # SIDEBAR (SpaceX-inspired)
@@ -2273,6 +2532,11 @@ menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 # MENU: LAPORAN HARIAN
 # =========================================================
 if menu_nav == "📝 Laporan Harian":
+ if IS_MOBILE:
+ render_laporan_harian_mobile()
+ st.stop()
+ # ===== DESKTOP (kode lama tetap jalan, tidak diubah) =====
+ staff_list = get_daftar_staf_terbaru()
     staff_list = get_daftar_staf_terbaru()
 
     # Top cards: Reminder & last feedback
@@ -2479,6 +2743,17 @@ if menu_nav == "📝 Laporan Harian":
             st.dataframe(df_log, use_container_width=True, hide_index=True)
         else:
             st.info("Kosong")
+
+if IS_MOBILE:
+    st.markdown("""
+    <div class="mobile-bottom-nav">
+      <a href="?nav=home">🏠</a>
+      <a href="?nav=report">📝</a>
+      <a href="?nav=kpi">🎯</a>
+      <a href="?nav=closing">🤝</a>
+      <a href="?nav=payment">💳</a>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =========================================================
@@ -2982,10 +3257,27 @@ elif menu_nav == "💳 Pembayaran":
 # =========================================================
 elif menu_nav == "📊 Dashboard Admin":
     if not st.session_state.get("is_admin", False):
-        st.warning("Akses Dashboard Admin memerlukan login admin.")
+        st.markdown("## 🔐 Login Admin")
+        if st.button("⬅️ Kembali ke Beranda", use_container_width=True):
+            set_nav("home")
+
+        if not admin_secret_configured():
+            st.warning("Admin login belum aktif: set `password_admin_hash` atau `password_admin` di Streamlit Secrets.")
+            st.stop()
+
+        pwd = st.text_input("Password Admin", type="password", key="pwd_admin_mobile")
+        if st.button("Login", use_container_width=True, type="primary"):
+            if verify_admin_password(pwd):
+                st.session_state["is_admin"] = True
+                ui_toast("Login berhasil", icon="✅")
+                st.rerun()
+            else:
+                st.error("Password salah.")
         st.stop()
 
+    # ===== lanjutkan dashboard admin lama (tidak perlu diubah) =====
     st.markdown("## 📊 Dashboard Produktivitas")
+    ...
     st.info("Dashboard ini memisahkan analisa antara Sales dan Marketing.")
 
     if st.button("🔄 Refresh Data", use_container_width=True):
