@@ -1795,7 +1795,7 @@ def render_laporan_harian_mobile():
         st.text_input("📞 No HP/WA Klien", key="kontak_klien_input")
         st.text_input("📌 Next Plan / Pending (Reminder Besok)", key="m_pending")
 
-    # ===== TAB 4: Submit =====
+# ===== TAB 4: Submit =====
     with tab4:
         st.caption("Pastikan data sudah benar, lalu submit.")
 
@@ -2394,33 +2394,25 @@ def render_home_mobile():
             with st.container(border=True):
                 st.markdown(f"### {f['icon']} {f['title']}")
                 st.caption(f["sub"])
-                
-                # [PERUBAHAN PENTING DISINI]
-                # Menggunakan 'on_click' membuat navigasi tereksekusi 
-                # SEBELUM halaman dimuat ulang, jadi terasa instan.
-                st.button(
-                    "Buka", 
-                    use_container_width=True, 
-                    key=f"home_open_{f['key']}",
-                    on_click=set_nav,      # Panggil fungsi navigasi
-                    args=(f["key"],)       # Kirim argumen halaman yang dituju
-                )
+                if st.button("Buka", use_container_width=True, key=f"home_open_{f['key']}"):
+                    set_nav(f["key"])
 
 
 
 # =========================================================
-# APP UI & ROUTER LOGIC (OPTIMIZED FOR MOBILE BACK BUTTON)
+# APP UI
 # =========================================================
-
-# 1. CEK KONEKSI DATABASE
 if not KONEKSI_GSHEET_BERHASIL:
-    st.error("Database Error: GSheet tidak terhubung.")
+    st.error("Database Error.")
     st.stop()
 
+# Small banner for Dropbox status
 if not KONEKSI_DROPBOX_BERHASIL:
     st.warning("⚠️ Dropbox non-aktif. Fitur upload foto/bukti dimatikan.")
 
-# 2. DEFINISI NAVIGASI
+# =========================================================
+# ROUTER NAV (untuk mobile ala "Facebook shortcut")
+# =========================================================
 HOME_NAV = "🏠 Beranda"
 
 NAV_MAP = {
@@ -2432,56 +2424,57 @@ NAV_MAP = {
     "admin": "📊 Dashboard Admin",
 }
 
-# 3. FUNGSI NAVIGASI (Update URL -> Trigger Rerun)
+def _get_query_nav():
+    try:
+        # streamlit baru
+        if hasattr(st, "query_params"):
+            v = st.query_params.get("nav", None)
+            # ✅ normalisasi: kalau list, ambil elemen pertama
+            if isinstance(v, (list, tuple)):
+                return v[0] if v else None
+            return v
+
+        # streamlit lama
+        qp = st.experimental_get_query_params()
+        return (qp.get("nav", [None])[0])
+    except Exception:
+        return None
+
 def set_nav(nav_key: str):
-    """Mengubah URL agar tercatat di history browser (Support Back Button HP)"""
-    # Set default ke home jika key tidak valid
-    if nav_key not in NAV_MAP:
-        nav_key = "home"
-    
-    # Update Query Params (Ini akan memicu Streamlit me-rerun script)
-    st.query_params["nav"] = nav_key
+    nav_key = nav_key if nav_key in NAV_MAP else "home"
+    try:
+        if hasattr(st, "query_params"):
+            st.query_params["nav"] = [nav_key]   # ✅ konsisten dengan format list
+        else:
+            st.experimental_set_query_params(nav=nav_key)
+    except Exception:
+        pass
+    st.session_state["menu_nav"] = NAV_MAP[nav_key]
+    st.rerun()
 
-# 4. BACA URL SEBAGAI 'SOURCE OF TRUTH'
-# Ambil parameter 'nav' dari URL, default ke 'home'
-# Streamlit terbaru mengembalikan string langsung, bukan list
-current_nav_key = st.query_params.get("nav", "home")
 
-# Validasi key dari URL
-if current_nav_key not in NAV_MAP:
-    current_nav_key = "home"
-
-# Sinkronkan Session State dengan URL
-st.session_state["menu_nav"] = NAV_MAP[current_nav_key]
-
-# Session defaults lain
+# Session defaults
 if "is_admin" not in st.session_state:
     st.session_state["is_admin"] = False
 
-# 5. RENDER HEADER (Selalu muncul di semua halaman)
+if "menu_nav" not in st.session_state:
+    # Mobile masuk Beranda, Desktop tetap ke Laporan Harian (tidak berubah)
+    st.session_state["menu_nav"] = HOME_NAV if IS_MOBILE else "📝 Laporan Harian"
+
+# Sinkronkan kalau URL ada ?nav=...
+nav_from_url = _get_query_nav()
+if nav_from_url in NAV_MAP:
+    st.session_state["menu_nav"] = NAV_MAP[nav_from_url]
+
+
+# Render header
 render_header()
 
-# 6. LOGIC HALAMAN UTAMA (FAST RENDER)
-# Ambil menu aktif saat ini
-active_menu = st.session_state["menu_nav"]
+# MOBILE: tampilkan Beranda sebagai landing page
+menu_nav = st.session_state.get("menu_nav", HOME_NAV if IS_MOBILE else "📝 Laporan Harian")
 
-# Jika sedang di HOME (Beranda)
-if active_menu == HOME_NAV:
-    if IS_MOBILE:
-        # Render Menu Mobile
-        render_home_mobile()
-    else:
-        # Jika Desktop, bisa redirect ke Laporan Harian atau tampilkan Home Desktop
-        # Disini kita biarkan user Desktop melihat Laporan Harian sebagai default jika mau
-        # Tapi agar konsisten dengan URL, kita arahkan tombol desktop nanti.
-        # Untuk sekarang, jika desktop buka ?nav=home, kita oper ke report
-        if current_nav_key == "home":
-             st.session_state["menu_nav"] = "📝 Laporan Harian"
-             st.rerun()
-
-    # [PENTING] STOP PROSES DISINI!
-    # Agar saat di Home, aplikasi tidak memuat Sidebar atau Data GSheet yang berat.
-    # Ini yang membuat aplikasi terasa 'Sat-Set' tanpa loading lama.
+if IS_MOBILE and menu_nav == HOME_NAV:
+    render_home_mobile()
     st.stop()
 
 
