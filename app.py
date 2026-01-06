@@ -801,7 +801,7 @@ def render_fb_like_landing():
             </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True  # <--- JANGAN LUPA INI
     )
 
     # Optional: quick tip (ringan & tidak mengubah fitur inti)
@@ -2430,7 +2430,6 @@ def render_header():
             {holding_html}
             <div class="sx-hero-grid">
                 <div class="sx-logo-card">{left_html}</div>
-
                 <div class="sx-hero-center">
                     <div class="sx-title">{APP_TITLE}</div>
                     <div class="sx-subrow">
@@ -2439,12 +2438,11 @@ def render_header():
                         <span class="{pill_dropbox_cls}"><span class="sx-dot"></span>Dropbox: {"ON" if dropbox_on else "OFF"}</span>
                     </div>
                 </div>
-
                 <div class="sx-logo-card">{right_html}</div>
             </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True  # <--- WAJIB ADA INI
     )
 
 
