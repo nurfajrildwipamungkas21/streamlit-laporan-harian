@@ -79,6 +79,9 @@ def inject_global_css():
             --gold:#facc15;
             --amber:#f59e0b;
             --danger:#ef4444;
+
+            /* Beri tahu browser bahwa UI ini dark theme */
+            color-scheme: dark;
         }
 
         /* ---------- App background ---------- */
@@ -393,16 +396,21 @@ def inject_global_css():
             background: rgba(255,255,255,0.06);
             font-size: 14px;
           }
+
+          /* Kurangi efek blur di HP (card form Closing Deal) */
+          div[data-testid="stVerticalBlockBorderWrapper"] > div {
+            backdrop-filter: none !important;
+            background: linear-gradient(
+                180deg,
+                rgba(6, 36, 22, 0.96),
+                rgba(5, 25, 17, 0.98)
+            ) !important;
+          }
         }
 
         /* =========================================
            PATCH KONTRAS TEKS & LOGO (MOBILE + DESKTOP)
            ========================================= */
-
-        /* Beri tahu browser bahwa UI ini dark theme */
-        :root {
-            color-scheme: dark;
-        }
 
         /* 1. Warna label & teks kecil di dalam form Closing Deal */
         div[data-testid="stForm"] label,
@@ -424,16 +432,32 @@ def inject_global_css():
             fill: #ffffff !important;
         }
 
-        /* 4. Kurangi efek blur di HP (background terlalu gelap) */
-        @media (max-width: 768px) {
-            div[data-testid="stVerticalBlockBorderWrapper"] > div {
-                backdrop-filter: none !important;
-                background: linear-gradient(
-                    180deg,
-                    rgba(6, 36, 22, 0.96),
-                    rgba(5, 25, 17, 0.98)
-                ) !important;
-            }
+        /* =========================================
+           PATCH LANJUTAN – KONTRAS TEKS DI DALAM CARD
+           (Riwayat Closing, dst)
+           ========================================= */
+
+        /* Semua teks di dalam card ber-border */
+        div[data-testid="stVerticalBlockBorderWrapper"],
+        div[data-testid="stVerticalBlockBorderWrapper"] p,
+        div[data-testid="stVerticalBlockBorderWrapper"] span,
+        div[data-testid="stVerticalBlockBorderWrapper"] small,
+        div[data-testid="stVerticalBlockBorderWrapper"] li {
+            color: rgba(255, 255, 255, 0.90) !important;
+        }
+
+        /* Teks yang berasal dari st.markdown / st.write */
+        div[data-testid="stMarkdown"],
+        div[data-testid="stMarkdown"] p,
+        div[data-testid="stMarkdown"] span,
+        div[data-testid="stMarkdown"] li,
+        div[data-testid="stMarkdown"] small,
+        div[data-testid="stMarkdownContainer"],
+        div[data-testid="stMarkdownContainer"] p,
+        div[data-testid="stMarkdownContainer"] span,
+        div[data-testid="stMarkdownContainer"] li,
+        div[data-testid="stMarkdownContainer"] small {
+            color: rgba(255, 255, 255, 0.90) !important;
         }
 
         </style>
