@@ -54,6 +54,7 @@ st.set_page_config(
 
 # =========================================================
 # GLOBAL STYLE (SpaceX x Muhammadiyah — Elegant, International)
+# WITH HIGH CONTRAST PATCH
 # =========================================================
 def inject_global_css():
     st.markdown(
@@ -192,8 +193,8 @@ def inject_global_css():
         }
 
         /* =========================
-           HERO HEADER (Custom)
-           ========================= */
+            HERO HEADER (Custom)
+            ========================= */
         .sx-hero{
             position: relative;
             border-radius: 20px;
@@ -325,8 +326,8 @@ def inject_global_css():
         .sx-pill.off .sx-dot{ background: rgba(239,68,68,0.95); }
 
         /* =========================
-           Sidebar Nav (SpaceX-like)
-           ========================= */
+            Sidebar Nav (SpaceX-like)
+            ========================= */
         .sx-nav{
             margin-top: 0.25rem;
         }
@@ -352,49 +353,90 @@ def inject_global_css():
         }
 
         /* ==================================================
-           MOBILE ONLY (<=768px) - tidak mengubah desktop
-           ================================================== */
+            MOBILE ONLY (<=768px) - tidak mengubah desktop
+            ================================================== */
         @media (max-width: 768px){
-          /* Sidebar disembunyikan di HP */
-          section[data-testid="stSidebar"] { display: none !important; }
+            /* Sidebar disembunyikan di HP */
+            section[data-testid="stSidebar"] { display: none !important; }
 
-          /* Padding konten dipersempit */
-          .block-container { padding-left: 1rem !important; padding-right: 1rem !important; }
+            /* Padding konten dipersempit */
+            .block-container { padding-left: 1rem !important; padding-right: 1rem !important; }
 
-          /* Hero dibuat lebih ringkas */
-          .sx-title { font-size: 1.35rem !important; }
-          .sx-hero-grid { grid-template-columns: 1fr !important; }
+            /* Hero dibuat lebih ringkas */
+            .sx-title { font-size: 1.35rem !important; }
+            .sx-hero-grid { grid-template-columns: 1fr !important; }
 
-          /* Logo kiri/kanan dimatikan di HP biar tidak makan tempat */
-          .sx-logo-card { display:none !important; }
-          @media (max-width: 768px){
-  .mobile-bottom-nav{
-    position: fixed;
-    left: 0; right: 0; bottom: 0;
-    padding: 10px 12px;
-    background: rgba(0,0,0,0.75);
-    border-top: 1px solid rgba(255,255,255,0.12);
-    display: flex;
-    justify-content: space-around;
-    gap: 8px;
-    z-index: 9999;
-    backdrop-filter: blur(10px);
-  }
-  .mobile-bottom-nav a{
-    text-decoration:none;
-    color: rgba(255,255,255,0.92);
-    padding: 8px 10px;
-    border-radius: 12px;
-    border: 1px solid rgba(255,255,255,0.12);
-    background: rgba(255,255,255,0.06);
-    font-size: 14px;
-  }
-  /* biar konten tidak ketutup bottom nav */
-  .block-container{ padding-bottom: 80px !important; }
-}
+            /* Logo kiri/kanan dimatikan di HP biar tidak makan tempat */
+            .sx-logo-card { display:none !important; }
 
+            .mobile-bottom-nav{
+                position: fixed;
+                left: 0; right: 0; bottom: 0;
+                padding: 10px 12px;
+                background: rgba(0,0,0,0.75);
+                border-top: 1px solid rgba(255,255,255,0.12);
+                display: flex;
+                justify-content: space-around;
+                gap: 8px;
+                z-index: 9999;
+                backdrop-filter: blur(10px);
+            }
+            .mobile-bottom-nav a{
+                text-decoration:none;
+                color: rgba(255,255,255,0.92);
+                padding: 8px 10px;
+                border-radius: 12px;
+                border: 1px solid rgba(255,255,255,0.12);
+                background: rgba(255,255,255,0.06);
+                font-size: 14px;
+            }
+            /* biar konten tidak ketutup bottom nav */
+            .block-container{ padding-bottom: 80px !important; }
         }
 
+        /* =========================================
+           PATCH KONTRAS TEKS & LOGO (MOBILE + DESKTOP)
+           Tambahkan di PALING BAWAH <style> yang sudah ada
+           ========================================= */
+
+        /* Beri tahu browser bahwa UI ini dark theme */
+        :root {
+            color-scheme: dark;
+        }
+
+        /* 1. Warna label & teks kecil di dalam form Closing Deal */
+        div[data-testid="stForm"] label,
+        div[data-testid="stForm"] p {
+            color: rgba(255, 255, 255, 0.9) !important;
+        }
+
+        /* 2. Warna teks judul field di dalam kartu form (jaga-jaga) */
+        div[data-testid="stVerticalBlockBorderWrapper"] label,
+        div[data-testid="stVerticalBlockBorderWrapper"] p {
+            color: rgba(255, 255, 255, 0.88) !important;
+        }
+
+        /* 3. (Opsional) Biar icon / logo tidak nyaru di navbar / header custom */
+        .sx-nav button,
+        .sx-nav svg,
+        .sx-nav span {
+            color: #ffffff !important;
+            fill: #ffffff !important;
+        }
+
+        /* 4. (Opsional tapi direkomendasikan) Kurangi efek blur di HP
+              yang bikin background makin gelap sehingga teks kelihatan pudar */
+        @media (max-width: 768px) {
+            div[data-testid="stVerticalBlockBorderWrapper"] > div {
+                backdrop-filter: none !important;
+                /* ganti dengan background gelap biasa tapi tetap transparan tipis */
+                background: linear-gradient(
+                    180deg,
+                    rgba(6, 36, 22, 0.96),
+                    rgba(5, 25, 17, 0.98)
+                ) !important;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True
