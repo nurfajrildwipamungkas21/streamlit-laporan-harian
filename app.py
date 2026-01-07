@@ -3514,7 +3514,26 @@ elif menu_nav == "💳 Pembayaran":
                 else:
                     st.error("Pilih file dulu.")
 
-else:
+# 5. MENU: ADMIN
+elif menu_nav == "📊 Dashboard Admin":
+    if IS_MOBILE:
+        render_admin_mobile()
+    else:
+        # --- LOGIC DESKTOP ---
+        if not st.session_state["is_admin"]:
+            # Tampilan Login
+            c_login1, c_login2, c_login3 = st.columns([1, 1, 1])
+            with c_login2:
+                with st.container(border=True):
+                    st.markdown("### 🔐 Login Admin")
+                    pwd = st.text_input("Password", type="password", key="desk_adm_pwd")
+                    if st.button("Login Masuk", use_container_width=True, type="primary"):
+                        if verify_admin_password(pwd):
+                            st.session_state["is_admin"] = True
+                            st.rerun()
+                        else:
+                            st.error("Password salah.")
+        else:
             # =========================================================
             # DASHBOARD ADMIN DESKTOP (INTEGRASI FULL FITUR)
             # =========================================================
@@ -3593,8 +3612,11 @@ else:
 
                         if not df_digital.empty:
                             if HAS_PLOTLY:
-                                fig = px.pie(df_digital, names=COL_NAMA, title="Distribusi Beban Kerja", hole=0.4)
-                                st.plotly_chart(fig, use_container_width=True)
+                                try:
+                                    fig = px.pie(df_digital, names=COL_NAMA, title="Distribusi Beban Kerja", hole=0.4)
+                                    st.plotly_chart(fig, use_container_width=True)
+                                except:
+                                    st.bar_chart(df_digital[COL_NAMA].value_counts(), color="#facc15")
                             else:
                                 st.bar_chart(df_digital[COL_NAMA].value_counts(), color="#facc15")
 
@@ -3680,13 +3702,15 @@ else:
 
                             st.divider()
                             
-                            # Kotak Masalah & Hasil (Grid 3 Kolom)
-                            r1, r2, r3 = st.columns(3)
+                            # Kotak Masalah & Hasil (Grid 4 Kolom - Termasuk Kendala Klien)
+                            r1, r2, r3, r4 = st.columns(4)
                             with r1:
                                 st.info(f"💡 **Hasil:**\n\n{row.get(COL_KESIMPULAN, '-')}")
                             with r2:
-                                st.warning(f"🚧 **Kendala:**\n\nInternal: {row.get(COL_KENDALA, '-')}\n\nKlien: {row.get(COL_KENDALA_KLIEN, '-')}")
+                                st.warning(f"🚧 **Internal:**\n\n{row.get(COL_KENDALA, '-')}")
                             with r3:
+                                st.warning(f"🧑‍💼 **Klien:**\n\n{row.get(COL_KENDALA_KLIEN, '-')}")
+                            with r4:
                                 st.error(f"📌 **Pending:**\n\n{row.get(COL_PENDING, '-')}")
 
                             # Lihat Foto
@@ -3718,6 +3742,7 @@ else:
                 if df_all.empty or COL_LINK_FOTO not in df_all.columns:
                     st.info("Data kosong.")
                 else:
+                    # Filter link http valid
                     df_foto = df_all[df_all[COL_LINK_FOTO].astype(str).str.contains("http", na=False, case=False)]
                     df_foto = df_foto.sort_values(by=COL_TIMESTAMP, ascending=False).head(20)
                     
@@ -3775,6 +3800,18 @@ else:
                         st.markdown("#### ⚙️ Config Team")
                         df_tm = load_team_config()
                         st.dataframe(df_tm, use_container_width=True, hide_index=True)
+                        
+                        with st.form("desk_add_team"):
+                            t_name = st.text_input("Nama Team")
+                            t_pos = st.text_input("Posisi")
+                            t_mem = st.text_area("Anggota (1 per baris)")
+                            if st.form_submit_button("Simpan Team"):
+                                members = [m.strip() for m in t_mem.splitlines() if m.strip()]
+                                if t_name and members:
+                                    tambah_team_baru(t_name, t_pos, members)
+                                    st.success("Team Tersimpan")
+                                    st.cache_data.clear()
+                                    st.rerun()
 
 
 # =========================================================
