@@ -3514,22 +3514,267 @@ elif menu_nav == "💳 Pembayaran":
                 else:
                     st.error("Pilih file dulu.")
 
-# 5. MENU: ADMIN
-elif menu_nav == "📊 Dashboard Admin":
-    if IS_MOBILE:
-        render_admin_mobile()
-    else:
-        # --- LOGIC DESKTOP (Existing) ---
-        if not st.session_state["is_admin"]:
-            pwd = st.text_input("Password Admin", type="password")
-            if st.button("Login"):
-                if verify_admin_password(pwd):
-                    st.session_state["is_admin"] = True
-                    st.rerun()
-        else:
-            st.markdown("## 📊 Dashboard Produktivitas")
-            st.info("Dashboard desktop view...")
-            # (Masukkan logic dashboard admin desktop Anda di sini)
+else:
+            # =========================================================
+            # DASHBOARD ADMIN DESKTOP (INTEGRASI FULL FITUR)
+            # =========================================================
+            st.markdown("## 📊 Dashboard & Monitoring (Desktop)")
+            
+            # Helper Kategori (Lokal untuk Dashboard)
+            def get_category_dashboard(val):
+                val_str = str(val)
+                keywords_digital = ["Digital", "Marketing", "Konten", "Ads", "Telesales", "Admin", "Follow"]
+                if any(k in val_str for k in keywords_digital):
+                    return "Digital/Internal"
+                return "Kunjungan Lapangan"
+
+            # 1. Load Data
+            staff_list = get_daftar_staf_terbaru()
+            df_all = load_all_reports(staff_list)
+
+            # 2. Pre-processing Data
+            if not df_all.empty:
+                try:
+                    # Pastikan format datetime aman
+                    df_all[COL_TIMESTAMP] = pd.to_datetime(df_all[COL_TIMESTAMP], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+                    df_all["Tanggal_Date"] = df_all[COL_TIMESTAMP].dt.date
+                    df_all["Kategori"] = df_all[COL_TEMPAT].apply(get_category_dashboard)
+                except Exception:
+                    df_all["Tanggal_Date"] = datetime.now(tz=TZ_JKT).date()
+                    df_all["Kategori"] = "Umum"
+
+            # 3. Navigasi Tab Dashboard
+            tab_prod, tab_leads, tab_review, tab_galeri, tab_data, tab_config = st.tabs([
+                "📈 Produktivitas", 
+                "🧲 Leads & Interest", 
+                "💬 Review & Feedback", 
+                "🖼️ Galeri Bukti", 
+                "📦 Master Data", 
+                "⚙️ Config Staff"
+            ])
+
+            # --- TAB 1: PRODUKTIVITAS ---
+            with tab_prod:
+                st.markdown("### 🚀 Analisa Kinerja Tim")
+                
+                if df_all.empty:
+                    st.info("Belum ada data laporan masuk.")
+                else:
+                    # Filter Rentang Waktu
+                    c_fil1, c_fil2 = st.columns([1, 4])
+                    with c_fil1:
+                        days_opt = st.selectbox("Rentang Waktu:", [7, 14, 30, 60, 90], index=0, key="desk_prod_days")
+                    
+                    start_date = datetime.now(tz=TZ_JKT).date() - timedelta(days=days_opt)
+                    df_filt = df_all[df_all["Tanggal_Date"] >= start_date].copy()
+
+                    # Split Data
+                    df_sales = df_filt[df_filt["Kategori"] == "Kunjungan Lapangan"]
+                    df_digital = df_filt[df_filt["Kategori"] == "Digital/Internal"]
+
+                    # Visualisasi Sales
+                    with st.container(border=True):
+                        st.markdown("#### 🚗 Performance Sales (Lapangan)")
+                        k1, k2, k3 = st.columns(3)
+                        k1.metric("Total Kunjungan", len(df_sales))
+                        k2.metric("Sales Aktif", df_sales[COL_NAMA].nunique())
+                        k3.metric("Rata-rata/Hari", f"{len(df_sales)/days_opt:.1f}")
+                        
+                        if not df_sales.empty:
+                            st.bar_chart(df_sales[COL_NAMA].value_counts(), color="#16a34a")
+
+                    # Visualisasi Digital
+                    with st.container(border=True):
+                        st.markdown("#### 💻 Performance Digital & Internal")
+                        d1, d2, d3 = st.columns(3)
+                        d1.metric("Total Output", len(df_digital))
+                        d2.metric("Staf Aktif", df_digital[COL_NAMA].nunique())
+                        d3.metric("Rata-rata/Hari", f"{len(df_digital)/days_opt:.1f}")
+
+                        if not df_digital.empty:
+                            if HAS_PLOTLY:
+                                fig = px.pie(df_digital, names=COL_NAMA, title="Distribusi Beban Kerja", hole=0.4)
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.bar_chart(df_digital[COL_NAMA].value_counts(), color="#facc15")
+
+            # --- TAB 2: LEADS (FILTER INTEREST) ---
+            with tab_leads:
+                st.markdown("### 🧲 Database Leads (Klien)")
+                st.caption("Filter dan download data klien berdasarkan tingkat ketertarikan.")
+
+                if df_all.empty:
+                    st.info("Data kosong.")
+                else:
+                    if COL_INTEREST not in df_all.columns:
+                        st.warning("Kolom Interest belum tersedia di database.")
+                    else:
+                        # Session state untuk filter agar tidak reset saat klik download
+                        if "desk_filter_int" not in st.session_state:
+                            st.session_state["desk_filter_int"] = "Under 50% (A)"
+
+                        # Tombol Filter Cepat
+                        b1, b2, b3 = st.columns(3)
+                        if b1.button("Tarik: Under 50% (A)", use_container_width=True):
+                            st.session_state["desk_filter_int"] = "Under 50% (A)"
+                        if b2.button("Tarik: 50-75% (B)", use_container_width=True):
+                            st.session_state["desk_filter_int"] = "50-75% (B)"
+                        if b3.button("Tarik: 75%-100%", use_container_width=True):
+                            st.session_state["desk_filter_int"] = "75%-100%"
+                        
+                        sel_int = st.session_state["desk_filter_int"]
+                        
+                        # Filtering
+                        df_show = df_all.copy()
+                        df_show[COL_INTEREST] = df_show[COL_INTEREST].astype(str).str.strip()
+                        df_leads = df_show[df_show[COL_INTEREST] == sel_int].copy()
+
+                        with st.container(border=True):
+                            st.success(f"📂 Menampilkan Data: **{sel_int}** (Total: {len(df_leads)})")
+                            
+                            cols_display = [c for c in [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_TEMPAT, COL_DESKRIPSI, COL_KENDALA_KLIEN] if c in df_leads.columns]
+                            st.dataframe(df_leads[cols_display], use_container_width=True, hide_index=True)
+
+                            # Tombol Download
+                            c_ex, c_csv = st.columns(2)
+                            safe_name = sel_int.replace("%", "").replace(" ", "_").replace("/", "")
+                            
+                            with c_ex:
+                                if HAS_OPENPYXL:
+                                    xb = df_to_excel_bytes(df_leads[cols_display], sheet_name="Leads", wrap_cols=[COL_DESKRIPSI, COL_TEMPAT])
+                                    if xb:
+                                        st.download_button(f"⬇️ Download Excel ({sel_int})", data=xb, file_name=f"leads_{safe_name}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                            with c_csv:
+                                csv_data = df_leads[cols_display].to_csv(index=False).encode('utf-8')
+                                st.download_button(f"⬇️ Download CSV ({sel_int})", data=csv_data, file_name=f"leads_{safe_name}.csv", mime="text/csv", use_container_width=True)
+
+            # --- TAB 3: REVIEW & FEEDBACK ---
+            with tab_review:
+                st.markdown("### 📝 Review Laporan & Kirim Feedback")
+                if df_all.empty:
+                    st.info("Data kosong.")
+                else:
+                    # Urutkan dari terbaru
+                    df_rev = df_all.sort_values(by=COL_TIMESTAMP, ascending=False).head(50)
+                    
+                    for i, row in df_rev.iterrows():
+                        with st.container(border=True):
+                            # Header Card
+                            c_h1, c_h2 = st.columns([4, 1])
+                            with c_h1:
+                                st.markdown(f"**{row.get(COL_NAMA, '-')}** | 📅 {row.get(COL_TIMESTAMP, '-')}")
+                                st.caption(f"📍 {row.get(COL_TEMPAT, '-')} ({row.get('Kategori', '-')})")
+                            with c_h2:
+                                intr = row.get(COL_INTEREST, "-")
+                                if intr and intr != "-" and intr != "":
+                                    st.markdown(f"🔥 `{intr}`")
+
+                            # Body Card
+                            st.markdown(f"📄 **Aktivitas:** {row.get(COL_DESKRIPSI, '-')}")
+                            
+                            # Info Klien
+                            klien = row.get(COL_NAMA_KLIEN, "-")
+                            hp = row.get(COL_KONTAK_KLIEN, "-")
+                            if klien not in ["-", ""] or hp not in ["-", ""]:
+                                st.markdown(f"👤 **Klien:** {klien} | 📞 `{hp}`")
+
+                            st.divider()
+                            
+                            # Kotak Masalah & Hasil (Grid 3 Kolom)
+                            r1, r2, r3 = st.columns(3)
+                            with r1:
+                                st.info(f"💡 **Hasil:**\n\n{row.get(COL_KESIMPULAN, '-')}")
+                            with r2:
+                                st.warning(f"🚧 **Kendala:**\n\nInternal: {row.get(COL_KENDALA, '-')}\n\nKlien: {row.get(COL_KENDALA_KLIEN, '-')}")
+                            with r3:
+                                st.error(f"📌 **Pending:**\n\n{row.get(COL_PENDING, '-')}")
+
+                            # Lihat Foto
+                            link_foto = str(row.get(COL_LINK_FOTO, ""))
+                            if "http" in link_foto:
+                                with st.expander("🖼️ Lihat Bukti Foto"):
+                                    direct_url = link_foto.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                                    st.image(direct_url, width=300)
+                                    st.caption(f"Link: {link_foto}")
+
+                            # Input Feedback
+                            existing_fb = row.get(COL_FEEDBACK, "")
+                            with st.expander(f"💬 Beri Feedback ({row.get(COL_NAMA)})", expanded=False):
+                                uk = f"fb_desk_{i}_{row.get(COL_TIMESTAMP)}"
+                                fb_in = st.text_area("Tulis Masukan/Arahan:", value=str(existing_fb), key=uk)
+                                if st.button("Kirim Feedback 🚀", key=f"btn_{uk}"):
+                                    ts_val = row.get(COL_TIMESTAMP)
+                                    ts_str = ts_val.strftime("%d-%m-%Y %H:%M:%S") if hasattr(ts_val, "strftime") else str(ts_val)
+                                    ok, msg = kirim_feedback_admin(row.get(COL_NAMA), ts_str, fb_in)
+                                    if ok:
+                                        st.success("Terkirim!")
+                                        st.cache_data.clear()
+                                    else:
+                                        st.error(msg)
+
+            # --- TAB 4: GALERI ---
+            with tab_galeri:
+                st.markdown("### 🖼️ Galeri Aktivitas (Live View)")
+                if df_all.empty or COL_LINK_FOTO not in df_all.columns:
+                    st.info("Data kosong.")
+                else:
+                    df_foto = df_all[df_all[COL_LINK_FOTO].astype(str).str.contains("http", na=False, case=False)]
+                    df_foto = df_foto.sort_values(by=COL_TIMESTAMP, ascending=False).head(20)
+                    
+                    if df_foto.empty:
+                        st.warning("Tidak ada foto ditemukan.")
+                    else:
+                        cols = st.columns(4)
+                        for idx, row in enumerate(df_foto.to_dict("records")):
+                            with cols[idx % 4]:
+                                with st.container(border=True):
+                                    url_asli = str(row.get(COL_LINK_FOTO, ""))
+                                    direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                                    try:
+                                        st.image(direct_url, use_container_width=True)
+                                        st.caption(f"**{row.get(COL_NAMA)}**\n{row.get(COL_TEMPAT)}")
+                                        st.link_button("Buka Full", url_asli)
+                                    except:
+                                        st.error("Gagal load")
+
+            # --- TAB 5: MASTER DATA ---
+            with tab_data:
+                st.markdown("### 📦 Data Master Laporan")
+                c_refresh, c_down = st.columns([1, 4])
+                with c_refresh:
+                    if st.button("🔄 Refresh Data", key="desk_refresh_master"):
+                        st.cache_data.clear()
+                        st.rerun()
+                
+                st.dataframe(df_all, use_container_width=True, hide_index=True)
+                
+                if HAS_OPENPYXL:
+                    xb = df_to_excel_bytes(df_all, sheet_name="Master_Laporan")
+                    if xb:
+                        st.download_button("⬇️ Download Full Excel", data=xb, file_name="master_laporan_harian.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            # --- TAB 6: CONFIG ---
+            with tab_config:
+                c1, c2 = st.columns(2)
+                with c1:
+                    with st.container(border=True):
+                        st.markdown("#### 👥 Manajemen Staf")
+                        st.dataframe(pd.DataFrame({"Nama Terdaftar": staff_list}), use_container_width=True, hide_index=True)
+                        
+                        with st.form("desk_add_staff"):
+                            new_st = st.text_input("Nama Staf Baru")
+                            if st.form_submit_button("Simpan"):
+                                if new_st:
+                                    tambah_staf_baru(new_st)
+                                    st.success("Tersimpan")
+                                    st.cache_data.clear()
+                                    st.rerun()
+                
+                with c2:
+                    with st.container(border=True):
+                        st.markdown("#### ⚙️ Config Team")
+                        df_tm = load_team_config()
+                        st.dataframe(df_tm, use_container_width=True, hide_index=True)
 
 
 # =========================================================
