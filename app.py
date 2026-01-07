@@ -2594,62 +2594,117 @@ if IS_MOBILE and menu_nav != "📝 Laporan Harian":
 # FUNGSI RENDER MOBILE PER FITUR (BARU)
 # =========================================================
 def render_kpi_mobile():
-    st.markdown("### 🎯 Target & KPI (Mobile)")
-    
-    tab1, tab2 = st.tabs(["🏆 Team", "⚡ Individu"])
-    
+    st.markdown("### 🎯 Target & KPI (Full Mobile)")
+
+    # Gunakan Tabs seperti Desktop agar fitur lengkap
+    tab1, tab2, tab3 = st.tabs(["🏆 Team", "⚡ Individu", "⚙️ Admin"])
+
+    # --- TAB 1: TEAM ---
     with tab1:
-        st.caption("Checklist Target Team")
+        st.caption("Checklist & Upload Bukti Team")
         df_team = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
+        
         if not df_team.empty:
-            # Tampilan simple card untuk mobile
-            for idx, row in df_team.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"**{row['Misi']}**")
-                    st.caption(f"📅 {row.get('Tgl_Selesai','-')}")
-                    checked = st.checkbox("Selesai?", value=row["Status"], key=f"mob_team_{idx}")
-                    if checked != row["Status"]:
-                        df_team.at[idx, "Status"] = checked
-                        # Auto save change logic could be added here, 
-                        # but for simplicity we assume manual save or direct update
-                        st.info("Perubahan status perlu disimpan via tombol save di bawah (jika ada).")
+            # 1. Editor (Bisa Edit Status/Text)
+            edited_team = render_hybrid_table(df_team, "mob_team_tbl", "Misi")
             
-            # Note: Editing full table di mobile agak sulit, 
-            # disarankan hanya view atau simple checklist.
-            st.dataframe(df_team, use_container_width=True, hide_index=True)
+            # Tombol Simpan
+            if st.button("💾 Simpan Perubahan (Team)", use_container_width=True, key="mob_btn_save_team"):
+                actor = get_actor_fallback(default="Admin")
+                final_df = apply_audit_checklist_changes(df_team, edited_team, ["Misi"], actor)
+                if save_checklist(SHEET_TARGET_TEAM, final_df, TEAM_CHECKLIST_COLUMNS):
+                    st.success("Tersimpan!")
+                    st.rerun()
+
+            st.divider()
+            
+            # 2. Upload Bukti (Fitur Desktop dibawa ke HP)
+            with st.expander("📂 Upload Bukti / Catatan"):
+                sel_misi = st.selectbox("Pilih Misi", df_team["Misi"].unique(), key="mob_sel_misi")
+                note_misi = st.text_area("Catatan", key="mob_note_misi")
+                file_misi = st.file_uploader("File", key="mob_file_misi")
+                
+                if st.button("Update Bukti", use_container_width=True, key="mob_upd_team"):
+                    actor = get_actor_fallback()
+                    res, msg = update_evidence_row(SHEET_TARGET_TEAM, sel_misi, note_misi, file_misi, actor, "Team")
+                    if res: st.success("Updated!"); st.rerun()
+                    else: st.error(msg)
         else:
             st.info("Belum ada target team.")
 
+    # --- TAB 2: INDIVIDU ---
     with tab2:
-        st.caption("Checklist Individu")
-        # Logic individu sederhana
+        st.caption("Target Individu")
         staff = get_daftar_staf_terbaru()
-        filter_nama = st.selectbox("Filter Nama:", staff, key="mob_kpi_filter")
-        df_indiv = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
-        if not df_indiv.empty:
-            df_user = df_indiv[df_indiv["Nama"] == filter_nama]
-            if not df_user.empty:
-                st.dataframe(df_user[["Target", "Status", "Tgl_Selesai"]], use_container_width=True, hide_index=True)
-            else:
-                st.info("Kosong.")
+        filter_nama = st.selectbox("Filter Nama:", staff, key="mob_indiv_filter")
+        
+        df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
+        df_user = df_indiv_all[df_indiv_all["Nama"] == filter_nama]
+        
+        if not df_user.empty:
+            edited_indiv = render_hybrid_table(df_user, f"mob_indiv_{filter_nama}", "Target")
+            
+            if st.button(f"💾 Simpan ({filter_nama})", use_container_width=True, key="mob_save_indiv"):
+                df_merged = df_indiv_all.copy()
+                df_merged.update(edited_indiv)
+                final_df = apply_audit_checklist_changes(df_indiv_all, df_merged, ["Nama", "Target"], filter_nama)
+                save_checklist(SHEET_TARGET_INDIVIDU, final_df, INDIV_CHECKLIST_COLUMNS)
+                st.success("Tersimpan!")
+                st.rerun()
+            
+            # Upload Bukti Individu
+            with st.expander(f"📂 Update Bukti ({filter_nama})"):
+                pilih_target = st.selectbox("Target:", df_user["Target"].tolist(), key="mob_sel_indiv")
+                note_target = st.text_area("Catatan", key="mob_note_indiv")
+                file_target = st.file_uploader("File", key="mob_file_indiv")
+                if st.button("Update Pribadi", use_container_width=True, key="mob_upd_indiv"):
+                    res, msg = update_evidence_row(SHEET_TARGET_INDIVIDU, pilih_target, note_target, file_target, filter_nama, "Individu")
+                    if res: st.success("Updated!"); st.rerun()
+                    else: st.error(msg)
         else:
-            st.info("Data kosong.")
+            st.info("Kosong.")
+
+    # --- TAB 3: ADMIN (Fitur Tambah Target) ---
+    with tab3:
+        st.markdown("#### ➕ Tambah Target Baru")
+        jenis_t = st.radio("Jenis", ["Team", "Individu"], horizontal=True, key="mob_jenis_target")
+        
+        with st.form("mob_add_kpi"):
+            target_text = st.text_area("Isi Target (1 per baris)", height=100)
+            c1, c2 = st.columns(2)
+            t_mulai = c1.date_input("Mulai", value=datetime.now())
+            t_selesai = c2.date_input("Selesai", value=datetime.now()+timedelta(days=30))
+            
+            nama_target = ""
+            if jenis_t == "Individu":
+                nama_target = st.selectbox("Staf:", get_daftar_staf_terbaru(), key="mob_add_staf_target")
+            
+            if st.form_submit_button("Tambah Target", use_container_width=True):
+                targets = clean_bulk_input(target_text)
+                sheet = SHEET_TARGET_TEAM if jenis_t == "Team" else SHEET_TARGET_INDIVIDU
+                base = ["", str(t_mulai), str(t_selesai), "FALSE", "-"]
+                if jenis_t == "Individu": base = [nama_target] + base
+                
+                if add_bulk_targets(sheet, base, targets):
+                    st.success("Berhasil!")
+                    st.rerun()
+                else:
+                    st.error("Gagal.")
 
 def render_closing_mobile():
-    st.markdown("### 🤝 Closing Deal (Mobile)")
+    st.markdown("### 🤝 Closing Deal (Full Mobile)")
     
-    with st.expander("➕ Input Deal Baru", expanded=True):
+    # Form Input Tetap Sama
+    with st.expander("➕ Input Deal Baru", expanded=False):
         with st.form("mob_form_closing"):
+            cd_group = st.text_input("Nama Group (Opsional)")
             cd_marketing = st.selectbox("Nama Marketing", get_daftar_staf_terbaru())
             cd_tgl = st.date_input("Tanggal Event")
-            cd_bidang = st.text_input("Bidang", placeholder="F&B / Wedding / dll")
+            cd_bidang = st.text_input("Bidang", placeholder="F&B / Wedding")
             cd_nilai = st.text_input("Nilai (Rp)", placeholder="Contoh: 15jt")
             
             if st.form_submit_button("Simpan Deal", type="primary", use_container_width=True):
-                # [OPTIMASI 1]: Tambahkan spinner agar user tau proses sedang berjalan
-                with st.spinner("Menyimpan data..."):
-                    res, msg = tambah_closing_deal("-", cd_marketing, cd_tgl, cd_bidang, cd_nilai)
-                    
+                res, msg = tambah_closing_deal(cd_group, cd_marketing, cd_tgl, cd_bidang, cd_nilai)
                 if res:
                     st.success(msg)
                     st.cache_data.clear()
@@ -2659,90 +2714,231 @@ def render_closing_mobile():
                     st.error(msg)
     
     st.divider()
-    st.markdown("#### 📋 Riwayat Closing (5 Terakhir)")
+    st.markdown("#### 📋 Riwayat Lengkap & Download")
     
-    # Load data hanya saat diperlukan
     df_cd = load_closing_deal()
     
     if not df_cd.empty:
-        # [OPTIMASI 2]: Ubah head(10) jadi head(5) agar rendering di HP enteng
-        df_display = df_cd.sort_index(ascending=False).head(5) 
+        # 1. Tampilkan Statistik Singkat
+        tot = df_cd[COL_NILAI_KONTRAK].sum() if COL_NILAI_KONTRAK in df_cd.columns else 0
+        st.metric("Total Closing", format_rupiah_display(tot))
         
-        for _, row in df_display.iterrows():
-            with st.container(border=True):
-                nominal = format_rupiah_display(row[COL_NILAI_KONTRAK])
-                st.markdown(f"💰 **{nominal}**")
-                st.caption(f"👤 {row[COL_MARKETING]} | 📅 {row[COL_TGL_EVENT]}")
-                st.text(f"Bidang: {row[COL_BIDANG]}")
+        # 2. Tampilkan Semua Data (Tanpa batasan .head)
+        st.dataframe(df_cd, use_container_width=True, hide_index=True)
         
-        # [OPTIMASI 3]: Beritahu user jika ada data yang disembunyikan
-        sisa_data = len(df_cd) - 5
-        if sisa_data > 0:
-            st.caption(f"ℹ️ {sisa_data} data lama disembunyikan agar aplikasi cepat. Buka di Laptop/PC untuk lihat semua.")
+        # 3. Fitur Download (Excel & CSV) - Diaktifkan di Mobile
+        c1, c2 = st.columns(2)
+        with c1:
+            if HAS_OPENPYXL:
+                xb = df_to_excel_bytes(df_cd, sheet_name="Closing")
+                if xb:
+                    st.download_button("⬇️ Excel", data=xb, file_name="closing_mob.xlsx", 
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                                       use_container_width=True)
+        with c2:
+            csv = df_cd.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇️ CSV", data=csv, file_name="closing_mob.csv", 
+                               mime="text/csv", use_container_width=True)
+
+        # 4. Grafik (Jika ada Plotly)
+        if HAS_PLOTLY:
+            with st.expander("📊 Lihat Grafik Performance"):
+                try:
+                    df_plot = df_cd.copy()
+                    df_plot[COL_NILAI_KONTRAK] = df_plot[COL_NILAI_KONTRAK].fillna(0).astype(int)
+                    fig = px.bar(df_plot, x=COL_MARKETING, y=COL_NILAI_KONTRAK, color=COL_BIDANG,
+                                 title="Total per Marketing")
+                    st.plotly_chart(fig, use_container_width=True)
+                except: pass
     else:
         st.info("Belum ada data.")
 
 def render_payment_mobile():
-    st.markdown("### 💳 Pembayaran (Mobile)")
+    st.markdown("### 💳 Pembayaran (Full Mobile)")
     
-    with st.expander("➕ Input Pembayaran", expanded=True):
+    # Input Baru
+    with st.expander("➕ Input Pembayaran Baru", expanded=False):
         with st.form("mob_form_pay"):
-            p_marketing = st.selectbox("Nama Marketing", get_daftar_staf_terbaru())
-            p_nominal = st.text_input("Nominal (Rp)", placeholder="Contoh: 5jt")
+            p_group = st.text_input("Group")
+            p_marketing = st.selectbox("Marketing", get_daftar_staf_terbaru())
+            p_nominal = st.text_input("Nominal (Rp)")
             p_jenis = st.selectbox("Jenis", ["DP", "Pelunasan", "Termin"])
             p_jatuh_tempo = st.date_input("Jatuh Tempo")
             p_status = st.checkbox("Sudah Dibayar?")
+            p_bukti = st.file_uploader("Upload Bukti", disabled=not KONEKSI_DROPBOX_BERHASIL)
             
             if st.form_submit_button("Simpan", type="primary", use_container_width=True):
-                # [OPTIMASI 4]: Spinner untuk feedback visual
-                with st.spinner("Memproses pembayaran..."):
-                    res, msg = tambah_pembayaran_dp("-", p_marketing, datetime.now(), p_jenis, p_nominal, p_jatuh_tempo, p_status, None, "-")
-                    
+                res, msg = tambah_pembayaran_dp(p_group, p_marketing, datetime.now(), p_jenis, p_nominal, p_jatuh_tempo, p_status, p_bukti, "-")
                 if res:
                     st.success(msg)
                     st.cache_data.clear()
-                    time.sleep(1)
                     st.rerun()
                 else:
                     st.error(msg)
 
     st.divider()
-    st.markdown("#### ⚠️ Alert Jatuh Tempo")
+    
+    # Load Data
     df_pay = load_pembayaran_dp()
     
     if not df_pay.empty:
+        # Alert System
         overdue, due_soon = build_alert_pembayaran(df_pay)
+        if not overdue.empty: st.error(f"⛔ {len(overdue)} Overdue!")
+        if not due_soon.empty: st.warning(f"⚠️ {len(due_soon)} Jatuh Tempo Dekat")
         
-        # [OPTIMASI 5]: Batasi tinggi tabel alert agar tidak memanjang ke bawah
-        if not overdue.empty:
-            st.error(f"{len(overdue)} Overdue!")
-            st.dataframe(overdue[[COL_MARKETING, COL_NOMINAL_BAYAR]], use_container_width=True, height=150)
+        # --- FITUR EDIT DATA DI MOBILE ---
+        st.markdown("#### 📋 Edit Data & Cek Status")
+        st.caption("Anda bisa mengubah Status 'Lunas' atau 'Jatuh Tempo' langsung di sini.")
+        
+        # Siapkan kolom yang bisa diedit
+        df_view = payment_df_for_display(df_pay)
+        editable_cols = {COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR}
+        disabled_cols = [c for c in PAYMENT_COLUMNS if c not in editable_cols]
+
+        edited_pay_mob = st.data_editor(
+            df_view,
+            column_config={
+                COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Lunas?", width="small"),
+                COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", width="medium"),
+                COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True),
+                COL_BUKTI_BAYAR: st.column_config.LinkColumn("Bukti"),
+                COL_TS_UPDATE: st.column_config.TextColumn("Log", disabled=True)
+            },
+            disabled=disabled_cols,
+            hide_index=True,
+            use_container_width=True,
+            key="editor_pay_mobile"
+        )
+        
+        # Tombol Simpan Perubahan
+        if st.button("💾 Simpan Perubahan Data", use_container_width=True, key="btn_save_pay_mob"):
+            df_after = df_pay.copy().set_index(COL_TS_BAYAR, drop=False)
+            ed = edited_pay_mob.copy().set_index(COL_TS_BAYAR, drop=False)
             
-        if not due_soon.empty:
-            st.warning(f"{len(due_soon)} Due Soon")
-            st.dataframe(due_soon[[COL_MARKETING, COL_NOMINAL_BAYAR]], use_container_width=True, height=150)
+            # Apply changes
+            for c in [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR]:
+                if c in ed.columns: df_after.loc[ed.index, c] = ed[c]
             
-        st.markdown("#### 📋 5 Data Terakhir")
-        st.dataframe(df_pay.tail(5), use_container_width=True)
+            df_after = df_after.reset_index(drop=True)
+            actor = get_actor_fallback(default="Mobile User")
+            
+            final_df = apply_audit_payments_changes(df_pay, df_after, actor=actor)
+            if save_pembayaran_dp(final_df):
+                st.success("Data Terupdate!")
+                st.rerun()
+            else:
+                st.error("Gagal simpan.")
+
+        st.divider()
+        
+        # --- FITUR UPLOAD SUSULAN DI MOBILE ---
+        with st.expander("📎 Upload Bukti (Susulan)"):
+            df_pay_reset = df_pay.reset_index(drop=True)
+            opts = [f"{i}. {r[COL_MARKETING]} ({format_rupiah_display(r[COL_NOMINAL_BAYAR])})" for i, r in df_pay_reset.iterrows()]
+            sel_idx = st.selectbox("Pilih Data:", range(len(opts)), format_func=lambda x: opts[x], key="mob_sel_upd_bukti")
+            
+            file_susulan = st.file_uploader("Upload File Baru", key="mob_file_susulan")
+            
+            if st.button("⬆️ Upload Bukti", use_container_width=True, key="mob_btn_upd_bukti"):
+                if file_susulan:
+                    mk_name = df_pay_reset.iloc[sel_idx][COL_MARKETING]
+                    ok, msg = update_bukti_pembayaran_by_index(sel_idx, file_susulan, mk_name, actor="Mobile User")
+                    if ok:
+                        st.success("Berhasil!")
+                        st.rerun()
+                    else: st.error(msg)
     else:
         st.info("Data kosong.")
 
 def render_admin_mobile():
-    st.markdown("### 🔐 Admin Login")
+    st.markdown("### 🔐 Admin Dashboard (Full Mobile)")
+    
+    # 1. Cek Login
     if not st.session_state["is_admin"]:
-        pwd = st.text_input("Password", type="password")
-        if st.button("Login", use_container_width=True):
+        pwd = st.text_input("Password Admin", type="password", key="mob_adm_pwd")
+        if st.button("Login", use_container_width=True, key="mob_adm_login"):
             if verify_admin_password(pwd):
                 st.session_state["is_admin"] = True
                 st.rerun()
             else:
-                st.error("Salah.")
-    else:
-        st.success("Anda Login sebagai Admin")
-        st.info("Fitur Dashboard Admin lengkap disarankan dibuka via Laptop/PC untuk analisa grafik yang lebih baik.")
-        if st.button("Logout", use_container_width=True):
-            st.session_state["is_admin"] = False
-            st.rerun()
+                st.error("Password salah.")
+        return # Stop disini kalau belum login
+
+    # 2. Jika Sudah Login -> Tampilkan Dashboard Penuh
+    if st.button("🔓 Logout", use_container_width=True, key="mob_adm_logout"):
+        st.session_state["is_admin"] = False
+        st.rerun()
+
+    # --- CODE DASHBOARD ADMIN (Versi Compact untuk Mobile) ---
+    
+    # Helper sederhana (copy dari desktop logic)
+    def get_cat(val):
+        s = str(val)
+        if any(k in s for k in ["Digital", "Ads", "Konten"]): return "Digital"
+        return "Sales"
+
+    staff_list = get_daftar_staf_terbaru()
+    df_all = load_all_reports(staff_list)
+    
+    if not df_all.empty:
+        try:
+            df_all[COL_TIMESTAMP] = pd.to_datetime(df_all[COL_TIMESTAMP], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+            df_all["Tgl"] = df_all[COL_TIMESTAMP].dt.date
+            df_all["Kat"] = df_all[COL_TEMPAT].apply(get_cat)
+        except: pass
+
+    # TABS NAVIGATION MOBILE
+    tab_prod, tab_leads, tab_data, tab_cfg = st.tabs(["📈 Grafik", "🧲 Leads", "📦 Data", "⚙️ Config"])
+
+    # A. Tab Produktivitas
+    with tab_prod:
+        st.caption("Analisa Kinerja")
+        if not df_all.empty:
+            days = st.selectbox("Hari Terakhir:", [7, 30, 90], key="mob_adm_days")
+            start_d = datetime.now(tz=TZ_JKT).date() - timedelta(days=days)
+            df_f = df_all[df_all["Tgl"] >= start_d].copy()
+            
+            st.metric("Total Laporan", len(df_f))
+            st.bar_chart(df_f[COL_NAMA].value_counts())
+        else: st.info("No data")
+
+    # B. Tab Leads (Download Excel)
+    with tab_leads:
+        st.caption("Filter & Download Leads")
+        sel_int = st.selectbox("Interest:", ["Under 50% (A)", "50-75% (B)", "75%-100%"], key="mob_adm_int")
+        if not df_all.empty and COL_INTEREST in df_all.columns:
+            df_leads = df_all[df_all[COL_INTEREST].astype(str).str.strip() == sel_int]
+            st.dataframe(df_leads[[COL_NAMA_KLIEN, COL_KONTAK_KLIEN]], use_container_width=True)
+            
+            if HAS_OPENPYXL:
+                xb = df_to_excel_bytes(df_leads, sheet_name="Leads")
+                if xb:
+                    st.download_button("⬇️ Excel Leads", data=xb, file_name=f"leads_{sel_int}.xlsx", 
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                                       use_container_width=True)
+
+    # C. Tab Data Master
+    with tab_data:
+        st.caption("Master Data Laporan")
+        if st.button("Refresh Data", use_container_width=True, key="mob_ref_data"):
+            st.cache_data.clear(); st.rerun()
+            
+        st.dataframe(df_all, use_container_width=True)
+        
+        if HAS_OPENPYXL:
+            xb = df_to_excel_bytes(df_all, sheet_name="Master")
+            if xb: st.download_button("⬇️ Download Full Excel", data=xb, file_name="master.xlsx", use_container_width=True)
+
+    # D. Tab Config (Tambah Staf)
+    with tab_cfg:
+        st.caption("Kelola Staf & Tim")
+        with st.form("mob_add_staff"):
+            new_st = st.text_input("Nama Staf Baru")
+            if st.form_submit_button("Simpan"):
+                tambah_staf_baru(new_st)
+                st.success("Tersimpan")
+                st.cache_data.clear(); st.rerun()
 
 # =========================================================
 # MAIN ROUTER LOGIC (REVISI TOTAL)
