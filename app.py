@@ -54,7 +54,6 @@ st.set_page_config(
 
 # =========================================================
 # GLOBAL STYLE (SpaceX x Muhammadiyah — Elegant, International)
-# FIXED: Preserving Elegance + Mobile Input Visibility Patch
 # =========================================================
 def inject_global_css():
     st.markdown(
@@ -80,9 +79,6 @@ def inject_global_css():
             --gold:#facc15;
             --amber:#f59e0b;
             --danger:#ef4444;
-            
-            /* PATCH 1: Paksa browser HP merender dalam mode gelap */
-            color-scheme: dark;
         }
 
         /* ---------- App background ---------- */
@@ -109,7 +105,7 @@ def inject_global_css():
             mask-image: radial-gradient(circle at 50% 15%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.0) 70%);
         }
 
-        /* Hide Streamlit default UI chrome */
+        /* Hide Streamlit default UI chrome (we use custom header) */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
@@ -117,48 +113,11 @@ def inject_global_css():
         /* Typography */
         h1, h2, h3, h4, h5, h6, p, label, span, div {
             font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
-            color: var(--text);
         }
 
         /* =========================
-           PATCH 2: FIX INPUT & LABEL DI HP (Chrome/Edge)
-           Masalah utama: Browser HP memaksakan background putih pada input.
-           Solusi: Kita paksa background transparan gelap & teks putih.
-           ========================= */
-        
-        /* 1. Label Input (Nama, Tanggal, dll) -> Wajib Putih */
-        div[data-testid="stWidgetLabel"] p,
-        div[data-testid="stWidgetLabel"] label,
-        label {
-            color: #ffffff !important;
-            opacity: 1 !important;
-        }
-
-        /* 2. Kolom Input (Kotak Isian) -> Background Gelap Transparan */
-        .stTextInput input, 
-        .stTextArea textarea, 
-        .stNumberInput input, 
-        .stDateInput input, 
-        .stSelectbox div[data-baseweb="select"] > div {
-            background-color: rgba(255, 255, 255, 0.08) !important; /* Efek kaca gelap */
-            color: #ffffff !important; /* Teks input putih */
-            border: 1px solid rgba(255, 255, 255, 0.2) !important;
-            border-radius: 12px !important;
-        }
-
-        /* 3. Placeholder (Teks bayangan contoh) */
-        ::placeholder {
-            color: rgba(255, 255, 255, 0.5) !important;
-        }
-
-        /* 4. Dropdown Menu Item Background */
-        ul[data-baseweb="menu"] {
-            background-color: #04110b !important;
-        }
-
-        /* =========================
-           Text selection
-           ========================= */
+        Text selection (blok teks)
+        ========================= */
         .stApp ::selection{
             color: #ffffff !important;
             background: rgba(22,163,74,0.35) !important;
@@ -214,6 +173,17 @@ def inject_global_css():
             filter: brightness(1.05);
         }
 
+        /* Inputs */
+        .stTextInput input, .stTextArea textarea, .stNumberInput input {
+            border-radius: 12px !important;
+        }
+        .stDateInput input {
+            border-radius: 12px !important;
+        }
+        .stSelectbox div[data-baseweb="select"] > div {
+            border-radius: 12px !important;
+        }
+
         /* Dataframes / tables */
         div[data-testid="stDataFrame"] {
             border-radius: 14px;
@@ -222,7 +192,7 @@ def inject_global_css():
         }
 
         /* =========================
-           HERO HEADER (Custom) - ORIGINAL
+           HERO HEADER (Custom)
            ========================= */
         .sx-hero{
             position: relative;
@@ -284,7 +254,7 @@ def inject_global_css():
         *, *::before, *::after { box-sizing: border-box; }
 
         .sx-logo-card{
-            background: rgba(255,255,255,0.92); /* Tetap putih terang agar logo tidak nyaru */
+            background: rgba(255,255,255,0.92);
             border: 1px solid rgba(0,0,0,0.06);
             border-radius: 16px;
             width: 100%;
@@ -295,10 +265,6 @@ def inject_global_css():
             align-items:center;
             justify-content:center;
             box-shadow: 0 10px 26px rgba(0,0,0,0.28);
-            
-            /* PATCH 3: Z-Index agar tidak tertimpa elemen lain di HP */
-            position: relative;
-            z-index: 5;
         }
 
         .sx-logo-card img{
@@ -401,37 +367,40 @@ def inject_global_css():
 
           /* Logo kiri/kanan dimatikan di HP biar tidak makan tempat */
           .sx-logo-card { display:none !important; }
-          
-          /* PATCH 4: Navbar Bawah Mobile */
-          .mobile-bottom-nav{
-            position: fixed;
-            left: 0; right: 0; bottom: 0;
-            padding: 10px 12px;
-            background: rgba(0,0,0,0.85); /* Agak gelap agar ikon terlihat */
-            border-top: 1px solid rgba(255,255,255,0.12);
-            display: flex;
-            justify-content: space-around;
-            gap: 8px;
-            z-index: 9999;
-            backdrop-filter: blur(10px);
-          }
-          .mobile-bottom-nav a{
-            text-decoration:none;
-            color: rgba(255,255,255,0.92);
-            padding: 8px 10px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.12);
-            background: rgba(255,255,255,0.06);
-            font-size: 14px;
-          }
-          /* biar konten tidak ketutup bottom nav */
-          .block-container{ padding-bottom: 80px !important; }
+          @media (max-width: 768px){
+  .mobile-bottom-nav{
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 10px 12px;
+    background: rgba(0,0,0,0.75);
+    border-top: 1px solid rgba(255,255,255,0.12);
+    display: flex;
+    justify-content: space-around;
+    gap: 8px;
+    z-index: 9999;
+    backdrop-filter: blur(10px);
+  }
+  .mobile-bottom-nav a{
+    text-decoration:none;
+    color: rgba(255,255,255,0.92);
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06);
+    font-size: 14px;
+  }
+  /* biar konten tidak ketutup bottom nav */
+  .block-container{ padding-bottom: 80px !important; }
+}
+
         }
 
         </style>
         """,
         unsafe_allow_html=True
     )
+
+inject_global_css()
 
 
 # =========================================================
