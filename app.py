@@ -54,7 +54,6 @@ st.set_page_config(
 
 # =========================================================
 # GLOBAL STYLE (SpaceX x Muhammadiyah — Elegant, International)
-# FIXED: Mobile Browser Compatibility (Chrome/Edge Dark Mode Force)
 # =========================================================
 def inject_global_css():
     st.markdown(
@@ -69,9 +68,9 @@ def inject_global_css():
 
             --cardA: rgba(255,255,255,0.06);
             --cardB: rgba(255,255,255,0.045);
-            --border: rgba(255,255,255,0.15); /* Border sedikit dipertegas */
+            --border: rgba(255,255,255,0.10);
 
-            --text: #ffffff; /* Dipaksa Putih Solid agar kontras di HP */
+            --text: rgba(255,255,255,0.92);
             --muted: rgba(255,255,255,0.70);
 
             --green:#16a34a;
@@ -80,9 +79,6 @@ def inject_global_css():
             --gold:#facc15;
             --amber:#f59e0b;
             --danger:#ef4444;
-
-            /* PENTING: Memaksa browser render sebagai dark mode */
-            color-scheme: dark;
         }
 
         /* ---------- App background ---------- */
@@ -114,46 +110,14 @@ def inject_global_css():
         footer {visibility: hidden;}
         header {visibility: hidden;}
 
-        /* Typography Global Force */
-        html, body, [class*="css"] {
-            font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-            color: var(--text) !important;
-            -webkit-font-smoothing: antialiased;
-        }
-
+        /* Typography */
         h1, h2, h3, h4, h5, h6, p, label, span, div {
-            font-family: "Space Grotesk", sans-serif;
-            color: var(--text);
+            font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
         }
 
         /* =========================
-           FIX KRUSIAL: LABEL & INPUT HP
-           ========================= */
-        /* Memaksa label form (Nama, Tanggal, dll) jadi Putih di semua browser HP */
-        div[data-testid="stWidgetLabel"] p, 
-        div[data-testid="stWidgetLabel"] label,
-        label {
-            color: #ffffff !important;
-            opacity: 1 !important;
-            font-weight: 500;
-        }
-
-        /* Input Field: Background gelap transparan, Teks Putih */
-        .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"], .stTextArea textarea, .stDateInput input {
-            color: #ffffff !important; 
-            background-color: rgba(255,255,255,0.07) !important; 
-            border: 1px solid rgba(255,255,255,0.2) !important;
-            border-radius: 12px !important;
-        }
-        
-        /* Placeholder Input agar terbaca */
-        ::placeholder {
-            color: rgba(255,255,255,0.4) !important;
-        }
-
-        /* =========================
-           Text selection (blok teks)
-           ========================= */
+        Text selection (blok teks)
+        ========================= */
         .stApp ::selection{
             color: #ffffff !important;
             background: rgba(22,163,74,0.35) !important;
@@ -204,20 +168,20 @@ def inject_global_css():
             background: linear-gradient(135deg, rgba(22,163,74,0.95), rgba(245,158,11,0.92)) !important;
             color: rgba(6, 26, 17, 0.95) !important;
             border: none !important;
-            font-weight: 600;
         }
         button[kind="primary"]:hover {
             filter: brightness(1.05);
         }
 
-        /* Expander Header Fix */
-        .streamlit-expanderHeader {
-            background-color: rgba(255,255,255,0.05) !important;
-            border-radius: 10px !important;
-            color: #ffffff !important;
+        /* Inputs */
+        .stTextInput input, .stTextArea textarea, .stNumberInput input {
+            border-radius: 12px !important;
         }
-        .streamlit-expanderHeader svg {
-            fill: #ffffff !important;
+        .stDateInput input {
+            border-radius: 12px !important;
+        }
+        .stSelectbox div[data-baseweb="select"] > div {
+            border-radius: 12px !important;
         }
 
         /* Dataframes / tables */
@@ -289,10 +253,9 @@ def inject_global_css():
 
         *, *::before, *::after { box-sizing: border-box; }
 
-        /* FIX LOGO CARD: Background Putih Solid agar tidak nyaru */
         .sx-logo-card{
-            background: #ffffff !important;
-            border: 2px solid rgba(255,255,255,0.8);
+            background: rgba(255,255,255,0.92);
+            border: 1px solid rgba(0,0,0,0.06);
             border-radius: 16px;
             width: 100%;
             max-width: 240px;
@@ -301,9 +264,7 @@ def inject_global_css():
             display:flex;
             align-items:center;
             justify-content:center;
-            box-shadow: 0 10px 26px rgba(0,0,0,0.35);
-            position: relative;
-            z-index: 5;
+            box-shadow: 0 10px 26px rgba(0,0,0,0.28);
         }
 
         .sx-logo-card img{
@@ -326,7 +287,6 @@ def inject_global_css():
             letter-spacing: 0.06em;
             text-transform: uppercase;
             margin: 0;
-            color: #ffffff;
         }
         .sx-subrow{
             margin-top: 0.45rem;
@@ -364,7 +324,9 @@ def inject_global_css():
         .sx-pill.on .sx-dot{ background: rgba(34,197,94,0.95); }
         .sx-pill.off .sx-dot{ background: rgba(239,68,68,0.95); }
 
-        /* Sidebar Nav (SpaceX-like) */
+        /* =========================
+           Sidebar Nav (SpaceX-like)
+           ========================= */
         .sx-nav{
             margin-top: 0.25rem;
         }
@@ -390,7 +352,7 @@ def inject_global_css():
         }
 
         /* ==================================================
-           MOBILE ONLY (<=768px)
+           MOBILE ONLY (<=768px) - tidak mengubah desktop
            ================================================== */
         @media (max-width: 768px){
           /* Sidebar disembunyikan di HP */
@@ -405,36 +367,40 @@ def inject_global_css():
 
           /* Logo kiri/kanan dimatikan di HP biar tidak makan tempat */
           .sx-logo-card { display:none !important; }
-          
-          .mobile-bottom-nav{
-            position: fixed;
-            left: 0; right: 0; bottom: 0;
-            padding: 10px 12px;
-            background: rgba(0,0,0,0.85); /* Sedikit lebih gelap agar kontras */
-            border-top: 1px solid rgba(255,255,255,0.12);
-            display: flex;
-            justify-content: space-around;
-            gap: 8px;
-            z-index: 9999;
-            backdrop-filter: blur(12px);
-          }
-          .mobile-bottom-nav a{
-            text-decoration:none;
-            color: rgba(255,255,255,0.92);
-            padding: 8px 10px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.12);
-            background: rgba(255,255,255,0.06);
-            font-size: 18px; /* Icon diperbesar sedikit */
-          }
-          /* biar konten tidak ketutup bottom nav */
-          .block-container{ padding-bottom: 80px !important; }
+          @media (max-width: 768px){
+  .mobile-bottom-nav{
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 10px 12px;
+    background: rgba(0,0,0,0.75);
+    border-top: 1px solid rgba(255,255,255,0.12);
+    display: flex;
+    justify-content: space-around;
+    gap: 8px;
+    z-index: 9999;
+    backdrop-filter: blur(10px);
+  }
+  .mobile-bottom-nav a{
+    text-decoration:none;
+    color: rgba(255,255,255,0.92);
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06);
+    font-size: 14px;
+  }
+  /* biar konten tidak ketutup bottom nav */
+  .block-container{ padding-bottom: 80px !important; }
+}
+
         }
 
         </style>
         """,
         unsafe_allow_html=True
     )
+
+inject_global_css()
 
 
 # =========================================================
