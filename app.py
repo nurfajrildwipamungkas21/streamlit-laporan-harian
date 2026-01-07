@@ -460,12 +460,41 @@ def inject_global_css():
             color: rgba(255, 255, 255, 0.90) !important;
         }
 
+        /* =========================================
+           FIX KONTRAS METRIC (Total Nilai, Overdue, dll)
+           ========================================= */
+
+        /* Container metric */
+        div[data-testid="stMetric"] {
+            color: var(--text) !important;
+        }
+
+        /* Label kecil di atas angka */
+        div[data-testid="stMetricLabel"],
+        div[data-testid="stMetric"] label {
+            color: rgba(255,255,255,0.80) !important;
+            font-weight: 500 !important;
+        }
+
+        /* Angka besar (nilai utama metric) */
+        div[data-testid="stMetricValue"] {
+            color: var(--gold) !important;  /* ganti ke var(--text) kalau mau putih */
+            font-weight: 700 !important;
+        }
+
+        /* Delta metric (jika dipakai) */
+        div[data-testid="stMetricDelta"] {
+            color: var(--green2) !important;
+            font-weight: 600 !important;
+        }
+
         </style>
         """,
         unsafe_allow_html=True
     )
 
 inject_global_css()
+
 
 
 
