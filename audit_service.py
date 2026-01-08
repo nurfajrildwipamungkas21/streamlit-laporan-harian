@@ -465,3 +465,21 @@ def compare_and_get_changes(df_old, df_new, key_col_index=None):
             })
             
     return changes
+
+# --- Tambahkan ini di bagian paling bawah audit_service.py ---
+
+def load_audit_log(spreadsheet):
+    """
+    Mengambil seluruh data Audit Log dari Spreadsheet untuk ditampilkan di App.
+    """
+    try:
+        ws = ensure_audit_sheet(spreadsheet)
+        data = ws.get_all_records()
+        if not data:
+            return pd.DataFrame(columns=AUDIT_COLS)
+            
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        print(f"Error loading audit log: {e}")
+        return pd.DataFrame(columns=AUDIT_COLS)
