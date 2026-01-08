@@ -4420,6 +4420,7 @@ elif menu_nav == "📊 Dashboard Admin":
             "🖼️ Galeri", 
             "📦 Master Data", 
             "⚙️ Config & Staff"
+            "⚡ Super Editor"
         ])
 
         # ---------------------------------------------------------
