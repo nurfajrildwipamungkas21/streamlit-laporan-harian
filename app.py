@@ -490,6 +490,36 @@ def inject_global_css():
             font-weight: 600 !important;
         }
 
+        /* =========================================
+           LOADING SPINNER OVERLAY (CUSTOM CSS)
+           ========================================= */
+        /* Mengubah tampilan st.spinner bawaan menjadi overlay di tengah layar */
+        div[data-testid="stSpinner"] {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 999999; /* Z-index tinggi agar di atas elemen lain */
+            background: rgba(0, 0, 0, 0.85); /* Background gelap transparan */
+            padding: 25px 50px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(8px); /* Efek blur di belakangnya */
+            color: #ffffff !important;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        /* Opsional: Memperbesar icon spinner-nya sedikit */
+        div[data-testid="stSpinner"] > div {
+            border-color: var(--gold) var(--gold) transparent transparent !important;
+        }
+
         </style>
         """,
         unsafe_allow_html=True
