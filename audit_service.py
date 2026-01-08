@@ -28,36 +28,80 @@ AUDIT_COLS = [
 
 def ensure_audit_sheet(spreadsheet):
     """
-    Memastikan tab audit tersedia dengan Header Bahasa Indonesia.
+    Memastikan tab audit tersedia dengan Formatting Rapi (Style ala app.py).
     """
     try:
-        ws = spreadsheet.worksheet(SHEET_AUDIT_NAME)
-        
-        # [OPSIONAL] Cek apakah header masih lama? Jika iya, update header saja.
-        # Ini biar Anda tidak perlu hapus sheet manual jika hanya ganti nama kolom.
-        current_header = ws.row_values(1)
-        if not current_header or current_header[0] == "Timestamp": 
-            # Timpa header lama dengan Bahasa Indonesia
-            ws.update(range_name="A1", values=[AUDIT_COLS], value_input_option="USER_ENTERED")
-            ws.format("A1:I1", {"textFormat": {"bold": True}})
-            
-        return ws
-    except gspread.WorksheetNotFound:
+        # Coba buka sheetnya
         try:
+            ws = spreadsheet.worksheet(SHEET_AUDIT_NAME)
+        except gspread.WorksheetNotFound:
+            # Jika belum ada, buat baru
             ws = spreadsheet.add_worksheet(title=SHEET_AUDIT_NAME, rows=2000, cols=len(AUDIT_COLS))
+            # Isi Header
             ws.update(range_name="A1", values=[AUDIT_COLS], value_input_option="USER_ENTERED")
-            ws.format("A1:I1", {"textFormat": {"bold": True}})
-            ws.freeze(rows=1)
-            
-            # Atur lebar kolom agar enak dibaca (dalam pixel)
-            ws.set_column_width(1, 160) # Waktu
-            ws.set_column_width(2, 120) # Pelaku
-            ws.set_column_width(5, 150) # Nama Data
-            ws.set_column_width(8, 200) # Alasan
-            ws.set_column_width(9, 450) # Rincian (Paling Lebar)
-            return ws
-        except Exception as e:
-            raise Exception(f"Gagal membuat sheet Audit otomatis: {e}")
+
+        # ==========================================
+        # LOGIC FORMATTING OTOMATIS (PERBAIKAN)
+        # ==========================================
+        
+        # 1. Pastikan Header Sesuai (Jika header lama, timpa baru)
+        current_header = ws.row_values(1)
+        if not current_header or current_header[0] != AUDIT_COLS[0]:
+            ws.update(range_name="A1", values=[AUDIT_COLS], value_input_option="USER_ENTERED")
+
+        # 2. Atur Lebar Kolom (Pixel)
+        ws.batch_update({
+            "requests": [
+                # Atur Lebar Kolom
+                {"updateDimensionProperties": {"range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1}, "properties": {"pixelSize": 150}, "fields": "pixelSize"}}, # Waktu
+                {"updateDimensionProperties": {"range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 1, "endIndex": 2}, "properties": {"pixelSize": 120}, "fields": "pixelSize"}}, # Pelaku
+                {"updateDimensionProperties": {"range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 2, "endIndex": 4}, "properties": {"pixelSize": 130}, "fields": "pixelSize"}}, # Role & Fitur
+                {"updateDimensionProperties": {"range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 4, "endIndex": 5}, "properties": {"pixelSize": 150}, "fields": "pixelSize"}}, # Nama Data
+                {"updateDimensionProperties": {"range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 5, "endIndex": 6}, "properties": {"pixelSize": 80},  "fields": "pixelSize"}}, # Baris Ke
+                {"updateDimensionProperties": {"range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 6, "endIndex": 7}, "properties": {"pixelSize": 100}, "fields": "pixelSize"}}, # Aksi
+                {"updateDimensionProperties": {"range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 7, "endIndex": 8}, "properties": {"pixelSize": 200}, "fields": "pixelSize"}}, # Alasan
+                {"updateDimensionProperties": {"range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": 8, "endIndex": 9}, "properties": {"pixelSize": 450}, "fields": "pixelSize"}}, # Rincian (Lebar)
+                
+                # Freeze Row 1
+                {"updateSheetProperties": {"properties": {"sheetId": ws.id, "gridProperties": {"frozenRowCount": 1}}, "fields": "gridProperties.frozenRowCount"}},
+                
+                # Format Header (Bold, Center, Background Biru Muda)
+                {"repeatCell": {
+                    "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1},
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": {"red": 0.9, "green": 0.94, "blue": 0.98}, # Biru Muda Soft
+                            "horizontalAlignment": "CENTER",
+                            "verticalAlignment": "MIDDLE",
+                            "textFormat": {"bold": True, "fontSize": 10}
+                        }
+                    },
+                    "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat)"
+                }},
+
+                # Format Body (Rata Atas, Wrap Text) - PENTING BIAR RAPI
+                {"repeatCell": {
+                    "range": {"sheetId": ws.id, "startRowIndex": 1},
+                    "cell": {
+                        "userEnteredFormat": {
+                            "verticalAlignment": "TOP",   # Teks selalu mulai dari atas sel
+                            "wrapStrategy": "WRAP"        # Teks panjang akan turun ke bawah (tidak kepotong)
+                        }
+                    },
+                    "fields": "userEnteredFormat(verticalAlignment,wrapStrategy)"
+                }}
+            ]
+        })
+        
+        return ws
+
+    except Exception as e:
+        # Jika error formatting, return ws apa adanya agar sistem tidak crash
+        print(f"Warning (Audit Format): {e}")
+        try:
+            return spreadsheet.worksheet(SHEET_AUDIT_NAME)
+        except:
+            raise e
 
 def format_changes_human_readable(changes_dict):
     """
