@@ -2625,101 +2625,93 @@ if IS_MOBILE and menu_nav == HOME_NAV:
     st.stop()
 
 
-    # =========================================================
-    # SIDEBAR (SpaceX-inspired)
-    # =========================================================
-    with st.sidebar:
-        if st.button("🔄 Refresh Data", type="primary", use_container_width=True):
-            st.cache_data.clear()
+# =========================================================
+# SIDEBAR (SpaceX-inspired)
+# =========================================================
+with st.sidebar:
+    if st.button("🔄 Refresh Data", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    st.markdown("<div class='sx-section-title'>Navigation</div>", unsafe_allow_html=True)
+
+    menu_items = [
+        "📝 Laporan Harian",
+        "🎯 Target & KPI",
+        "🤝 Closing Deal",
+        "💳 Pembayaran",
+    ]
+    if st.session_state["is_admin"]:
+        menu_items.append("📊 Dashboard Admin")
+
+    # SpaceX-like nav buttons
+    st.markdown("<div class='sx-nav'>", unsafe_allow_html=True)
+    for i, item in enumerate(menu_items):
+        active = (st.session_state.get("menu_nav") == item)
+        btype = "primary" if active else "secondary"
+        if st.button(item, use_container_width=True, type=btype, key=f"nav_{i}"):
+            st.session_state["menu_nav"] = item
             st.rerun()
-        st.markdown("<div class='sx-section-title'>Navigation</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        menu_items = [
-            "📝 Laporan Harian",
-            "🎯 Target & KPI",
-            "🤝 Closing Deal",
-            "💳 Pembayaran",
-        ]
-        if st.session_state["is_admin"]:
-            menu_items.append("📊 Dashboard Admin")
+    st.divider()
 
-        # SpaceX-like nav buttons
-        st.markdown("<div class='sx-nav'>", unsafe_allow_html=True)
-        for i, item in enumerate(menu_items):
-            active = (st.session_state.get("menu_nav") == item)
-            btype = "primary" if active else "secondary"
-            if st.button(item, use_container_width=True, type=btype, key=f"nav_{i}"):
-                st.session_state["menu_nav"] = item
-                st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
+    # Admin login
+    if not st.session_state["is_admin"]:
+        with st.expander("🔐 Akses Khusus Admin", expanded=False):
+            if not admin_secret_configured():
+                st.warning("Admin login belum aktif: set `password_admin_hash` (disarankan) atau `password_admin` di Streamlit Secrets.")
+            pwd = st.text_input("Password:", type="password", key="input_pwd")
+            if st.button("Login Admin", use_container_width=True):
+                if verify_admin_password(pwd):
+                    st.session_state["is_admin"] = True
+                    # Jika baru login, refresh menu agar Dashboard muncul.
+                    st.rerun()
+                else:
+                    st.error("Password salah / belum dikonfigurasi!")
+    else:
+        if st.button("🔓 Logout Admin", use_container_width=True):
+            st.session_state["is_admin"] = False
+            # Kalau sedang di dashboard, pindahkan ke laporan harian.
+            if st.session_state.get("menu_nav") == "📊 Dashboard Admin":
+                st.session_state["menu_nav"] = "📝 Laporan Harian"
+            st.rerun()
 
-        st.divider()
+    st.divider()
 
-        # Admin login
-        if not st.session_state["is_admin"]:
-            with st.expander("🔐 Akses Khusus Admin", expanded=False):
-                if not admin_secret_configured():
-                    st.warning("Admin login belum aktif: set `password_admin_hash` (disarankan) atau `password_admin` di Streamlit Secrets.")
-                pwd = st.text_input("Password:", type="password", key="input_pwd")
-                if st.button("Login Admin", use_container_width=True):
-                    if verify_admin_password(pwd):
-                        st.session_state["is_admin"] = True
-                        # Jika baru login, refresh menu agar Dashboard muncul.
-                        st.rerun()
-                    else:
-                        st.error("Password salah / belum dikonfigurasi!")
-        else:
-            if st.button("🔓 Logout Admin", use_container_width=True):
-                st.session_state["is_admin"] = False
-                # Kalau sedang di dashboard, pindahkan ke laporan harian.
-                if st.session_state.get("menu_nav") == "📊 Dashboard Admin":
-                    st.session_state["menu_nav"] = "📝 Laporan Harian"
-                st.rerun()
+    # Quick stats (lightweight)
+    try:
+        df_pay_sidebar = load_pembayaran_dp()
+        overdue_s, due_soon_s = build_alert_pembayaran(df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
+        st.markdown("<div class='sx-section-title'>Quick Stats</div>", unsafe_allow_html=True)
+        st.metric("Overdue Payment", int(len(overdue_s)) if overdue_s is not None else 0)
+        st.metric("Due ≤ 3 hari", int(len(due_soon_s)) if due_soon_s is not None else 0)
+    except Exception:
+        pass
 
-        st.divider()
+    st.divider()
+    st.caption("Tip: navigasi ala SpaceX → ringkas, jelas, fokus.")
 
-        # Quick stats (lightweight)
-        try:
-            df_pay_sidebar = load_pembayaran_dp()
-            overdue_s, due_soon_s = build_alert_pembayaran(df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
-            st.markdown("<div class='sx-section-title'>Quick Stats</div>", unsafe_allow_html=True)
-            st.metric("Overdue Payment", int(len(overdue_s)) if overdue_s is not None else 0)
-            st.metric("Due ≤ 3 hari", int(len(due_soon_s)) if due_soon_s is not None else 0)
-        except Exception:
-            pass
+menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
-        st.divider()
-        st.caption("Tip: navigasi ala SpaceX → ringkas, jelas, fokus.")
-
-    menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
-
-    # =========================================================
-    # MOBILE NAV (Bottom nav tampil di semua halaman mobile kecuali Home)
-    # =========================================================
-
-    HOME_NAV = "🏠 Beranda"  # samakan dengan label nav Home kamu yang sebenarnya
-
-    if IS_MOBILE and menu_nav != HOME_NAV:
-        # 1) Tombol Kembali ke Beranda (opsional, tapi enak di UX)
-        if st.button("⬅️ Kembali ke Beranda", use_container_width=True, key="global_mobile_back"):
-            set_nav("home")  # sesuaikan dengan router/nav kamu
-
-        # 2) Bottom Navigation Bar (Menu Bawah)
-        st.markdown(
-            """
-            <div class="mobile-bottom-nav">
-            <a href="?nav=home">🏠</a>
-            <a href="?nav=report">📝</a>
-            <a href="?nav=kpi">🎯</a>
-            <a href="?nav=closing">🤝</a>
-            <a href="?nav=payment">💳</a>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        st.divider()
-
+# [MULAI KODE TAMBAHAN: FIX NAVIGASI MOBILE]
+# Ini akan memunculkan tombol Back & Menu Bawah untuk Closing, KPI, Payment, dll.
+if IS_MOBILE and menu_nav != "📝 Laporan Harian":
+    # 1. Tombol Kembali ke Beranda
+    if st.button("⬅️ Kembali ke Beranda", use_container_width=True, key="global_mobile_back"):
+        set_nav("home")
+    
+    # 2. Bottom Navigation Bar (Menu Bawah)
+    st.markdown("""
+    <div class="mobile-bottom-nav">
+      <a href="?nav=home">🏠</a>
+      <a href="?nav=report">📝</a>
+      <a href="?nav=kpi">🎯</a>
+      <a href="?nav=closing">🤝</a>
+      <a href="?nav=payment">💳</a>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.divider()
 
 
 # =========================================================
