@@ -2550,7 +2550,7 @@ NAV_MAP = {
     "kpi": "🎯 Target & KPI",
     "closing": "🤝 Closing Deal",
     "payment": "💳 Pembayaran",
-    "📜 Global Audit Log",
+    "log": "📜 Global Audit Log",
     "admin": "📊 Dashboard Admin",
 }
 
