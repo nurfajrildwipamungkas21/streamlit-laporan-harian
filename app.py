@@ -4419,7 +4419,7 @@ elif menu_nav == "📊 Dashboard Admin":
             "💬 Review & Feedback", 
             "🖼️ Galeri", 
             "📦 Master Data", 
-            "⚙️ Config & Staff"
+            "⚙️ Config & Staff", 
             "⚡ Super Editor"
         ])
 
