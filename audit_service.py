@@ -28,10 +28,12 @@ AUDIT_COLS = [
 
 def ensure_audit_sheet(spreadsheet):
     """
-    Memastikan tab audit tersedia dengan Formatting Cerdas:
-    1. Header Biru & Bold.
-    2. Kolom A-H: AUTO-RESIZE (Menyesuaikan panjang tulisan).
-    3. Kolom I (Rincian): FIXED WIDTH (Agar tidak melebar ke samping) + Wrap Text.
+    Memastikan tab audit tersedia dengan Formatting Profesional (Enterprise Look):
+    1. Header: Biru Elegan + Bold + Center.
+    2. Body: Borders (Garis Tabel) + Align Top + Wrap Text.
+    3. Column Width: 
+       - Kolom A (Waktu) & I (Rincian) -> FIXED (Agar rapi).
+       - Kolom B-H -> AUTO RESIZE (Menyesuaikan isi).
     """
     try:
         # 1. GET / CREATE SHEET
@@ -48,85 +50,95 @@ def ensure_audit_sheet(spreadsheet):
             ws.update(range_name=range_header, values=[AUDIT_COLS], value_input_option="USER_ENTERED")
 
         # ==========================================
-        # 3. FORMATTING (Hybrid: Gspread + Batch Update)
+        # 3. FORMATTING (ULTIMATE BATCH)
         # ==========================================
-        
         sheet_id = ws.id
 
-        # A. Styling Header & Body (Warna, Font, Wrap)
-        # Kita pakai formatting batch agar hemat API call
         requests = [
-            # 1. Freeze Row 1
+            # A. Freeze Header
             {
                 "updateSheetProperties": {
                     "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
                     "fields": "gridProperties.frozenRowCount"
                 }
             },
-            # 2. Format Header (Biru, Bold, Center)
+            # B. Format Header (Background Biru Profesional)
             {
                 "repeatCell": {
                     "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
                     "cell": {
                         "userEnteredFormat": {
-                            "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 0.97}, # Biru Muda
+                            "backgroundColor": {"red": 0.22, "green": 0.46, "blue": 0.73}, # Biru Tua Professional
                             "horizontalAlignment": "CENTER",
                             "verticalAlignment": "MIDDLE",
-                            "textFormat": {"bold": True, "fontSize": 10}
+                            "textFormat": {"bold": True, "fontSize": 10, "foregroundColor": {"red": 1, "green": 1, "blue": 1}} # Teks Putih
                         }
                     },
                     "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat)"
                 }
             },
-            # 3. Format Body (Wrap Text, Align Top)
+            # C. Format Body (Wrap Text, Align Top, Font Standar)
             {
                 "repeatCell": {
                     "range": {"sheetId": sheet_id, "startRowIndex": 1},
                     "cell": {
                         "userEnteredFormat": {
-                            "verticalAlignment": "TOP",   # Teks mulai dari atas
-                            "wrapStrategy": "WRAP"        # Teks turun ke bawah
+                            "verticalAlignment": "TOP",
+                            "wrapStrategy": "WRAP",
+                            "textFormat": {"fontSize": 10}
                         }
                     },
-                    "fields": "userEnteredFormat(verticalAlignment,wrapStrategy)"
+                    "fields": "userEnteredFormat(verticalAlignment,wrapStrategy,textFormat)"
                 }
             },
-            # 4. AUTO RESIZE Kolom A - H (Index 0 - 7)
-            # Ini kuncinya! Biar kolom menyesuaikan panjang tulisan "Admin", "Closing_Deal", dll.
+            # D. ADD BORDERS (GARIS TABEL) - INI YANG BIKIN RAPI
+            {
+                "updateBorders": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0, # Dari Header sampai bawah
+                        "startColumnIndex": 0,
+                        "endColumnIndex": 9
+                    },
+                    "top": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "bottom": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "left": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "right": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "innerHorizontal": {"style": "SOLID", "width": 1, "color": {"red": 0.9, "green": 0.9, "blue": 0.9}},
+                    "innerVertical": {"style": "SOLID", "width": 1, "color": {"red": 0.9, "green": 0.9, "blue": 0.9}},
+                }
+            },
+            # E. FIXED WIDTH (Waktu & Rincian)
+            {
+                "updateDimensionProperties": {
+                    "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1}, # Kolom A (Waktu)
+                    "properties": {"pixelSize": 160}, "fields": "pixelSize"
+                }
+            },
+            {
+                "updateDimensionProperties": {
+                    "range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 8, "endIndex": 9}, # Kolom I (Rincian)
+                    "properties": {"pixelSize": 500}, "fields": "pixelSize"
+                }
+            },
+            # F. AUTO RESIZE (Kolom B - H)
             {
                 "autoResizeDimensions": {
                     "dimensions": {
                         "sheetId": sheet_id,
                         "dimension": "COLUMNS",
-                        "startIndex": 0, # Kolom A
-                        "endIndex": 8    # Kolom H (Sebelum Rincian)
+                        "startIndex": 1, # Mulai dari Kolom B (Pelaku)
+                        "endIndex": 8    # Sampai sebelum I
                     }
-                }
-            },
-            # 5. FIXED WIDTH Kolom I (Rincian) (Index 8)
-            # Kolom Rincian kita paksa 500px, karena isinya panjang.
-            {
-                "updateDimensionProperties": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "dimension": "COLUMNS",
-                        "startIndex": 8,
-                        "endIndex": 9
-                    },
-                    "properties": {"pixelSize": 500},
-                    "fields": "pixelSize"
                 }
             }
         ]
 
-        # Eksekusi semua format sekaligus
         ws.batch_update({"requests": requests})
-
         return ws
 
     except Exception as e:
         print(f"[ERROR Formatting Audit]: {e}")
-        # Kembalikan ws apa adanya agar aplikasi tetap jalan meski formatting gagal
         try:
             return spreadsheet.worksheet(SHEET_AUDIT_NAME)
         except:
