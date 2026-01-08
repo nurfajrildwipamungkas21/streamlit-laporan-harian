@@ -2550,6 +2550,7 @@ NAV_MAP = {
     "kpi": "🎯 Target & KPI",
     "closing": "🤝 Closing Deal",
     "payment": "💳 Pembayaran",
+    "📜 Global Audit Log",
     "admin": "📊 Dashboard Admin",
 }
 
@@ -2621,6 +2622,7 @@ with st.sidebar:
         "🎯 Target & KPI",
         "🤝 Closing Deal",
         "💳 Pembayaran",
+        "📜 Global Audit Log",
     ]
     if st.session_state["is_admin"]:
         menu_items.append("📊 Dashboard Admin")
@@ -2693,6 +2695,7 @@ if IS_MOBILE and menu_nav != "📝 Laporan Harian":
       <a href="?nav=kpi">🎯</a>
       <a href="?nav=closing">🤝</a>
       <a href="?nav=payment">💳</a>
+      <a href="?nav=log">📜</a> </div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3048,6 +3051,55 @@ def render_admin_mobile():
                 tambah_staf_baru(new_st)
                 st.success("Tersimpan")
                 st.cache_data.clear(); st.rerun()
+
+def render_audit_mobile():
+    st.markdown("### 📜 Global Audit Log (Mobile)")
+    st.caption("Rekaman jejak perubahan data admin.")
+
+    # Import fungsi load
+    from audit_service import load_audit_log
+    
+    # Tombol Refresh
+    if st.button("🔄 Refresh", use_container_width=True, key="mob_refresh_log"):
+        st.cache_data.clear()
+        st.rerun()
+
+    # Load Data
+    df_log = load_audit_log(spreadsheet)
+
+    if not df_log.empty:
+        # Sortir data terbaru diatas
+        try:
+            col_waktu = "Waktu & Tanggal"
+            df_log[col_waktu] = pd.to_datetime(df_log[col_waktu], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+            df_log = df_log.sort_values(by=col_waktu, ascending=False)
+        except:
+            pass
+
+        # Tampilan Mobile (Card View Sederhana)
+        # Kita ambil 10 data terbaru saja biar ringan di HP
+        st.markdown("#### 🕒 10 Aktivitas Terakhir")
+        for i, row in df_log.head(10).iterrows():
+            with st.container(border=True):
+                # Baris 1: Siapa & Kapan
+                st.markdown(f"**{row.get('Pelaku (User)', '-')}**")
+                st.caption(f"📅 {row.get('Waktu & Tanggal')} | 🔧 {row.get('Aksi Dilakukan')}")
+                
+                # Baris 2: Apa yang diubah
+                st.text(f"Data: {row.get('Nama Data / Sheet')}")
+                st.info(f"📝 {row.get('Alasan Perubahan', '-')}")
+                
+                # Expander untuk detail teknis
+                with st.expander("Lihat Detail Perubahan"):
+                    st.code(row.get('Rincian (Sebelum ➡ Sesudah)', '-'), language="text")
+
+        # Tombol Download Excel (Penting buat admin cek di HP)
+        if HAS_OPENPYXL:
+            xb = df_to_excel_bytes(df_log, sheet_name="Audit_Log")
+            if xb:
+                st.download_button("⬇️ Download Full Log (Excel)", data=xb, file_name="audit_log_full.xlsx", use_container_width=True)
+    else:
+        st.info("Belum ada data log.")
 
 # =========================================================
 # MAIN ROUTER LOGIC (REVISI TOTAL)
@@ -3527,6 +3579,75 @@ elif menu_nav == "💳 Pembayaran":
                         st.error(msg)
                 else:
                     st.error("Pilih file dulu.")
+
+# =========================================================
+# MENU: GLOBAL AUDIT LOG (FITUR BARU)
+# =========================================================
+elif menu_nav == "📜 Global Audit Log":
+    st.markdown("## 📜 Global Audit Log")
+    st.caption("Rekaman jejak perubahan data yang dilakukan oleh Admin (Super Editor). Transparansi data.")
+
+    # Load Data dari Service
+    from audit_service import load_audit_log
+    
+    # Tombol Refresh
+    if st.button("🔄 Refresh Log", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    with st.spinner("Memuat data log..."):
+        df_log = load_audit_log(spreadsheet)
+
+    if not df_log.empty:
+        # Konversi kolom Waktu agar bisa di-sort
+        try:
+            # Sesuaikan nama kolom dengan yang ada di audit_service.py (AUDIT_COLS)
+            col_waktu = "Waktu & Tanggal" 
+            df_log[col_waktu] = pd.to_datetime(df_log[col_waktu], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+            # Sort dari yang paling baru (Descending)
+            df_log = df_log.sort_values(by=col_waktu, ascending=False)
+        except Exception:
+            pass # Jika format tanggal error, biarkan apa adanya
+
+        # --- FITUR FILTERING (Biar gampang cari) ---
+        with st.expander("🔍 Filter Pencarian"):
+            c1, c2 = st.columns(2)
+            with c1:
+                filter_user = st.multiselect("Pilih Pelaku (User)", df_log["Pelaku (User)"].unique())
+            with c2:
+                filter_sheet = st.multiselect("Pilih Sheet/Data", df_log["Nama Data / Sheet"].unique())
+        
+        # Terapkan Filter
+        df_show = df_log.copy()
+        if filter_user:
+            df_show = df_show[df_show["Pelaku (User)"].isin(filter_user)]
+        if filter_sheet:
+            df_show = df_show[df_show["Nama Data / Sheet"].isin(filter_sheet)]
+
+        # --- TAMPILAN DATA ---
+        st.markdown(f"**Total Record:** {len(df_show)}")
+        
+        # Tampilkan DataFrame
+        st.dataframe(
+            df_show, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Waktu & Tanggal": st.column_config.DatetimeColumn("Waktu", format="D MMM YYYY, HH:mm:ss"),
+                "Rincian (Sebelum ➡ Sesudah)": st.column_config.TextColumn("Detail Perubahan", width="large"),
+                "Alasan Perubahan": st.column_config.TextColumn("Alasan", width="medium"),
+            }
+        )
+
+        # Download Button
+        if HAS_OPENPYXL:
+            xb = df_to_excel_bytes(df_show, sheet_name="Audit_Log")
+            if xb:
+                st.download_button("⬇️ Download Log (Excel)", data=xb, file_name="global_audit_log.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        st.info("Belum ada riwayat perubahan data.")
+
+    render_section_watermark()
 
 # 5. MENU: ADMIN
 elif menu_nav == "📊 Dashboard Admin":
