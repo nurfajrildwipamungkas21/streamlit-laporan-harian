@@ -491,33 +491,53 @@ def inject_global_css():
         }
 
         /* =========================================
-           LOADING SPINNER OVERLAY (CUSTOM CSS)
+           LOADING SPINNER OVERLAY (FIXED & FULLSCREEN)
            ========================================= */
-        /* Mengubah tampilan st.spinner bawaan menjadi overlay di tengah layar */
+        /* Container utama spinner: dibuat memenuhi satu layar penuh */
         div[data-testid="stSpinner"] {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 999999; /* Z-index tinggi agar di atas elemen lain */
-            background: rgba(0, 0, 0, 0.85); /* Background gelap transparan */
-            padding: 25px 50px;
-            border-radius: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(8px); /* Efek blur di belakangnya */
-            color: #ffffff !important;
-            text-align: center;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 999999 !important; /* Pastikan di paling depan */
+            
+            /* Background Gelap Transparan (Glassmorphism) */
+            background: rgba(0, 0, 0, 0.85) !important; 
+            backdrop-filter: blur(8px); /* Efek blur latar belakang */
+            
+            /* Posisi konten di tengah */
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 10px;
+            gap: 20px;
+            
+            /* Reset style bawaan yang mengganggu */
+            transform: none !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Teks pesan loading (misal: "Sedang menyimpan...") */
+        div[data-testid="stSpinner"] > div {
+            color: #ffffff !important;
+            font-size: 1.1rem !important;
+            font-weight: 500 !important;
+            letter-spacing: 0.05em;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
         }
         
-        /* Opsional: Memperbesar icon spinner-nya sedikit */
-        div[data-testid="stSpinner"] > div {
-            border-color: var(--gold) var(--gold) transparent transparent !important;
+        /* Icon Lingkaran Berputar (Spinner) */
+        /* Target elemen SVG atau div lingkaran di dalam spinner */
+        div[data-testid="stSpinner"] > div > div {
+            border-top-color: var(--gold) !important;    /* Warna Emas */
+            border-right-color: var(--green) !important; /* Warna Hijau */
+            border-bottom-color: var(--gold) !important; /* Warna Emas */
+            border-left-color: transparent !important;
+            width: 3.5rem !important;  /* Ukuran icon lebih besar */
+            height: 3.5rem !important;
+            border-width: 4px !important; /* Ketebalan garis */
         }
 
         </style>
@@ -1939,29 +1959,39 @@ def render_laporan_harian_mobile():
         st.caption("Pastikan data sudah benar, lalu submit.")
 
         if st.button("✅ Submit Laporan", type="primary", use_container_width=True):
-            # [OPTIMASI]: Gunakan spinner agar user tahu sistem sedang bekerja
-            with st.spinner("Sedang mengupload & menyimpan..."):
-                
-                # --- PROSES (Dipindah ke dalam spinner) ---
-                kategori_aktivitas = st.session_state.get("m_kategori", "")
-                is_kunjungan = str(kategori_aktivitas).startswith("🚗")
-                lokasi_input = st.session_state.get("m_lokasi", "") if is_kunjungan else kategori_aktivitas
-                main_deskripsi = st.session_state.get("m_deskripsi", "")
-                sosmed_link = st.session_state.get("m_sosmed", "") if "Digital Marketing" in str(kategori_aktivitas) else ""
+            
+            # --- 1. SIAPKAN VARIABEL DATA ---
+            kategori_aktivitas = st.session_state.get("m_kategori", "")
+            is_kunjungan = str(kategori_aktivitas).startswith("🚗")
+            lokasi_input = st.session_state.get("m_lokasi", "") if is_kunjungan else kategori_aktivitas
+            main_deskripsi = st.session_state.get("m_deskripsi", "")
+            sosmed_link = st.session_state.get("m_sosmed", "") if "Digital Marketing" in str(kategori_aktivitas) else ""
+            fotos = st.session_state.get("m_fotos", None)
 
-                fotos = st.session_state.get("m_fotos", None)
+            # --- 2. VALIDASI INPUT ---
+            if is_kunjungan and not str(lokasi_input).strip():
+                st.error("Lokasi kunjungan wajib diisi.")
+                st.stop()
+            
+            if (not fotos) and (not str(main_deskripsi).strip()):
+                st.error("Deskripsi wajib diisi.")
+                st.stop()
 
-                # Validasi ringkas
-                if is_kunjungan and not str(lokasi_input).strip():
-                    st.error("Lokasi kunjungan wajib diisi.")
-                    st.stop() # Hentikan proses jika invalid
-                
-                if (not fotos) and (not str(main_deskripsi).strip()):
-                    st.error("Deskripsi wajib diisi.")
-                    st.stop() # Hentikan proses jika invalid
+            # --- 3. PERSIAPAN PROGRESS BAR ---
+            # Container kosong untuk menaruh loading bar
+            progress_placeholder = st.empty()
+            
+            # Hitung total langkah (Jumlah Foto + 1 langkah simpan ke Excel/GSheet)
+            jml_foto = len(fotos) if fotos else 0
+            total_steps = jml_foto + 1 
+            current_step = 0
 
+            # Tampilkan Bar Awal (0%)
+            my_bar = progress_placeholder.progress(0, text="🚀 Memulai proses...")
+
+            try:
+                # Siapkan data timestamp & string lain
                 ts = now_ts_str()
-
                 val_kesimpulan = (st.session_state.get("m_kesimpulan") or "-").strip() or "-"
                 val_kendala = (st.session_state.get("m_kendala") or "-").strip() or "-"
                 val_kendala_klien = (st.session_state.get("m_kendala_klien") or "-").strip() or "-"
@@ -1974,11 +2004,24 @@ def render_laporan_harian_mobile():
                 rows = []
                 final_lokasi = lokasi_input if is_kunjungan else kategori_aktivitas
 
-                # Proses Upload (Berat)
+                # --- 4. PROSES UPLOAD FOTO (LOOPING) ---
                 if fotos and KONEKSI_DROPBOX_BERHASIL:
                     for i, f in enumerate(fotos):
+                        # Update Persentase Progress Bar
+                        # (Contoh: Foto 1 dari 3 => 33%)
+                        pct = float(current_step / total_steps)
+                        # Pastikan pct tidak lebih dari 1.0
+                        if pct > 1.0: pct = 1.0
+                        
+                        my_bar.progress(pct, text=f"📤 Mengupload foto ke-{i+1} dari {jml_foto}...")
+
+                        # Eksekusi Upload (Berat)
                         url = upload_ke_dropbox(f, nama_pelapor, "Laporan_Harian")
+                        
+                        # Ambil deskripsi per foto jika ada
                         desc = st.session_state.get(f"m_desc_{i}", "") or main_deskripsi or "-"
+                        
+                        # Masukkan ke list rows
                         rows.append([
                             ts, nama_pelapor, final_lokasi, desc,
                             url, sosmed_link if sosmed_link else "-",
@@ -1986,7 +2029,11 @@ def render_laporan_harian_mobile():
                             val_pending, val_feedback, val_interest,
                             val_nama_klien, val_kontak_klien
                         ])
+                        
+                        # Tambah counter langkah
+                        current_step += 1
                 else:
+                    # Jika tidak ada foto, langsung siapkan 1 baris
                     rows.append([
                         ts, nama_pelapor, final_lokasi, main_deskripsi,
                         "-", sosmed_link if sosmed_link else "-",
@@ -1995,20 +2042,37 @@ def render_laporan_harian_mobile():
                         val_nama_klien, val_kontak_klien
                     ])
 
-                # Proses Simpan ke GSheet (Berat)
+                # --- 5. PROSES SIMPAN KE DATABASE (GSHEET) ---
+                # Update bar ke langkah terakhir sebelum selesai
+                pct_save = float(current_step / total_steps)
+                if pct_save > 0.95: pct_save = 0.95 # Biarkan sisa sedikit untuk efek selesai
+                
+                my_bar.progress(pct_save, text="💾 Menyimpan data ke Database...")
+                
+                # Eksekusi Simpan (Berat)
                 ok = simpan_laporan_harian_batch(rows, nama_pelapor)
 
-            # --- SELESAI (Keluar dari spinner) ---
-            if ok:
-                st.success(f"✅ Laporan tersimpan! Reminder besok: **{val_pending}**")
-                ui_toast("Laporan tersimpan!", icon="✅")
-                
-                # [PENTING] Clear cache & jeda sedikit sebelum pindah halaman
-                st.cache_data.clear()
-                time.sleep(1) 
-                set_nav("home")
-            else:
-                st.error("Gagal simpan. Cek koneksi internet.")
+                # --- 6. FINISHING ---
+                # Set bar ke 100%
+                my_bar.progress(1.0, text="✅ Selesai!")
+                time.sleep(0.8) # Jeda sebentar agar user lihat status 100%
+                progress_placeholder.empty() # Hapus bar agar bersih
+
+                if ok:
+                    st.success(f"✅ Laporan tersimpan! Reminder: **{val_pending}**")
+                    ui_toast("Laporan tersimpan!", icon="✅")
+                    
+                    # Clear cache & Navigasi
+                    st.cache_data.clear()
+                    time.sleep(1) 
+                    set_nav("home")
+                else:
+                    st.error("Gagal menyimpan ke Database (GSheet).")
+
+            except Exception as e:
+                # Jika error, hapus bar dan tampilkan error
+                progress_placeholder.empty()
+                st.error(f"Terjadi kesalahan: {e}")
 
 
 # =========================================================
