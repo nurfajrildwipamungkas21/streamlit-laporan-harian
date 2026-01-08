@@ -2514,6 +2514,7 @@ def render_home_mobile():
         {"key": "kpi",     "icon": "🎯", "title": "Target & KPI",   "sub": "Checklist team & individu"},
         {"key": "closing", "icon": "🤝", "title": "Closing Deal",   "sub": "Catat deal + export"},
         {"key": "payment", "icon": "💳", "title": "Pembayaran",     "sub": "DP/Termin/Pelunasan + jatuh tempo"},
+        {"key": "log",     "icon": "📜", "title": "Global Audit Log", "sub": "Riwayat perubahan data (Super Admin)"},
         {"key": "admin",   "icon": "🔐", "title": "Akses Admin",    "sub": "Dashboard + kontrol (butuh login)"},
     ]
 
@@ -2688,6 +2689,7 @@ if IS_MOBILE and menu_nav != "📝 Laporan Harian":
         set_nav("home")
     
     # 2. Bottom Navigation Bar (Menu Bawah)
+    # Perbaikan: Menambahkan link nav=log dan merapikan tag HTML
     st.markdown("""
     <div class="mobile-bottom-nav">
       <a href="?nav=home">🏠</a>
@@ -2695,7 +2697,7 @@ if IS_MOBILE and menu_nav != "📝 Laporan Harian":
       <a href="?nav=kpi">🎯</a>
       <a href="?nav=closing">🤝</a>
       <a href="?nav=payment">💳</a>
-      <a href="?nav=log">📜</a> </div>
+      <a href="?nav=log">📜</a>
     </div>
     """, unsafe_allow_html=True)
     
