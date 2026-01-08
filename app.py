@@ -751,6 +751,18 @@ try:
         gc = gspread.authorize(creds)
         spreadsheet = gc.open(NAMA_GOOGLE_SHEET)
         KONEKSI_GSHEET_BERHASIL = True
+        # =========================================================
+        # [BARU] AUTO-CREATE AUDIT SHEET SAAT STARTUP
+        # =========================================================
+        # Tambahkan blok ini agar sheet otomatis dibuat saat aplikasi dibuka
+        from audit_service import ensure_audit_sheet
+        try:
+            ensure_audit_sheet(spreadsheet)
+            # print("Audit sheet ready.") # Opsional untuk debug console
+        except Exception as e:
+            st.error(f"⚠️ Sistem Error: Gagal membuat Sheet Audit otomatis. Pesan: {e}")
+            # Ini akan memunculkan kotak merah di layar jika gagal,
+            # jadi admin langsung tahu ada yang salah.
     else:
         st.error("GSheet Error: Kredensial tidak ditemukan.")
 except Exception as e:
