@@ -497,6 +497,24 @@ def inject_global_css():
             font-weight: 600 !important;
         }
 
+        /* =========================================
+           WATERMARK SECTION (tambahan dari Code 2)
+           ========================================= */
+        .sx-section-watermark{
+          position: relative;
+          margin-top: 22px;
+          opacity: 0.10;
+          display: flex;
+          justify-content: center;
+        }
+        .sx-section-watermark img{
+          max-width: 680px;
+          width: 100%;
+          height: auto;
+          border-radius: 18px;
+          filter: saturate(1.05) contrast(1.05);
+        }
+
         </style>
         """,
         unsafe_allow_html=True
@@ -674,15 +692,20 @@ def normalize_date(x):
         return None
 
 
-def get_actor_fallback(default="-") -> str:
+def get_actor_fallback(default: str = "-") -> str:
     """
     Ambil 'actor' (siapa yang mengedit) dari session_state yang tersedia.
-    Jika tidak ada, fallback ke default.
+    Jika tidak ada / kosong, fallback ke default.
     """
-    for k in ["pelapor_main", "sidebar_user", "payment_editor_name"]:
-        if k in st.session_state and safe_str(st.session_state.get(k), "").strip():
-            return safe_str(st.session_state.get(k)).strip()
+    keys = ["pelapor_main", "pelapor_desk", "sidebar_user", "payment_editor_name"]
+
+    for k in keys:
+        val = safe_str(st.session_state.get(k), "").strip()
+        if val:
+            return val
+
     return default
+
 
 
 # =========================================================
@@ -2602,96 +2625,30 @@ if IS_MOBILE and menu_nav == HOME_NAV:
     st.stop()
 
 
+menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
+
 # =========================================================
-# SIDEBAR (SpaceX-inspired)
+# NAV SYNC: query param (?nav=) -> session_state["menu_nav"]
 # =========================================================
-with st.sidebar:
-    if st.button("🔄 Refresh Data", type="primary", use_container_width=True):
-        st.cache_data.clear()
+NAV_SLUG_TO_LABEL = {
+    "home":   "📝 Laporan Harian",   # anggap Home = Laporan Harian
+    "report": "📝 Laporan Harian",
+    "kpi":    "🎯 Target & KPI",
+    "closing":"🤝 Closing Deal",
+    "payment":"💳 Pembayaran",
+    "admin":  "📊 Dashboard Admin",
+}
+
+qp_nav = st.query_params.get("nav")
+if qp_nav:
+    target_label = NAV_SLUG_TO_LABEL.get(qp_nav)
+    if target_label and st.session_state.get("menu_nav") != target_label:
+        st.session_state["menu_nav"] = target_label
         st.rerun()
-    st.markdown("<div class='sx-section-title'>Navigation</div>", unsafe_allow_html=True)
 
-    menu_items = [
-        "📝 Laporan Harian",
-        "🎯 Target & KPI",
-        "🤝 Closing Deal",
-        "💳 Pembayaran",
-    ]
-    if st.session_state["is_admin"]:
-        menu_items.append("📊 Dashboard Admin")
-
-    # SpaceX-like nav buttons
-    st.markdown("<div class='sx-nav'>", unsafe_allow_html=True)
-    for i, item in enumerate(menu_items):
-        active = (st.session_state.get("menu_nav") == item)
-        btype = "primary" if active else "secondary"
-        if st.button(item, use_container_width=True, type=btype, key=f"nav_{i}"):
-            st.session_state["menu_nav"] = item
-            st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.divider()
-
-    # Admin login
-    if not st.session_state["is_admin"]:
-        with st.expander("🔐 Akses Khusus Admin", expanded=False):
-            if not admin_secret_configured():
-                st.warning("Admin login belum aktif: set `password_admin_hash` (disarankan) atau `password_admin` di Streamlit Secrets.")
-            pwd = st.text_input("Password:", type="password", key="input_pwd")
-            if st.button("Login Admin", use_container_width=True):
-                if verify_admin_password(pwd):
-                    st.session_state["is_admin"] = True
-                    # Jika baru login, refresh menu agar Dashboard muncul.
-                    st.rerun()
-                else:
-                    st.error("Password salah / belum dikonfigurasi!")
-    else:
-        if st.button("🔓 Logout Admin", use_container_width=True):
-            st.session_state["is_admin"] = False
-            # Kalau sedang di dashboard, pindahkan ke laporan harian.
-            if st.session_state.get("menu_nav") == "📊 Dashboard Admin":
-                st.session_state["menu_nav"] = "📝 Laporan Harian"
-            st.rerun()
-
-    st.divider()
-
-    # Quick stats (lightweight)
-    try:
-        df_pay_sidebar = load_pembayaran_dp()
-        overdue_s, due_soon_s = build_alert_pembayaran(df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
-        st.markdown("<div class='sx-section-title'>Quick Stats</div>", unsafe_allow_html=True)
-        st.metric("Overdue Payment", int(len(overdue_s)) if overdue_s is not None else 0)
-        st.metric("Due ≤ 3 hari", int(len(due_soon_s)) if due_soon_s is not None else 0)
-    except Exception:
-        pass
-
-    st.divider()
-    st.caption("Tip: navigasi ala SpaceX → ringkas, jelas, fokus.")
-
-
+# refresh local var setelah kemungkinan reroute
 menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
-menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
-
-# [MULAI KODE TAMBAHAN: FIX NAVIGASI MOBILE]
-# Ini akan memunculkan tombol Back & Menu Bawah untuk Closing, KPI, Payment, dll.
-if IS_MOBILE and menu_nav != "📝 Laporan Harian":
-    # 1. Tombol Kembali ke Beranda
-    if st.button("⬅️ Kembali ke Beranda", use_container_width=True, key="global_mobile_back"):
-        set_nav("home")
-    
-    # 2. Bottom Navigation Bar (Menu Bawah)
-    st.markdown("""
-    <div class="mobile-bottom-nav">
-      <a href="?nav=home">🏠</a>
-      <a href="?nav=report">📝</a>
-      <a href="?nav=kpi">🎯</a>
-      <a href="?nav=closing">🤝</a>
-      <a href="?nav=payment">💳</a>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.divider()
 
 
 # =========================================================
@@ -3147,17 +3104,37 @@ elif menu_nav == "🎯 Target & KPI":
                         st.cache_data.clear()
                         st.rerun()
                 
+                # ✅ Pastikan selalu ada actor (taruh di atas, sebelum dipakai)
+                actor = get_actor_fallback(default="Admin")
+
                 with c_upload:
-                    with st.expander("📂 Upload Bukti / Catatan (Per Item)"):
-                        sel_misi = st.selectbox("Pilih Misi", df_team["Misi"].unique())
-                        note_misi = st.text_area("Catatan Tambahan")
-                        file_misi = st.file_uploader("Bukti", key="up_team_desk")
-                        if st.button("Update Bukti Team"):
-                            res, msg = update_evidence_row(SHEET_TARGET_TEAM, sel_misi, note_misi, file_misi, actor, "Team")
-                            if res: st.success("Updated!"); st.rerun()
-                            else: st.error(msg)
-            else:
-                st.info("Belum ada target team.")
+                    if not df_team.empty:
+                        with st.expander("📂 Upload Bukti / Catatan (Per Item)"):
+                            sel_misi = st.selectbox(
+                                "Pilih Misi",
+                                df_team["Misi"].dropna().unique(),
+                                key="sel_misi_team_desk",
+                            )
+                            note_misi = st.text_area("Catatan Tambahan", key="note_misi_team_desk")
+                            file_misi = st.file_uploader("Bukti", key="up_team_desk")
+
+                            if st.button("Update Bukti Team", key="btn_update_bukti_team_desk"):
+                                res, msg = update_evidence_row(
+                                    SHEET_TARGET_TEAM,
+                                    sel_misi,
+                                    note_misi,
+                                    file_misi,
+                                    actor,
+                                    "Team",
+                                )
+                                if res:
+                                    st.success("Updated!")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                    else:
+                        st.info("Belum ada target team.")
+
 
         # TAB 2: INDIVIDU
         with tab2:
