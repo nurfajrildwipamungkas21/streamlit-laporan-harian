@@ -3565,13 +3565,13 @@ elif menu_nav == "📊 Dashboard Admin":
                     df_all["Kategori"] = "Umum"
 
             # 3. Navigasi Tab Dashboard
-            tab_prod, tab_leads, tab_review, tab_galeri, tab_data, tab_config = st.tabs([
+            tab_prod, tab_leads, tab_review, tab_galeri, tab_data, tab_config, tab_super = st.tabs([
                 "📈 Produktivitas", 
                 "🧲 Leads & Interest", 
                 "💬 Review & Feedback", 
                 "🖼️ Galeri Bukti", 
                 "📦 Master Data", 
-                "⚙️ Config Staff"
+                "⚙️ Config Staff",
                 "⚡ SUPER EDITOR"
             ])
 
