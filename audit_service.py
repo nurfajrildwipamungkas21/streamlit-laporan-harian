@@ -28,8 +28,10 @@ AUDIT_COLS = [
 
 def ensure_audit_sheet(spreadsheet):
     """
-    Memastikan tab audit tersedia dengan Formatting Rapi.
-    Menggunakan fungsi native gspread agar lebih stabil dan anti-error.
+    Memastikan tab audit tersedia dengan Formatting Cerdas:
+    1. Header Biru & Bold.
+    2. Kolom A-H: AUTO-RESIZE (Menyesuaikan panjang tulisan).
+    3. Kolom I (Rincian): FIXED WIDTH (Agar tidak melebar ke samping) + Wrap Text.
     """
     try:
         # 1. GET / CREATE SHEET
@@ -42,80 +44,89 @@ def ensure_audit_sheet(spreadsheet):
         # 2. PASTIKAN HEADER UPDATE
         current_header = ws.row_values(1)
         if not current_header or current_header[0] != AUDIT_COLS[0]:
-            # Update cell A1:I1 sekaligus
-            range_header = f"A1:{chr(65 + len(AUDIT_COLS) - 1)}1" # A1:I1
+            range_header = f"A1:{chr(65 + len(AUDIT_COLS) - 1)}1"
             ws.update(range_name=range_header, values=[AUDIT_COLS], value_input_option="USER_ENTERED")
 
         # ==========================================
-        # 3. FORMATTING (SAFE MODE)
+        # 3. FORMATTING (Hybrid: Gspread + Batch Update)
         # ==========================================
-        # Kita pisah-pisah agar jika satu gagal, yang lain tetap jalan.
         
-        # A. Freeze Header (Baris 1)
-        try:
-            ws.freeze(rows=1)
-        except Exception as e:
-            print(f"[Warn] Freeze gagal: {e}")
+        sheet_id = ws.id
 
-        # B. Atur Lebar Kolom (Satu per satu agar aman)
-        # Index kolom di gspread dimulai dari 1 (A=1, B=2, dst)
-        widths = {
-            1: 160, # A: Waktu
-            2: 120, # B: Pelaku
-            3: 130, # C: Jabatan
-            4: 130, # D: Fitur
-            5: 150, # E: Nama Data
-            6: 80,  # F: Baris Ke
-            7: 100, # G: Aksi
-            8: 250, # H: Alasan
-            9: 500  # I: Rincian (Paling Lebar)
-        }
-        try:
-            # Batch update column width (Lebih efisien daripada loop satu-satu)
-            body_width = {"requests": []}
-            for col_idx, px in widths.items():
-                body_width["requests"].append({
-                    "updateDimensionProperties": {
-                        "range": {
-                            "sheetId": ws.id,
-                            "dimension": "COLUMNS",
-                            "startIndex": col_idx - 1,
-                            "endIndex": col_idx
-                        },
-                        "properties": {"pixelSize": px},
-                        "fields": "pixelSize"
+        # A. Styling Header & Body (Warna, Font, Wrap)
+        # Kita pakai formatting batch agar hemat API call
+        requests = [
+            # 1. Freeze Row 1
+            {
+                "updateSheetProperties": {
+                    "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
+                    "fields": "gridProperties.frozenRowCount"
+                }
+            },
+            # 2. Format Header (Biru, Bold, Center)
+            {
+                "repeatCell": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1},
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 0.97}, # Biru Muda
+                            "horizontalAlignment": "CENTER",
+                            "verticalAlignment": "MIDDLE",
+                            "textFormat": {"bold": True, "fontSize": 10}
+                        }
+                    },
+                    "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat)"
+                }
+            },
+            # 3. Format Body (Wrap Text, Align Top)
+            {
+                "repeatCell": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": 1},
+                    "cell": {
+                        "userEnteredFormat": {
+                            "verticalAlignment": "TOP",   # Teks mulai dari atas
+                            "wrapStrategy": "WRAP"        # Teks turun ke bawah
+                        }
+                    },
+                    "fields": "userEnteredFormat(verticalAlignment,wrapStrategy)"
+                }
+            },
+            # 4. AUTO RESIZE Kolom A - H (Index 0 - 7)
+            # Ini kuncinya! Biar kolom menyesuaikan panjang tulisan "Admin", "Closing_Deal", dll.
+            {
+                "autoResizeDimensions": {
+                    "dimensions": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": 0, # Kolom A
+                        "endIndex": 8    # Kolom H (Sebelum Rincian)
                     }
-                })
-            ws.batch_update(body_width)
-        except Exception as e:
-            print(f"[Warn] Width formatting gagal: {e}")
+                }
+            },
+            # 5. FIXED WIDTH Kolom I (Rincian) (Index 8)
+            # Kolom Rincian kita paksa 500px, karena isinya panjang.
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": 8,
+                        "endIndex": 9
+                    },
+                    "properties": {"pixelSize": 500},
+                    "fields": "pixelSize"
+                }
+            }
+        ]
 
-        # C. Styling Header (Bold, Center, Warna Biru)
-        try:
-            ws.format("A1:I1", {
-                "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 0.97}, # Biru Muda
-                "textFormat": {"bold": True, "fontSize": 10},
-                "horizontalAlignment": "CENTER",
-                "verticalAlignment": "MIDDLE"
-            })
-        except Exception as e:
-            print(f"[Warn] Header style gagal: {e}")
-
-        # D. Styling Body (Wrap Text, Align Top)
-        # A2:I artinya dari baris 2 sampai bawah
-        try:
-            ws.format("A2:I", {
-                "wrapStrategy": "WRAP",
-                "verticalAlignment": "TOP"
-            })
-        except Exception as e:
-            print(f"[Warn] Body style gagal: {e}")
+        # Eksekusi semua format sekaligus
+        ws.batch_update({"requests": requests})
 
         return ws
 
     except Exception as e:
-        print(f"CRITICAL ERROR di ensure_audit_sheet: {e}")
-        # Kembalikan ws apa adanya agar aplikasi tidak crash total
+        print(f"[ERROR Formatting Audit]: {e}")
+        # Kembalikan ws apa adanya agar aplikasi tetap jalan meski formatting gagal
         try:
             return spreadsheet.worksheet(SHEET_AUDIT_NAME)
         except:
