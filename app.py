@@ -3963,7 +3963,8 @@ elif menu_nav == "📊 Dashboard Admin":
                     "Target Team": SHEET_TARGET_TEAM,
                     "Target Individu": SHEET_TARGET_INDIVIDU,
                     "Closing Deal": SHEET_CLOSING_DEAL,
-                    "Pembayaran": SHEET_PEMBAYARAN
+                    "Pembayaran": SHEET_PEMBAYARAN,
+                    "📜 Global Audit Log": "Global_Audit_Log"
                 }
                 
                 # Tambahan: Bisa load sheet staff individual
@@ -4820,7 +4821,8 @@ elif menu_nav == "📊 Dashboard Admin":
                     "Target Team": SHEET_TARGET_TEAM,
                     "Target Individu": SHEET_TARGET_INDIVIDU,
                     "Closing Deal": SHEET_CLOSING_DEAL,
-                    "Pembayaran": SHEET_PEMBAYARAN
+                    "Pembayaran": SHEET_PEMBAYARAN,
+                    "📜 Global Audit Log": "Global_Audit_Log"
                 }
                 
                 staff_list = get_daftar_staf_terbaru()
