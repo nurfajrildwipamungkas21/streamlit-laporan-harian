@@ -40,6 +40,15 @@ try:
 except ImportError:
     HAS_PLOTLY = False
 
+# =========================================================
+# AUDIT INIT (WAJIB: sebelum akses DB / load data / UI)
+# =========================================================
+from audit import init_audit
+
+# opsi A (paling simpel): init sekali per session
+if "audit_inited" not in st.session_state:
+    init_audit()
+    st.session_state["audit_inited"] = True
 
 # =========================================================
 # PAGE CONFIG
