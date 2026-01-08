@@ -17,13 +17,27 @@ AUDIT_COLS = [
 ]
 
 def ensure_audit_sheet(spreadsheet):
-    """Memastikan tab audit tersedia."""
+    """
+    Memastikan tab audit tersedia. 
+    Jika tidak ada, BUAT BARU SEKARANG JUGA.
+    """
     try:
+        # 1. Coba akses sheetnya
         ws = spreadsheet.worksheet(SHEET_AUDIT_NAME)
+        return ws
     except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=SHEET_AUDIT_NAME, rows=1000, cols=len(AUDIT_COLS))
-        ws.append_row(AUDIT_COLS)
-    return ws
+        # 2. Jika Error (Tidak ketemu), buat baru
+        try:
+            ws = spreadsheet.add_worksheet(title=SHEET_AUDIT_NAME, rows=2000, cols=len(AUDIT_COLS))
+            # 3. Tulis Header langsung
+            ws.update(range_name="A1", values=[AUDIT_COLS], value_input_option="USER_ENTERED")
+            # 4. Format Header (Bold & Freeze) - Opsional biar rapi
+            ws.format("A1:I1", {"textFormat": {"bold": True}})
+            ws.freeze(rows=1)
+            return ws
+        except Exception as e:
+            # Jika gagal membuat, lempar error agar ketahuan di layar
+            raise Exception(f"Gagal membuat sheet Audit otomatis: {e}")
 
 def log_admin_action(spreadsheet, actor, role, feature, target_sheet, row_idx, action, reason, changes_dict):
     """
