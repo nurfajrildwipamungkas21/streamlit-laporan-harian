@@ -16,6 +16,8 @@ import hmac
 import base64
 import textwrap
 
+from audit_service import log_admin_action, compare_and_get_changes
+
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
 # =========================================================
@@ -40,15 +42,6 @@ try:
 except ImportError:
     HAS_PLOTLY = False
 
-# =========================================================
-# AUDIT INIT (WAJIB: sebelum akses DB / load data / UI)
-# =========================================================
-from audit import init_audit
-
-# opsi A (paling simpel): init sekali per session
-if "audit_inited" not in st.session_state:
-    init_audit()
-    st.session_state["audit_inited"] = True
 
 # =========================================================
 # PAGE CONFIG
@@ -497,24 +490,6 @@ def inject_global_css():
             font-weight: 600 !important;
         }
 
-        /* =========================================
-           WATERMARK SECTION (tambahan dari Code 2)
-           ========================================= */
-        .sx-section-watermark{
-          position: relative;
-          margin-top: 22px;
-          opacity: 0.10;
-          display: flex;
-          justify-content: center;
-        }
-        .sx-section-watermark img{
-          max-width: 680px;
-          width: 100%;
-          height: auto;
-          border-radius: 18px;
-          filter: saturate(1.05) contrast(1.05);
-        }
-
         </style>
         """,
         unsafe_allow_html=True
@@ -692,20 +667,15 @@ def normalize_date(x):
         return None
 
 
-def get_actor_fallback(default: str = "-") -> str:
+def get_actor_fallback(default="-") -> str:
     """
     Ambil 'actor' (siapa yang mengedit) dari session_state yang tersedia.
-    Jika tidak ada / kosong, fallback ke default.
+    Jika tidak ada, fallback ke default.
     """
-    keys = ["pelapor_main", "pelapor_desk", "sidebar_user", "payment_editor_name"]
-
-    for k in keys:
-        val = safe_str(st.session_state.get(k), "").strip()
-        if val:
-            return val
-
+    for k in ["pelapor_main", "sidebar_user", "payment_editor_name"]:
+        if k in st.session_state and safe_str(st.session_state.get(k), "").strip():
+            return safe_str(st.session_state.get(k)).strip()
     return default
-
 
 
 # =========================================================
@@ -2691,35 +2661,30 @@ with st.sidebar:
     st.divider()
     st.caption("Tip: navigasi ala SpaceX → ringkas, jelas, fokus.")
 
+
 menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
-# =========================================================
-# MOBILE NAV (Bottom nav tampil di semua halaman mobile kecuali Home)
-# =========================================================
+menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
-HOME_NAV = "🏠 Beranda"  # samakan dengan label nav Home kamu yang sebenarnya
-
-if IS_MOBILE and menu_nav != HOME_NAV:
-    # 1) Tombol Kembali ke Beranda (opsional, tapi enak di UX)
+# [MULAI KODE TAMBAHAN: FIX NAVIGASI MOBILE]
+# Ini akan memunculkan tombol Back & Menu Bawah untuk Closing, KPI, Payment, dll.
+if IS_MOBILE and menu_nav != "📝 Laporan Harian":
+    # 1. Tombol Kembali ke Beranda
     if st.button("⬅️ Kembali ke Beranda", use_container_width=True, key="global_mobile_back"):
-        set_nav("home")  # sesuaikan dengan router/nav kamu
-
-    # 2) Bottom Navigation Bar (Menu Bawah)
-    st.markdown(
-        """
-        <div class="mobile-bottom-nav">
-          <a href="?nav=home">🏠</a>
-          <a href="?nav=report">📝</a>
-          <a href="?nav=kpi">🎯</a>
-          <a href="?nav=closing">🤝</a>
-          <a href="?nav=payment">💳</a>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
+        set_nav("home")
+    
+    # 2. Bottom Navigation Bar (Menu Bawah)
+    st.markdown("""
+    <div class="mobile-bottom-nav">
+      <a href="?nav=home">🏠</a>
+      <a href="?nav=report">📝</a>
+      <a href="?nav=kpi">🎯</a>
+      <a href="?nav=closing">🤝</a>
+      <a href="?nav=payment">💳</a>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.divider()
-
 
 
 # =========================================================
@@ -3175,37 +3140,17 @@ elif menu_nav == "🎯 Target & KPI":
                         st.cache_data.clear()
                         st.rerun()
                 
-                # ✅ Pastikan selalu ada actor (taruh di atas, sebelum dipakai)
-                actor = get_actor_fallback(default="Admin")
-
                 with c_upload:
-                    if not df_team.empty:
-                        with st.expander("📂 Upload Bukti / Catatan (Per Item)"):
-                            sel_misi = st.selectbox(
-                                "Pilih Misi",
-                                df_team["Misi"].dropna().unique(),
-                                key="sel_misi_team_desk",
-                            )
-                            note_misi = st.text_area("Catatan Tambahan", key="note_misi_team_desk")
-                            file_misi = st.file_uploader("Bukti", key="up_team_desk")
-
-                            if st.button("Update Bukti Team", key="btn_update_bukti_team_desk"):
-                                res, msg = update_evidence_row(
-                                    SHEET_TARGET_TEAM,
-                                    sel_misi,
-                                    note_misi,
-                                    file_misi,
-                                    actor,
-                                    "Team",
-                                )
-                                if res:
-                                    st.success("Updated!")
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                    else:
-                        st.info("Belum ada target team.")
-
+                    with st.expander("📂 Upload Bukti / Catatan (Per Item)"):
+                        sel_misi = st.selectbox("Pilih Misi", df_team["Misi"].unique())
+                        note_misi = st.text_area("Catatan Tambahan")
+                        file_misi = st.file_uploader("Bukti", key="up_team_desk")
+                        if st.button("Update Bukti Team"):
+                            res, msg = update_evidence_row(SHEET_TARGET_TEAM, sel_misi, note_misi, file_misi, actor, "Team")
+                            if res: st.success("Updated!"); st.rerun()
+                            else: st.error(msg)
+            else:
+                st.info("Belum ada target team.")
 
         # TAB 2: INDIVIDU
         with tab2:
@@ -3627,6 +3572,7 @@ elif menu_nav == "📊 Dashboard Admin":
                 "🖼️ Galeri Bukti", 
                 "📦 Master Data", 
                 "⚙️ Config Staff"
+                "⚡ SUPER EDITOR"
             ])
 
             # --- TAB 1: PRODUKTIVITAS ---
@@ -3869,6 +3815,108 @@ elif menu_nav == "📊 Dashboard Admin":
                                     st.success("Team Tersimpan")
                                     st.cache_data.clear()
                                     st.rerun()
+
+            # ---------------------------------------------------------
+            # TAB 7: SUPER ADMIN EDITOR (FITUR BARU)
+            # ---------------------------------------------------------
+            with tab_super:
+                st.markdown("### ⚡ Super Admin Data Editor")
+                st.warning("⚠️ **PERHATIAN:** Fitur ini dapat mengubah SEMUA data. Setiap perubahan akan dicatat di Audit Log.")
+
+                # 1. Pilih Sheet yang mau diedit
+                # List sheet sesuaikan dengan konstanta nama sheet di app.py Anda
+                sheet_options = {
+                    "Laporan Harian": "Laporan Kegiatan Harian", # Ganti variable ini sesuai app.py (nama staf)
+                    "Target Team": SHEET_TARGET_TEAM,
+                    "Target Individu": SHEET_TARGET_INDIVIDU,
+                    "Closing Deal": SHEET_CLOSING_DEAL,
+                    "Pembayaran": SHEET_PEMBAYARAN
+                }
+                
+                # Tambahan: Bisa load sheet staff individual
+                staff_list = get_daftar_staf_terbaru()
+                for s in staff_list:
+                    sheet_options[f"Laporan: {s}"] = s
+
+                selected_label = st.selectbox("Pilih Data / Sheet:", list(sheet_options.keys()))
+                target_sheet_name = sheet_options[selected_label]
+
+                # 2. Load Data Existing
+                if st.button("📂 Load Data", key="btn_load_super"):
+                    st.session_state["super_df_old"] = None # Reset
+                    
+                    # Helper load worksheet generic
+                    try:
+                        ws = spreadsheet.worksheet(target_sheet_name)
+                        data = ws.get_all_records()
+                        df = pd.DataFrame(data)
+                        # Simpan state
+                        st.session_state["super_df_old"] = df.copy()
+                        st.session_state["super_sheet_target"] = target_sheet_name
+                    except Exception as e:
+                        st.error(f"Gagal load sheet: {e}")
+
+                # 3. Editor Interface
+                if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
+                    df_old = st.session_state["super_df_old"]
+                    st.info(f"Mengedit Sheet: **{st.session_state['super_sheet_target']}** ({len(df_old)} baris)")
+
+                    # Alasan Perubahan (Wajib untuk Audit)
+                    edit_reason = st.text_input("📝 Alasan Perubahan (Wajib diisi untuk Audit Log):", placeholder="Contoh: Koreksi typo nominal salah input")
+
+                    # Data Editor
+                    edited_df = st.data_editor(df_old, use_container_width=True, num_rows="dynamic", key="super_editor")
+
+                    # 4. Tombol Simpan
+                    if st.button("💾 SIMPAN PERUBAHAN & LOG AUDIT", type="primary", use_container_width=True):
+                        if not edit_reason:
+                            st.error("❌ Alasan perubahan wajib diisi!")
+                        else:
+                            # A. Deteksi Perubahan
+                            changes = compare_and_get_changes(df_old, edited_df)
+                            
+                            if not changes:
+                                st.warning("Tidak ada perubahan data yang terdeteksi.")
+                            else:
+                                with st.spinner("Menyimpan ke Google Sheets & Mencatat Audit..."):
+                                    try:
+                                        # B. Update Google Sheets (Override Full)
+                                        ws = spreadsheet.worksheet(st.session_state["super_sheet_target"])
+                                        
+                                        # Convert DF ke List of List
+                                        # Catatan: Ini metode overwrite (hapus isi lama, ganti baru) agar akurat sesuai editor
+                                        # Jika data sangat besar, sebaiknya update per cell, tapi ini lebih aman untuk konsistensi struktur
+                                        ws.clear()
+                                        # Tulis Header & Values
+                                        params = [edited_df.columns.values.tolist()] + edited_df.astype(str).values.tolist()
+                                        ws.update(range_name="A1", values=params, value_input_option="USER_ENTERED")
+                                        
+                                        # C. Catat Log Audit
+                                        actor = "Admin" # Atau ambil dari st.session_state.get("username", "Admin")
+                                        success_log = 0
+                                        for chg in changes:
+                                            # chg['row_idx'] adalah index 0-based dataframe. Di GSheet row mulai dari 2 (1 header)
+                                            real_row = chg['row_idx'] + 2 
+                                            log_admin_action(
+                                                spreadsheet=spreadsheet,
+                                                actor=actor,
+                                                role="Super Admin",
+                                                feature="Super Editor",
+                                                target_sheet=st.session_state["super_sheet_target"],
+                                                row_idx=real_row,
+                                                action="UPDATE",
+                                                reason=edit_reason,
+                                                changes_dict=chg['diff']
+                                            )
+                                            success_log += 1
+                                        
+                                        st.success(f"✅ Berhasil! {success_log} baris data diperbarui dan tercatat di Audit Log.")
+                                        
+                                        # Update State
+                                        st.session_state["super_df_old"] = edited_df.copy()
+                                        
+                                    except Exception as e:
+                                        st.error(f"Terjadi kesalahan saat menyimpan: {e}")
 
 
 # =========================================================
