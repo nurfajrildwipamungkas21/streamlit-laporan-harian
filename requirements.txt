@@ -6,3 +6,4 @@ dropbox
 plotly
 streamlit-aggrid
 openpyxl
+streamlit-google-auth
