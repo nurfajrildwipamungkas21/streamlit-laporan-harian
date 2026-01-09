@@ -68,22 +68,22 @@ def setup_authentication():
             "client_secret": st.secrets["auth"]["client_secret"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [st.secrets["auth"]["redirect_uri"]]
+            # Pastikan ini mengambil list dari secrets atau hardcoded sementara untuk testing
+            "redirect_uris": [st.secrets["auth"]["redirect_uri"]] 
         }
     }
 
     # 2. Tulis ke file sementara 'google_credentials.json'
-    # Ini diperlukan karena library Authenticate mewajibkan file path
     with open("google_credentials.json", "w") as f:
         json.dump(client_config, f)
 
-    # 3. Inisialisasi Authenticate dengan file path tersebut
+    # 3. Inisialisasi Authenticate
     authenticator = Authenticate(
-        secret_credentials_path="google_credentials.json", # Arahkan ke file yg baru dibuat
+        secret_credentials_path="google_credentials.json",
         cookie_name="laporan_kegiatan_cookie",
         cookie_key=st.secrets["server"]["cookieSecret"],
         cookie_expiry_days=7,
-        redirect_uri=st.secrets["auth"]["redirect_uri"]
+        redirect_uri=st.secrets["auth"]["redirect_uri"] # KUNCI PENTING: Harus match 100% dengan salah satu URI di Console
     )
     return authenticator
 
