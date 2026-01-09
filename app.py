@@ -102,8 +102,8 @@ if not st.session_state.get('connected'):
         st.markdown("<h1 style='text-align: center;'>🔐 Access Control</h1>", unsafe_allow_html=True)
         st.markdown(f"<p style='text-align: center;'>{APP_TITLE}</p>", unsafe_allow_html=True)
         st.divider()
-        # Tombol Login
-        auth.login_button(button_text="Sign in with Google", justify_content="center")
+        # Tombol Login (Cukup panggil .login() tanpa argumen aneh-aneh)
+        auth.login() 
     
     st.stop() # BERHENTI DISINI jika belum login
 
