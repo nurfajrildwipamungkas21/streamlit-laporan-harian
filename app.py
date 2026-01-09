@@ -9,6 +9,11 @@ from google.oauth2.service_account import Credentials
 import dropbox
 from dropbox.exceptions import AuthError, ApiError
 from dropbox.sharing import RequestedVisibility, SharedLinkSettings
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import random
+import string
 import re
 import io
 import hashlib
@@ -17,7 +22,178 @@ import base64
 import textwrap
 
 from audit_service import log_admin_action, compare_and_get_changes
-from streamlit_google_auth import Authenticate
+
+# --- BAGIAN IMPORT OPTIONAL LIBS JANGAN DIHAPUS (Excel/AgGrid/Plotly) ---
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    from openpyxl.utils import get_column_letter
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
+
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+    HAS_AGGRID = True
+except ImportError:
+    HAS_AGGRID = False
+
+try:
+    import plotly.express as px
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
+
+
+# =========================================================
+# PAGE CONFIG
+# =========================================================
+APP_TITLE = "Sales & Marketing Action Center"
+st.set_page_config(
+    page_title=APP_TITLE,
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# =========================================================
+# SYSTEM LOGIN OTP VIA EMAIL
+# =========================================================
+
+def send_email_otp(target_email, otp_code):
+    """Mengirim kode OTP ke email target menggunakan SMTP Gmail"""
+    smtp_config = st.secrets["smtp"]
+    sender_email = smtp_config["sender_email"]
+    sender_password = smtp_config["sender_password"]
+    
+    subject = "Kode Login - Sales Action Center"
+    body = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif;">
+        <h2 style="color: #2e7d32;">Sales & Marketing Action Center</h2>
+        <p>Halo,</p>
+        <p>Gunakan kode berikut untuk masuk ke aplikasi:</p>
+        <div style="background-color: #f1f8e9; padding: 15px; border-radius: 8px; display: inline-block;">
+            <h1 style="color: #1b5e20; letter-spacing: 5px; margin: 0;">{otp_code}</h1>
+        </div>
+        <p>Kode ini berlaku untuk satu kali login. Jangan berikan kepada siapapun.</p>
+        <hr>
+        <small>Pesan otomatis dari Sistem Laporan Harian.</small>
+      </body>
+    </html>
+    """
+
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = target_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'html'))
+
+    try:
+        # Menggunakan SSL (Port 465)
+        with smtplib.SMTP_SSL(smtp_config["smtp_server"], smtp_config["smtp_port"]) as server:
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, target_email, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Gagal kirim email: {e}")
+        return False
+
+def generate_otp():
+    return ''.join(random.choices(string.digits, k=6))
+
+def login_page():
+    # Inisialisasi State Halaman Login
+    if "otp_step" not in st.session_state:
+        st.session_state["otp_step"] = 1  # 1: Input Email, 2: Input OTP
+    if "temp_email" not in st.session_state:
+        st.session_state["temp_email"] = ""
+    if "generated_otp" not in st.session_state:
+        st.session_state["generated_otp"] = ""
+
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🔐 Secure Login</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center;'>{APP_TITLE}</p>", unsafe_allow_html=True)
+    st.divider()
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # STEP 1: Masukkan Email
+        if st.session_state["otp_step"] == 1:
+            with st.form("email_form"):
+                st.info("Masukkan email terdaftar untuk menerima Kode OTP.")
+                email_input = st.text_input("Email Address")
+                if st.form_submit_button("Kirim Kode OTP", use_container_width=True, type="primary"):
+                    # Cek apakah email terdaftar di secrets
+                    users_db = st.secrets.get("users", {})
+                    
+                    # Normalisasi input (lowercase & strip)
+                    email_clean = email_input.strip().lower()
+                    
+                    if email_clean in users_db:
+                        otp = generate_otp()
+                        if send_email_otp(email_clean, otp):
+                            st.session_state["generated_otp"] = otp
+                            st.session_state["temp_email"] = email_clean
+                            st.session_state["otp_step"] = 2
+                            st.success("Kode OTP telah dikirim ke email Anda!")
+                            time.sleep(1)
+                            st.rerun()
+                    else:
+                        st.error("⛔ Akses Ditolak: Email tidak terdaftar dalam sistem.")
+
+        # STEP 2: Masukkan Kode OTP
+        elif st.session_state["otp_step"] == 2:
+            st.warning(f"Kode dikirim ke: **{st.session_state['temp_email']}**")
+            
+            with st.form("otp_form"):
+                otp_input = st.text_input("Masukkan 6 Digit Kode", max_chars=6)
+                c1, c2 = st.columns(2)
+                back = c1.form_submit_button("⬅️ Ganti Email")
+                confirm = c2.form_submit_button("Verifikasi ✅", type="primary")
+
+                if back:
+                    st.session_state["otp_step"] = 1
+                    st.rerun()
+                
+                if confirm:
+                    if otp_input == st.session_state["generated_otp"]:
+                        # Login Sukses
+                        email_fix = st.session_state["temp_email"]
+                        user_info = st.secrets["users"][email_fix]
+                        
+                        st.session_state["logged_in"] = True
+                        st.session_state["user_email"] = email_fix
+                        st.session_state["user_name"] = user_info["name"]
+                        st.session_state["user_role"] = user_info["role"]
+                        
+                        # Set admin flag
+                        st.session_state["is_admin"] = (user_info["role"] in ["admin", "manager"])
+                        
+                        st.success("Login Berhasil! Mengalihkan...")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error("Kode OTP Salah! Silakan cek email lagi.")
+
+# =========================================================
+# MAIN FLOW CHECK
+# =========================================================
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login_page()
+    st.stop() # Berhenti disini jika belum login
+
+# =========================================================
+# USER INFO SETELAH LOGIN (Variabel Global)
+# =========================================================
+# Variabel ini akan dipakai di seluruh aplikasi
+user_email = st.session_state["user_email"]
+user_name = st.session_state["user_name"]
+user_role = st.session_state["user_role"]
 
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
@@ -2815,33 +2991,38 @@ with st.sidebar:
     st.divider()
 
     # -----------------------------------------------------------
-    # GANTI BLOK LOGIN LAMA DENGAN PROFIL USER GOOGLE
+    # PROFIL USER (OTP LOGIN)
     # -----------------------------------------------------------
     st.divider()
     
-    # Layout kolom untuk Foto Profil (kiri) dan Nama/Role (kanan)
     col_p1, col_p2 = st.columns([1, 3])
     
     with col_p1:
-        # Tampilkan foto profil dari Google jika ada
-        if st.session_state.get("user_picture"):
-            st.image(st.session_state["user_picture"], width=50)
-        else:
-            st.write("👤") # Icon default jika tidak ada foto
+        st.markdown("👤") # Icon default karena OTP tidak ambil foto profil Google
             
     with col_p2:
         st.caption("Login sebagai:")
-        # Nama User
         st.markdown(f"**{st.session_state.get('user_name', 'User')}**")
         
-        # Badge Role (Merah untuk Admin, Biru untuk Manager/Staff)
         role_now = st.session_state.get("user_role", "user")
         role_color = "red" if role_now == "admin" else "blue"
         st.markdown(f":{role_color}[{role_now.upper()}]")
 
-    # Tombol Logout (Menggunakan fungsi dari library google-auth)
+    # Tombol Logout Manual (Reset State)
     if st.button("🚪 Sign Out / Logout", use_container_width=True):
-        auth.logout()
+        # Reset semua variabel sesi yang penting
+        st.session_state["logged_in"] = False
+        st.session_state["user_email"] = None
+        st.session_state["user_name"] = None
+        st.session_state["user_role"] = None
+        st.session_state["is_admin"] = False
+        
+        # Reset step OTP agar kembali ke input email saat login ulang
+        st.session_state["otp_step"] = 1 
+        st.session_state["temp_email"] = ""
+        st.session_state["generated_otp"] = ""
+        
+        st.rerun()
     
     st.divider()
 
