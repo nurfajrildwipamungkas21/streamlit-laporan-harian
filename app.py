@@ -17,6 +17,7 @@ import base64
 import textwrap
 
 from audit_service import log_admin_action, compare_and_get_changes
+from streamlit_google_auth import Authenticate
 
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
@@ -53,6 +54,68 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# =========================================================
+# SYSTEM AUTENTIKASI (GOOGLE OAUTH)
+# =========================================================
+def setup_authentication():
+    authenticator = Authenticate(
+        secret_credentials_path=None, 
+        client_id=st.secrets["auth"]["clientId"],
+        client_secret=st.secrets["auth"]["clientSecret"],
+        redirect_uri=st.secrets["auth"]["redirectUri"],
+        cookie_name="laporan_kegiatan_cookie",
+        cookie_key=st.secrets["server"]["cookieSecret"],
+        cookie_expiry_days=7
+    )
+    return authenticator
+
+# 1. Inisialisasi & Cek Login
+auth = setup_authentication()
+auth.check_authentification()
+
+# 2. Halaman Login (Jika Belum Login)
+if not st.session_state.get('connected'):
+    # Inject CSS sedikit agar tombol login rapi (tapi belum load CSS global app)
+    st.markdown("""<style>.stButton>button {width: 100%; border-radius: 20px;}</style>""", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        st.markdown("<br><br><br>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center;'>🔐 Access Control</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center;'>{APP_TITLE}</p>", unsafe_allow_html=True)
+        st.divider()
+        # Tombol Login
+        auth.login_button(button_text="Sign in with Google", justify_content="center")
+    
+    st.stop() # BERHENTI DISINI jika belum login
+
+# 3. Logika Role (Whitelist Email)
+user_email = st.session_state['user_info'].get('email')
+user_name = st.session_state['user_info'].get('name')
+user_picture = st.session_state['user_info'].get('picture')
+
+roles_config = st.secrets.get("roles", {})
+user_role = roles_config.get(user_email, "unauthorized")
+
+if user_role == "unauthorized":
+    st.error(f"⛔ Akses Ditolak. Email '{user_email}' tidak terdaftar dalam sistem.")
+    if st.button("Logout"):
+        auth.logout()
+    st.stop()
+
+# 4. Simpan Session State
+st.session_state["user_role"] = user_role
+st.session_state["user_email"] = user_email
+st.session_state["user_name"] = user_name
+st.session_state["user_picture"] = user_picture
+
+# Mapping Role ke Flag Admin Existing
+# Admin = Full Access, Manager = Full Access (tapi nanti dibatasi fiturnya di UI)
+if user_role in ["admin", "manager"]:
+    st.session_state["is_admin"] = True
+else:
+    st.session_state["is_admin"] = False
 
 # =========================================================
 # GLOBAL STYLE (SpaceX x Muhammadiyah — Elegant, International)
@@ -2734,27 +2797,35 @@ with st.sidebar:
 
     st.divider()
 
-    # Admin login
-    if not st.session_state["is_admin"]:
-        with st.expander("🔐 Akses Khusus Admin", expanded=False):
-            if not admin_secret_configured():
-                st.warning("Admin login belum aktif: set `password_admin_hash` (disarankan) atau `password_admin` di Streamlit Secrets.")
-            pwd = st.text_input("Password:", type="password", key="input_pwd")
-            if st.button("Login Admin", use_container_width=True):
-                if verify_admin_password(pwd):
-                    st.session_state["is_admin"] = True
-                    # Jika baru login, refresh menu agar Dashboard muncul.
-                    st.rerun()
-                else:
-                    st.error("Password salah / belum dikonfigurasi!")
-    else:
-        if st.button("🔓 Logout Admin", use_container_width=True):
-            st.session_state["is_admin"] = False
-            # Kalau sedang di dashboard, pindahkan ke laporan harian.
-            if st.session_state.get("menu_nav") == "📊 Dashboard Admin":
-                st.session_state["menu_nav"] = "📝 Laporan Harian"
-            st.rerun()
+    # -----------------------------------------------------------
+    # GANTI BLOK LOGIN LAMA DENGAN PROFIL USER GOOGLE
+    # -----------------------------------------------------------
+    st.divider()
+    
+    # Layout kolom untuk Foto Profil (kiri) dan Nama/Role (kanan)
+    col_p1, col_p2 = st.columns([1, 3])
+    
+    with col_p1:
+        # Tampilkan foto profil dari Google jika ada
+        if st.session_state.get("user_picture"):
+            st.image(st.session_state["user_picture"], width=50)
+        else:
+            st.write("👤") # Icon default jika tidak ada foto
+            
+    with col_p2:
+        st.caption("Login sebagai:")
+        # Nama User
+        st.markdown(f"**{st.session_state.get('user_name', 'User')}**")
+        
+        # Badge Role (Merah untuk Admin, Biru untuk Manager/Staff)
+        role_now = st.session_state.get("user_role", "user")
+        role_color = "red" if role_now == "admin" else "blue"
+        st.markdown(f":{role_color}[{role_now.upper()}]")
 
+    # Tombol Logout (Menggunakan fungsi dari library google-auth)
+    if st.button("🚪 Sign Out / Logout", use_container_width=True):
+        auth.logout()
+    
     st.divider()
 
     # Quick stats (lightweight)
@@ -4047,107 +4118,115 @@ elif menu_nav == "📊 Dashboard Admin":
                                     st.rerun()
 
             # ---------------------------------------------------------
-            # TAB 7: SUPER ADMIN EDITOR (FITUR BARU)
+            # TAB 7: SUPER ADMIN EDITOR (Hanya untuk Admin, Manager disembunyikan)
             # ---------------------------------------------------------
-            with tab_super:
-                st.markdown("### ⚡ Super Admin Data Editor")
-                st.warning("⚠️ **PERHATIAN:** Fitur ini dapat mengubah SEMUA data. Setiap perubahan akan dicatat di Audit Log.")
+            # Cek role user dari session state yang sudah di-set saat login
+            if st.session_state.get("user_role") == "admin":
+                with tab_super:
+                    st.markdown("### ⚡ Super Admin Data Editor")
+                    st.warning("⚠️ **PERHATIAN:** Fitur ini dapat mengubah SEMUA data. Setiap perubahan akan dicatat di Audit Log.")
 
-                # 1. Pilih Sheet yang mau diedit
-                # List sheet sesuaikan dengan konstanta nama sheet di app.py Anda
-                sheet_options = {
-                    "Laporan Harian": "Laporan Kegiatan Harian", # Ganti variable ini sesuai app.py (nama staf)
-                    "Target Team": SHEET_TARGET_TEAM,
-                    "Target Individu": SHEET_TARGET_INDIVIDU,
-                    "Closing Deal": SHEET_CLOSING_DEAL,
-                    "Pembayaran": SHEET_PEMBAYARAN,
-                    "📜 Global Audit Log": "Global_Audit_Log"
-                }
-                
-                # Tambahan: Bisa load sheet staff individual
-                staff_list = get_daftar_staf_terbaru()
-                for s in staff_list:
-                    sheet_options[f"Laporan: {s}"] = s
-
-                selected_label = st.selectbox("Pilih Data / Sheet:", list(sheet_options.keys()))
-                target_sheet_name = sheet_options[selected_label]
-
-                # 2. Load Data Existing
-                if st.button("📂 Load Data", key="btn_load_super"):
-                    st.session_state["super_df_old"] = None # Reset
+                    # 1. Pilih Sheet yang mau diedit
+                    # List sheet sesuaikan dengan konstanta nama sheet di app.py Anda
+                    sheet_options = {
+                        "Laporan Harian": "Laporan Kegiatan Harian", # Ganti variable ini sesuai app.py (nama staf)
+                        "Target Team": SHEET_TARGET_TEAM,
+                        "Target Individu": SHEET_TARGET_INDIVIDU,
+                        "Closing Deal": SHEET_CLOSING_DEAL,
+                        "Pembayaran": SHEET_PEMBAYARAN,
+                        "📜 Global Audit Log": "Global_Audit_Log"
+                    }
                     
-                    # Helper load worksheet generic
-                    try:
-                        ws = spreadsheet.worksheet(target_sheet_name)
-                        data = ws.get_all_records()
-                        df = pd.DataFrame(data)
-                        # Simpan state
-                        st.session_state["super_df_old"] = df.copy()
-                        st.session_state["super_sheet_target"] = target_sheet_name
-                    except Exception as e:
-                        st.error(f"Gagal load sheet: {e}")
+                    # Tambahan: Bisa load sheet staff individual
+                    staff_list = get_daftar_staf_terbaru()
+                    for s in staff_list:
+                        sheet_options[f"Laporan: {s}"] = s
 
-                # 3. Editor Interface
-                if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
-                    df_old = st.session_state["super_df_old"]
-                    st.info(f"Mengedit Sheet: **{st.session_state['super_sheet_target']}** ({len(df_old)} baris)")
+                    selected_label = st.selectbox("Pilih Data / Sheet:", list(sheet_options.keys()))
+                    target_sheet_name = sheet_options[selected_label]
 
-                    # Alasan Perubahan (Wajib untuk Audit)
-                    edit_reason = st.text_input("📝 Alasan Perubahan (Wajib diisi untuk Audit Log):", placeholder="Contoh: Koreksi typo nominal salah input")
+                    # 2. Load Data Existing
+                    if st.button("📂 Load Data", key="btn_load_super"):
+                        st.session_state["super_df_old"] = None # Reset
+                        
+                        # Helper load worksheet generic
+                        try:
+                            ws = spreadsheet.worksheet(target_sheet_name)
+                            data = ws.get_all_records()
+                            df = pd.DataFrame(data)
+                            # Simpan state
+                            st.session_state["super_df_old"] = df.copy()
+                            st.session_state["super_sheet_target"] = target_sheet_name
+                        except Exception as e:
+                            st.error(f"Gagal load sheet: {e}")
 
-                    # Data Editor
-                    edited_df = st.data_editor(df_old, use_container_width=True, num_rows="dynamic", key="super_editor")
+                    # 3. Editor Interface
+                    if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
+                        df_old = st.session_state["super_df_old"]
+                        st.info(f"Mengedit Sheet: **{st.session_state['super_sheet_target']}** ({len(df_old)} baris)")
 
-                    # 4. Tombol Simpan
-                    if st.button("💾 SIMPAN PERUBAHAN & LOG AUDIT", type="primary", use_container_width=True):
-                        if not edit_reason:
-                            st.error("❌ Alasan perubahan wajib diisi!")
-                        else:
-                            # A. Deteksi Perubahan
-                            changes = compare_and_get_changes(df_old, edited_df)
-                            
-                            if not changes:
-                                st.warning("Tidak ada perubahan data yang terdeteksi.")
+                        # Alasan Perubahan (Wajib untuk Audit)
+                        edit_reason = st.text_input("📝 Alasan Perubahan (Wajib diisi untuk Audit Log):", placeholder="Contoh: Koreksi typo nominal salah input")
+
+                        # Data Editor
+                        edited_df = st.data_editor(df_old, use_container_width=True, num_rows="dynamic", key="super_editor")
+
+                        # 4. Tombol Simpan
+                        if st.button("💾 SIMPAN PERUBAHAN & LOG AUDIT", type="primary", use_container_width=True):
+                            if not edit_reason:
+                                st.error("❌ Alasan perubahan wajib diisi!")
                             else:
-                                with st.spinner("Menyimpan ke Google Sheets & Mencatat Audit..."):
-                                    try:
-                                        # B. Update Google Sheets (Override Full)
-                                        ws = spreadsheet.worksheet(st.session_state["super_sheet_target"])
-                                        
-                                        # Convert DF ke List of List
-                                        # Catatan: Ini metode overwrite (hapus isi lama, ganti baru) agar akurat sesuai editor
-                                        # Jika data sangat besar, sebaiknya update per cell, tapi ini lebih aman untuk konsistensi struktur
-                                        ws.clear()
-                                        # Tulis Header & Values
-                                        params = [edited_df.columns.values.tolist()] + edited_df.astype(str).values.tolist()
-                                        ws.update(range_name="A1", values=params, value_input_option="USER_ENTERED")
-                                        
-                                        # C. Catat Log Audit
-                                        actor = "Admin" # Atau ambil dari st.session_state.get("username", "Admin")
-                                        success_log = 0
-                                        for chg in changes:
-                                            # chg['row_idx'] adalah index 0-based dataframe. Di GSheet row mulai dari 2 (1 header)
-                                            real_row = chg['row_idx'] + 2 
-                                            log_admin_action(
-                                                spreadsheet=spreadsheet,
-                                                actor=actor,
-                                                role="Super Admin",
-                                                feature="Super Editor",
-                                                target_sheet=st.session_state["super_sheet_target"],
-                                                row_idx=real_row,
-                                                action="UPDATE",
-                                                reason=edit_reason,
-                                                changes_dict=chg['diff']
-                                            )
-                                            success_log += 1
-                                        
-                                        st.success(f"✅ Berhasil! {success_log} baris data diperbarui dan tercatat di Audit Log.")
-                                        
-                                        # Update State
-                                        st.session_state["super_df_old"] = edited_df.copy()
-                                        
-                                    except Exception as e:
-                                        st.error(f"Terjadi kesalahan saat menyimpan: {e}")
+                                # A. Deteksi Perubahan
+                                changes = compare_and_get_changes(df_old, edited_df)
+                                
+                                if not changes:
+                                    st.warning("Tidak ada perubahan data yang terdeteksi.")
+                                else:
+                                    with st.spinner("Menyimpan ke Google Sheets & Mencatat Audit..."):
+                                        try:
+                                            # B. Update Google Sheets (Override Full)
+                                            ws = spreadsheet.worksheet(st.session_state["super_sheet_target"])
+                                            
+                                            # Convert DF ke List of List
+                                            # Catatan: Ini metode overwrite (hapus isi lama, ganti baru) agar akurat sesuai editor
+                                            # Jika data sangat besar, sebaiknya update per cell, tapi ini lebih aman untuk konsistensi struktur
+                                            ws.clear()
+                                            # Tulis Header & Values
+                                            params = [edited_df.columns.values.tolist()] + edited_df.astype(str).values.tolist()
+                                            ws.update(range_name="A1", values=params, value_input_option="USER_ENTERED")
+                                            
+                                            # C. Catat Log Audit
+                                            # Ambil email/nama user yang sedang login dari session state
+                                            actor = st.session_state.get("user_email") or st.session_state.get("user_name") or "Admin"
+                                            
+                                            success_log = 0
+                                            for chg in changes:
+                                                # chg['row_idx'] adalah index 0-based dataframe. Di GSheet row mulai dari 2 (1 header)
+                                                real_row = chg['row_idx'] + 2 
+                                                log_admin_action(
+                                                    spreadsheet=spreadsheet,
+                                                    actor=actor,
+                                                    role="Super Admin",
+                                                    feature="Super Editor",
+                                                    target_sheet=st.session_state["super_sheet_target"],
+                                                    row_idx=real_row,
+                                                    action="UPDATE",
+                                                    reason=edit_reason,
+                                                    changes_dict=chg['diff']
+                                                )
+                                                success_log += 1
+                                            
+                                            st.success(f"✅ Berhasil! {success_log} baris data diperbarui dan tercatat di Audit Log.")
+                                            
+                                            # Update State
+                                            st.session_state["super_df_old"] = edited_df.copy()
+                                            
+                                        except Exception as e:
+                                            st.error(f"Terjadi kesalahan saat menyimpan: {e}")
+            else:
+                # Jika bukan admin (misal manager), tampilkan pesan akses ditolak
+                with tab_super:
+                    st.warning("🔒 Akses Super Editor hanya untuk role: ADMIN.")
 
 
 # =========================================================
@@ -4905,91 +4984,106 @@ elif menu_nav == "📊 Dashboard Admin":
                             else:
                                 st.error(msg)
 
+# ---------------------------------------------------------
+            # TAB 7: SUPER ADMIN EDITOR (FITUR KHUSUS ADMIN)
             # ---------------------------------------------------------
-            # TAB 7: SUPER ADMIN EDITOR (FITUR BARU)
-            # ---------------------------------------------------------
-            with tab_super:
-                st.markdown("### ⚡ Super Admin Data Editor")
-                st.warning("⚠️ **PERHATIAN:** Fitur ini dapat mengubah SEMUA data. Setiap perubahan akan dicatat di Audit Log.")
+            
+            # Cek apakah user adalah ADMIN. Jika manager/staff, sembunyikan fitur ini.
+            if st.session_state.get("user_role") == "admin":
+                with tab_super:
+                    st.markdown("### ⚡ Super Admin Data Editor")
+                    st.warning("⚠️ **PERHATIAN:** Fitur ini dapat mengubah SEMUA data. Setiap perubahan akan dicatat di Audit Log.")
 
-                # 1. Pilih Sheet yang mau diedit
-                sheet_options = {
-                    "Laporan Harian": "Laporan Kegiatan Harian", 
-                    "Target Team": SHEET_TARGET_TEAM,
-                    "Target Individu": SHEET_TARGET_INDIVIDU,
-                    "Closing Deal": SHEET_CLOSING_DEAL,
-                    "Pembayaran": SHEET_PEMBAYARAN,
-                    "📜 Global Audit Log": "Global_Audit_Log"
-                }
-                
-                staff_list = get_daftar_staf_terbaru()
-                for s in staff_list:
-                    sheet_options[f"Laporan: {s}"] = s
-
-                selected_label = st.selectbox("Pilih Data / Sheet:", list(sheet_options.keys()))
-                target_sheet_name = sheet_options[selected_label]
-
-                # 2. Load Data Existing
-                if st.button("📂 Load Data", key="btn_load_super"):
-                    st.session_state["super_df_old"] = None 
+                    # 1. Pilih Sheet yang mau diedit
+                    sheet_options = {
+                        "Laporan Harian": "Laporan Kegiatan Harian", 
+                        "Target Team": SHEET_TARGET_TEAM,
+                        "Target Individu": SHEET_TARGET_INDIVIDU,
+                        "Closing Deal": SHEET_CLOSING_DEAL,
+                        "Pembayaran": SHEET_PEMBAYARAN,
+                        "📜 Global Audit Log": "Global_Audit_Log"
+                    }
                     
-                    try:
-                        ws = spreadsheet.worksheet(target_sheet_name)
-                        data = ws.get_all_records()
-                        df = pd.DataFrame(data)
-                        st.session_state["super_df_old"] = df.copy()
-                        st.session_state["super_sheet_target"] = target_sheet_name
-                    except Exception as e:
-                        st.error(f"Gagal load sheet: {e}")
+                    staff_list = get_daftar_staf_terbaru()
+                    for s in staff_list:
+                        sheet_options[f"Laporan: {s}"] = s
 
-                # 3. Editor Interface
-                if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
-                    df_old = st.session_state["super_df_old"]
-                    st.info(f"Mengedit Sheet: **{st.session_state['super_sheet_target']}** ({len(df_old)} baris)")
+                    selected_label = st.selectbox("Pilih Data / Sheet:", list(sheet_options.keys()))
+                    target_sheet_name = sheet_options[selected_label]
 
-                    edit_reason = st.text_input("📝 Alasan Perubahan (Wajib diisi untuk Audit Log):", placeholder="Contoh: Koreksi typo nominal salah input")
+                    # 2. Load Data Existing
+                    if st.button("📂 Load Data", key="btn_load_super"):
+                        st.session_state["super_df_old"] = None 
+                        
+                        try:
+                            ws = spreadsheet.worksheet(target_sheet_name)
+                            data = ws.get_all_records()
+                            df = pd.DataFrame(data)
+                            st.session_state["super_df_old"] = df.copy()
+                            st.session_state["super_sheet_target"] = target_sheet_name
+                        except Exception as e:
+                            st.error(f"Gagal load sheet: {e}")
 
-                    edited_df = st.data_editor(df_old, use_container_width=True, num_rows="dynamic", key="super_editor")
+                    # 3. Editor Interface
+                    if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
+                        df_old = st.session_state["super_df_old"]
+                        st.info(f"Mengedit Sheet: **{st.session_state['super_sheet_target']}** ({len(df_old)} baris)")
 
-                    # 4. Tombol Simpan
-                    if st.button("💾 SIMPAN PERUBAHAN & LOG AUDIT", type="primary", use_container_width=True):
-                        if not edit_reason:
-                            st.error("❌ Alasan perubahan wajib diisi!")
-                        else:
-                            changes = compare_and_get_changes(df_old, edited_df)
-                            
-                            if not changes:
-                                st.warning("Tidak ada perubahan data yang terdeteksi.")
+                        edit_reason = st.text_input("📝 Alasan Perubahan (Wajib diisi untuk Audit Log):", placeholder="Contoh: Koreksi typo nominal salah input")
+
+                        edited_df = st.data_editor(df_old, use_container_width=True, num_rows="dynamic", key="super_editor")
+
+                        # 4. Tombol Simpan
+                        if st.button("💾 SIMPAN PERUBAHAN & LOG AUDIT", type="primary", use_container_width=True):
+                            if not edit_reason:
+                                st.error("❌ Alasan perubahan wajib diisi!")
                             else:
-                                with st.spinner("Menyimpan ke Google Sheets & Mencatat Audit..."):
-                                    try:
-                                        ws = spreadsheet.worksheet(st.session_state["super_sheet_target"])
-                                        
-                                        ws.clear()
-                                        params = [edited_df.columns.values.tolist()] + edited_df.astype(str).values.tolist()
-                                        ws.update(range_name="A1", values=params, value_input_option="USER_ENTERED")
-                                        
-                                        actor = "Admin"
-                                        success_log = 0
-                                        for chg in changes:
-                                            real_row = chg['row_idx'] + 2 
-                                            log_admin_action(
-                                                spreadsheet=spreadsheet,
-                                                actor=actor,
-                                                role="Super Admin",
-                                                feature="Super Editor",
-                                                target_sheet=st.session_state["super_sheet_target"],
-                                                row_idx=real_row,
-                                                action="UPDATE",
-                                                reason=edit_reason,
-                                                changes_dict=chg['diff']
-                                            )
-                                            success_log += 1
-                                        
-                                        st.success(f"✅ Berhasil! {success_log} baris data diperbarui dan tercatat di Audit Log.")
-                                        st.session_state["super_df_old"] = edited_df.copy()
-                                        
-                                    except Exception as e:
-                                        st.error(f"Terjadi kesalahan saat menyimpan: {e}")
-
-        render_section_watermark()
+                                changes = compare_and_get_changes(df_old, edited_df)
+                                
+                                if not changes:
+                                    st.warning("Tidak ada perubahan data yang terdeteksi.")
+                                else:
+                                    with st.spinner("Menyimpan ke Google Sheets & Mencatat Audit..."):
+                                        try:
+                                            # A. Update Google Sheets (Override Full)
+                                            ws = spreadsheet.worksheet(st.session_state["super_sheet_target"])
+                                            
+                                            ws.clear()
+                                            params = [edited_df.columns.values.tolist()] + edited_df.astype(str).values.tolist()
+                                            ws.update(range_name="A1", values=params, value_input_option="USER_ENTERED")
+                                            
+                                            # B. Catat Log Audit (Gunakan email user asli)
+                                            # Ambil email/nama dari session state
+                                            real_actor = st.session_state.get("user_email") or st.session_state.get("user_name") or "Admin"
+                                            
+                                            success_log = 0
+                                            for chg in changes:
+                                                real_row = chg['row_idx'] + 2 
+                                                log_admin_action(
+                                                    spreadsheet=spreadsheet,
+                                                    actor=real_actor, # <-- Pake variabel real_actor
+                                                    role="Super Admin",
+                                                    feature="Super Editor",
+                                                    target_sheet=st.session_state["super_sheet_target"],
+                                                    row_idx=real_row,
+                                                    action="UPDATE",
+                                                    reason=edit_reason,
+                                                    changes_dict=chg['diff']
+                                                )
+                                                success_log += 1
+                                            
+                                            st.success(f"✅ Berhasil! {success_log} baris data diperbarui dan tercatat di Audit Log.")
+                                            
+                                            # Update State agar tidak perlu reload
+                                            st.session_state["super_df_old"] = edited_df.copy()
+                                            
+                                        except Exception as e:
+                                            st.error(f"Terjadi kesalahan saat menyimpan: {e}")
+            
+            else:
+                # Jika user BUKAN admin (misal: manager), tampilkan pesan akses ditolak
+                with tab_super:
+                    st.warning("🔒 Akses Super Editor hanya tersedia untuk role: ADMIN.")
+            
+            # Render watermark di luar tabs (agar selalu muncul di bawah)
+            render_section_watermark()
