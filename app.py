@@ -58,15 +58,32 @@ st.set_page_config(
 # =========================================================
 # SYSTEM AUTENTIKASI (GOOGLE OAUTH)
 # =========================================================
+import json # Pastikan json diimport
+
 def setup_authentication():
+    # 1. Buat dictionary config sesuai format Google
+    client_config = {
+        "web": {
+            "client_id": st.secrets["auth"]["client_id"],
+            "client_secret": st.secrets["auth"]["client_secret"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [st.secrets["auth"]["redirect_uri"]]
+        }
+    }
+
+    # 2. Tulis ke file sementara 'google_credentials.json'
+    # Ini diperlukan karena library Authenticate mewajibkan file path
+    with open("google_credentials.json", "w") as f:
+        json.dump(client_config, f)
+
+    # 3. Inisialisasi Authenticate dengan file path tersebut
     authenticator = Authenticate(
-        secret_credentials_path=None, 
-        client_id=st.secrets["auth"]["clientId"],
-        client_secret=st.secrets["auth"]["clientSecret"],
-        redirect_uri=st.secrets["auth"]["redirectUri"],
+        secret_credentials_path="google_credentials.json", # Arahkan ke file yg baru dibuat
         cookie_name="laporan_kegiatan_cookie",
         cookie_key=st.secrets["server"]["cookieSecret"],
-        cookie_expiry_days=7
+        cookie_expiry_days=7,
+        redirect_uri=st.secrets["auth"]["redirect_uri"]
     )
     return authenticator
 
