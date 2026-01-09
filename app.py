@@ -104,78 +104,159 @@ def generate_otp():
     return ''.join(random.choices(string.digits, k=6))
 
 def login_page():
-    # Inisialisasi State Halaman Login
-    if "otp_step" not in st.session_state:
-        st.session_state["otp_step"] = 1  # 1: Input Email, 2: Input OTP
-    if "temp_email" not in st.session_state:
-        st.session_state["temp_email"] = ""
-    if "generated_otp" not in st.session_state:
-        st.session_state["generated_otp"] = ""
-
     st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center;'>🔐 Secure Login</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🔐 Access Portal</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center;'>{APP_TITLE}</p>", unsafe_allow_html=True)
     st.divider()
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # STEP 1: Masukkan Email
-        if st.session_state["otp_step"] == 1:
-            with st.form("email_form"):
-                st.info("Masukkan email terdaftar untuk menerima Kode OTP.")
-                email_input = st.text_input("Email Address")
-                if st.form_submit_button("Kirim Kode OTP", use_container_width=True, type="primary"):
-                    # Cek apakah email terdaftar di secrets
-                    users_db = st.secrets.get("users", {})
-                    
-                    # Normalisasi input (lowercase & strip)
-                    email_clean = email_input.strip().lower()
-                    
-                    if email_clean in users_db:
-                        otp = generate_otp()
-                        if send_email_otp(email_clean, otp):
-                            st.session_state["generated_otp"] = otp
-                            st.session_state["temp_email"] = email_clean
-                            st.session_state["otp_step"] = 2
-                            st.success("Kode OTP telah dikirim ke email Anda!")
-                            time.sleep(1)
-                            st.rerun()
-                    else:
-                        st.error("⛔ Akses Ditolak: Email tidak terdaftar dalam sistem.")
-
-        # STEP 2: Masukkan Kode OTP
-        elif st.session_state["otp_step"] == 2:
-            st.warning(f"Kode dikirim ke: **{st.session_state['temp_email']}**")
-            
-            with st.form("otp_form"):
-                otp_input = st.text_input("Masukkan 6 Digit Kode", max_chars=6)
-                c1, c2 = st.columns(2)
-                back = c1.form_submit_button("⬅️ Ganti Email")
-                confirm = c2.form_submit_button("Verifikasi ✅", type="primary")
-
-                if back:
-                    st.session_state["otp_step"] = 1
-                    st.rerun()
+        # MEMBUAT TABS: Staff vs Admin
+        tab_staff, tab_admin = st.tabs(["👤 Login Staff", "🛡️ Login Admin (OTP)"])
+        
+        # --- TAB 1: LOGIN STAFF (USERNAME & PASSWORD) ---
+        with tab_staff:
+            with st.form("form_login_staff"):
+                st.caption("Masuk menggunakan akun yang diberikan Admin.")
+                u_staff = st.text_input("Username")
+                p_staff = st.text_input("Password", type="password")
                 
-                if confirm:
-                    if otp_input == st.session_state["generated_otp"]:
-                        # Login Sukses
-                        email_fix = st.session_state["temp_email"]
-                        user_info = st.secrets["users"][email_fix]
-                        
+                if st.form_submit_button("Masuk", type="primary", use_container_width=True):
+                    # Cek ke database Google Sheet
+                    user_data = check_staff_login(u_staff, p_staff)
+                    
+                    if user_data:
+                        # SET SESSION STAFF
                         st.session_state["logged_in"] = True
-                        st.session_state["user_email"] = email_fix
-                        st.session_state["user_name"] = user_info["name"]
-                        st.session_state["user_role"] = user_info["role"]
+                        st.session_state["user_email"] = u_staff # Username jadi ID unik
+                        st.session_state["user_name"] = user_data["Nama"]
+                        st.session_state["user_role"] = "staff" # Hardcode staff
+                        st.session_state["is_admin"] = False    # Staff bukan admin
                         
-                        # Set admin flag
-                        st.session_state["is_admin"] = (user_info["role"] in ["admin", "manager"])
-                        
-                        st.success("Login Berhasil! Mengalihkan...")
+                        st.success(f"Selamat datang, {user_data['Nama']}!")
                         time.sleep(0.5)
                         st.rerun()
                     else:
-                        st.error("Kode OTP Salah! Silakan cek email lagi.")
+                        st.error("Username atau Password salah.")
+
+        # --- TAB 2: LOGIN ADMIN (EMAIL & OTP) ---
+        with tab_admin:
+            # Step 1: Input Email
+            if st.session_state.get("otp_step", 1) == 1:
+                with st.form("email_form"):
+                    st.caption("Khusus Admin & Manager (via Email Terdaftar)")
+                    email_input = st.text_input("Email Address")
+                    
+                    if st.form_submit_button("Kirim Kode OTP", use_container_width=True):
+                        # Cek whitelist di secrets.toml
+                        users_db = st.secrets.get("users", {})
+                        # Normalisasi email (hilangkan spasi & lowercase)
+                        email_clean = email_input.strip().lower()
+                        
+                        if email_clean in users_db:
+                            otp = generate_otp()
+                            # Kirim Email OTP
+                            if send_email_otp(email_clean, otp):
+                                st.session_state["generated_otp"] = otp
+                                st.session_state["temp_email"] = email_clean
+                                st.session_state["otp_step"] = 2
+                                st.success("OTP Terkirim ke email!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Gagal kirim email (Cek Config SMTP).")
+                        else:
+                            st.error("⛔ Akses Ditolak: Email tidak terdaftar sebagai Admin/Manager.")
+            
+            # Step 2: Input OTP
+            elif st.session_state.get("otp_step") == 2:
+                st.info(f"Kode dikirim ke: **{st.session_state['temp_email']}**")
+                
+                with st.form("otp_form"):
+                    otp_input = st.text_input("Kode OTP (6 Digit)", max_chars=6)
+                    c_back, c_ok = st.columns(2)
+                    
+                    # Tombol Kembali
+                    if c_back.form_submit_button("⬅️ Ganti Email"):
+                        st.session_state["otp_step"] = 1
+                        st.rerun()
+                        
+                    # Tombol Verifikasi
+                    if c_ok.form_submit_button("Verifikasi ✅", type="primary"):
+                        if otp_input == st.session_state["generated_otp"]:
+                            # LOGIN ADMIN SUKSES
+                            email_fix = st.session_state["temp_email"]
+                            user_info = st.secrets["users"][email_fix]
+                            
+                            st.session_state["logged_in"] = True
+                            st.session_state["user_email"] = email_fix
+                            st.session_state["user_name"] = user_info["name"]
+                            st.session_state["user_role"] = user_info["role"]
+                            # Set Admin Flag (Penting untuk akses menu dashboard)
+                            st.session_state["is_admin"] = True 
+                            
+                            st.success("Verifikasi Berhasil! Mengalihkan...")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.error("Kode OTP Salah.")
+                        
+# =========================================================
+# HELPER: DATABASE STAFF (GOOGLE SHEET)
+# =========================================================
+SHEET_USERS = "Config_Users"
+
+def init_user_db():
+    """Memastikan sheet user ada."""
+    try:
+        try:
+            ws = spreadsheet.worksheet(SHEET_USERS)
+        except gspread.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(title=SHEET_USERS, rows=100, cols=4)
+            ws.append_row(["Username", "Password", "Nama", "Role"], value_input_option="USER_ENTERED")
+            maybe_auto_format_sheet(ws, force=True)
+        return ws
+    except Exception:
+        return None
+
+def check_staff_login(username, password):
+    """Cek login untuk staff biasa via GSheet."""
+    ws = init_user_db()
+    if not ws: return None
+    
+    # Ambil semua data
+    records = ws.get_all_records()
+    for user in records:
+        u_db = str(user.get("Username", "")).strip()
+        p_db = str(user.get("Password", "")).strip()
+        if u_db == username and p_db == password:
+            return user # Mengembalikan dict {Username, Password, Nama, Role}
+    return None
+
+def add_staff_account(username, password, nama):
+    """Admin menambah akun staff."""
+    ws = init_user_db()
+    if not ws: return False, "DB Error"
+    
+    # Cek username kembar
+    existing_users = ws.col_values(1)
+    if username in existing_users:
+        return False, "Username sudah dipakai!"
+        
+    ws.append_row([username, password, nama, "staff"], value_input_option="USER_ENTERED")
+    return True, "Akun berhasil dibuat."
+
+def delete_staff_account(username):
+    """Admin menghapus akun staff."""
+    ws = init_user_db()
+    if not ws: return False, "DB Error"
+    
+    try:
+        cell = ws.find(username)
+        ws.delete_rows(cell.row)
+        return True, f"User {username} dihapus."
+    except gspread.exceptions.CellNotFound:
+        return False, "Username tidak ditemukan."
 
 # =========================================================
 # MAIN FLOW CHECK
@@ -3985,13 +4066,14 @@ elif menu_nav == "📊 Dashboard Admin":
                     df_all["Kategori"] = "Umum"
 
             # 3. Navigasi Tab Dashboard
-            tab_prod, tab_leads, tab_review, tab_galeri, tab_data, tab_config, tab_super = st.tabs([
+            tab_prod, tab_leads, tab_review, tab_galeri, tab_data, tab_config, tab_users, tab_super = st.tabs([
                 "📈 Produktivitas", 
                 "🧲 Leads & Interest", 
                 "💬 Review & Feedback", 
                 "🖼️ Galeri Bukti", 
                 "📦 Master Data", 
                 "⚙️ Config Staff",
+                "👥 Akun Staff",
                 "⚡ SUPER EDITOR"
             ])
 
@@ -4858,13 +4940,14 @@ elif menu_nav == "📊 Dashboard Admin":
 
             # 3. Navigasi Tab Dashboard
             # PERBAIKAN UTAMA DISINI: Menambahkan variabel 'tab_super'
-            tab_prod, tab_leads, tab_review, tab_galeri, tab_data, tab_config, tab_super = st.tabs([
+            tab_prod, tab_leads, tab_review, tab_galeri, tab_data, tab_config, tab_users, tab_super = st.tabs([
                 "📈 Produktivitas", 
                 "🧲 Leads & Interest", 
                 "💬 Review & Feedback", 
                 "🖼️ Galeri Bukti", 
                 "📦 Master Data", 
                 "⚙️ Config Staff",
+                "👥 Akun Staff",
                 "⚡ SUPER EDITOR"
             ])
 
@@ -5102,6 +5185,69 @@ elif menu_nav == "📊 Dashboard Admin":
                                 st.rerun()
                             else:
                                 st.error(msg)
+                                
+# ---------------------------------------------------------
+            # TAB BARU: KELOLA AKUN STAFF (KHUSUS ADMIN)
+            # ---------------------------------------------------------
+            with tab_users:
+                st.markdown("### 👥 Manajemen Akun Staff")
+                st.caption("Buatkan akun username & password untuk staff agar bisa login tanpa email/OTP.")
+                
+                col_add, col_view = st.columns([1, 2])
+                
+                with col_add:
+                    with st.container(border=True):
+                        st.markdown("#### ➕ Buat Akun Baru")
+                        with st.form("create_staff_acc"):
+                            new_u = st.text_input("Username (Tanpa spasi)", placeholder="cth: andi123")
+                            new_p = st.text_input("Password", type="password")
+                            new_n = st.text_input("Nama Lengkap Staff")
+                            
+                            if st.form_submit_button("Buat Akun"):
+                                if new_u and new_p and new_n:
+                                    ok, msg = add_staff_account(new_u, new_p, new_n)
+                                    if ok:
+                                        st.success(f"Akun '{new_n}' berhasil dibuat!")
+                                        # Opsional: Tambah ke list 'Nama Pelapor' juga biar sinkron
+                                        tambah_staf_baru(new_n) 
+                                        st.cache_data.clear()
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                                else:
+                                    st.warning("Semua field wajib diisi.")
+                
+                with col_view:
+                    with st.container(border=True):
+                        st.markdown("#### 📋 Daftar Staff Terdaftar")
+                        ws_u = init_user_db()
+                        if ws_u:
+                            all_users = ws_u.get_all_records()
+                            df_users = pd.DataFrame(all_users)
+                            
+                            if not df_users.empty:
+                                # Sensor password
+                                if "Password" in df_users.columns:
+                                    df_users["Password"] = "******"
+                                
+                                st.dataframe(df_users, use_container_width=True, hide_index=True)
+                                
+                                # Fitur Hapus
+                                with st.expander("🗑️ Hapus Akun Staff"):
+                                    with st.form("del_staff_form"):
+                                        del_u = st.selectbox("Pilih Username untuk dihapus:", df_users["Username"].unique())
+                                        if st.form_submit_button("Hapus Akun Permanen"):
+                                            ok, msg = delete_staff_account(del_u)
+                                            if ok:
+                                                st.success(msg)
+                                                st.cache_data.clear()
+                                                time.sleep(1)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg)
+                            else:
+                                st.info("Belum ada akun staff.")
 
 # ---------------------------------------------------------
             # TAB 7: SUPER ADMIN EDITOR (FITUR KHUSUS ADMIN)
