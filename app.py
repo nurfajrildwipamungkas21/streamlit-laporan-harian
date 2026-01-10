@@ -87,12 +87,13 @@ def get_pending_approvals():
     if not ws: return []
     return ws.get_all_records()
 
-import json
+import json  # Pastikan library json di-import
 
 def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval oleh Manager.
-    Menggabungkan logika update data dan pencatatan Audit Log (Approve/Reject).
+    Fungsi Eksekusi Approval oleh Manager (UPDATED).
+    Menyimpan detail 'Diff' saat REJECT agar Admin tahu draft mana yang ditolak.
+    Menggabungkan logika update data dan pencatatan Audit Log.
     """
     try:
         # Inisialisasi koneksi ke sheet pending (pastikan fungsi init_pending_db tersedia di scope global)
@@ -123,14 +124,14 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 old_v = old_d.get(k, "")
                 # Bandingkan nilai lama dan baru
                 if str(old_v) != str(v):
-                    diff_list.append(f"{k}: {old_v} -> {v}")
+                    diff_list.append(f"{k}: {old_v} ➡ {v}") # Pakai panah biar jelas perubahannya
             diff_str = "\n".join(diff_list)
         except Exception as e_json:
             diff_str = f"Data parsing error: {e_json}"
 
         # --- ACTION: REJECT ---
         if action == "REJECT":
-            # 1. Catat ke Audit Log bahwa Manager MENOLAK
+            # 1. Catat ke Audit Log bahwa Manager MENOLAK + Sertakan Diff-nya
             # (Pastikan fungsi log_admin_action tersedia di scope global/main script)
             log_admin_action(
                 spreadsheet=spreadsheet,
@@ -140,15 +141,15 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 target_sheet=target_sheet_name,
                 row_idx=row_target_idx + 2,
                 action="REJECTED", 
-                reason=f"Ditolak Manager. Alasan: {rejection_note}",
-                changes_dict={"Diff": diff_str}
+                reason=f"{rejection_note}", # Simpan alasan murni di sini
+                changes_dict={"Info": "Request Ditolak", "Detail Perubahan yg Ditolak": diff_str}
             )
             
             # 2. Hapus request dari sheet pending
             # Row index di GSheet = index list + 2 (header di baris 1)
             ws_pending.delete_rows(request_index_0based + 2)
             
-            return True, "Permintaan ditolak. Alasan telah dicatat di Log."
+            return True, "Permintaan ditolak. Pesan akan muncul di dashboard Admin."
             
         # --- ACTION: APPROVE ---
         elif action == "APPROVE":
@@ -184,18 +185,19 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 row_idx=gsheet_row,
                 action="APPROVED",
                 reason=req.get("Reason", "Approved by Manager"), 
-                changes_dict={"Diff": diff_str}
+                changes_dict={"Perubahan Disetujui": diff_str}
             )
 
             # 4. Hapus Request dari Sheet Pending setelah berhasil
             ws_pending.delete_rows(request_index_0based + 2)
             
-            return True, "Perubahan disetujui, diterapkan ke Database, dan dicatat di Log."
+            return True, "Perubahan disetujui & diterapkan ke Database."
             
     except Exception as e:
         return False, f"Error: {e}"
 
 # --- BAGIAN IMPORT OPTIONAL LIBS JANGAN DIHAPUS (Excel/AgGrid/Plotly) ---
+# Bagian ini dipertahankan dari Code Pertama untuk menjaga kompatibilitas arsitektur
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
@@ -4191,17 +4193,42 @@ elif menu_nav == "📜 Global Audit Log":
             if filter_sheet:
                 df_show = df_show[df_show["Nama Data / Sheet"].isin(filter_sheet)]
 
-            # --- TAMPILAN DATA ---
+            # --- TAMPILAN DATA KHUSUS (Clean View - Dari Code Kedua) ---
             st.markdown(f"**Total Record:** {len(df_show)}")
             
+            # Pilih kolom yang mau ditampilkan saja
+            cols_to_show = ["Waktu & Tanggal", "Aksi Dilakukan", "Rincian (Sebelum ➡ Sesudah)", "Alasan Perubahan", "Pelaku (User)"]
+            
+            # Pastikan kolom ada di dataframe sebelum filter (menghindari error key missing)
+            cols_final = [c for c in cols_to_show if c in df_show.columns]
+            
             st.dataframe(
-                df_show, 
+                df_show[cols_final], 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
-                    "Waktu & Tanggal": st.column_config.DatetimeColumn("Waktu", format="D MMM YYYY, HH:mm:ss"),
-                    "Rincian (Sebelum ➡ Sesudah)": st.column_config.TextColumn("Detail Perubahan", width="large"),
-                    "Alasan Perubahan": st.column_config.TextColumn("Alasan", width="medium"),
+                    "Waktu & Tanggal": st.column_config.DatetimeColumn(
+                        "🕒 Waktu", 
+                        format="D MMM YYYY, HH:mm:ss",
+                        width="medium"
+                    ),
+                    "Rincian (Sebelum ➡ Sesudah)": st.column_config.TextColumn(
+                        "📝 Detail Perubahan (Diff)", 
+                        width="large",
+                        help="Menampilkan nilai lama vs nilai baru"
+                    ),
+                    "Alasan Perubahan": st.column_config.TextColumn(
+                        "💬 Catatan / Alasan", 
+                        width="medium"
+                    ),
+                    "Aksi Dilakukan": st.column_config.TextColumn(
+                        "Status",
+                        width="small"
+                    ),
+                    "Pelaku (User)": st.column_config.TextColumn(
+                        "Oleh",
+                        width="small"
+                    )
                 }
             )
 
@@ -4698,48 +4725,65 @@ elif menu_nav == "📊 Dashboard Admin":
                     df_old = st.session_state["super_df_old"]
                     target_s = st.session_state["super_sheet_target"]
                     
-                    # --- CEK STATUS TERAKHIR DARI AUDIT LOG ---
+                    # --- CEK STATUS TERAKHIR (UPDATED - Menggabungkan Logic Code Kedua) ---
+                    # Logic: Cek Pending List dulu -> Jika kosong, baru cek History Log terakhir
                     try:
                         from audit_service import load_audit_log
                         logs = load_audit_log(spreadsheet)
                         
                         status_alert = None
-                        if not logs.empty:
+                        
+                        # 1. Cek apakah ada Request Pending untuk sheet ini?
+                        ws_pend = init_pending_db() # Pastikan fungsi ini tersedia/diimport
+                        pending_recs = ws_pend.get_all_records() if ws_pend else []
+                        is_pending = any(p['Target Sheet'] == target_s for p in pending_recs)
+
+                        if is_pending:
+                            status_alert = {
+                                "type": "info", 
+                                "msg": "⏳ MENUNGGU PERSETUJUAN", 
+                                "detail": "Perubahan pada sheet ini sedang direview oleh Manager."
+                            }
+                        
+                        # 2. Jika tidak ada pending, cek History Log terakhir
+                        elif not logs.empty:
                             # Filter log khusus sheet ini
                             logs_sheet = logs[logs["Nama Data / Sheet"] == target_s]
+                            
                             if not logs_sheet.empty:
                                 # Ambil log paling baru
                                 last_action = logs_sheet.iloc[0] 
                                 action_type = str(last_action.get("Aksi Dilakukan", "")).upper()
                                 reason_log = last_action.get("Alasan Perubahan", "-")
                                 actor_log = last_action.get("Pelaku (User)", "Manager")
+                                time_log = last_action.get("Waktu & Tanggal", "-")
                                 
                                 if "REJECTED" in action_type:
+                                     # Tampilkan Alasan Penolakan dengan detail
                                      status_alert = {
                                          "type": "error",
-                                         "msg": f"⛔ Perubahan terakhir DITOLAK oleh {actor_log}.",
-                                         "detail": f"Catatan: {reason_log}"
+                                         "msg": f"⛔ PERUBAHAN TERAKHIR DITOLAK ({time_log})",
+                                         "detail": f"👮‍♂️ Oleh: {actor_log}\n📝 Alasan: {reason_log}"
                                      }
                                 elif "APPROVED" in action_type:
                                      status_alert = {
                                          "type": "success",
-                                         "msg": "✅ Perubahan terakhir SUDAH DISETUJUI.",
-                                         "detail": f"Oleh: {actor_log}"
+                                         "msg": f"✅ DATA SUDAH DISETUJUI ({time_log})",
+                                         "detail": f"Data sheet ini adalah versi final yang disetujui."
                                      }
-                                elif "System_Pending" in str(target_s): 
-                                     status_alert = {"type": "info", "msg": "Sedang Menunggu Persetujuan...", "detail": ""}
-                    except ImportError:
-                        status_alert = None 
-                        pass
+                    except Exception as e:
+                        # Fallback jika terjadi error koneksi log
+                        print(f"Status check error: {e}")
+                        status_alert = None
 
-                    # TAMPILKAN ALERT STATUS DI ATAS EDITOR
+                    # --- TAMPILKAN ALERT STATUS DI ATAS EDITOR ---
                     if status_alert:
                         if status_alert["type"] == "error":
                             st.error(f"{status_alert['msg']}\n\n{status_alert['detail']}")
                         elif status_alert["type"] == "success":
-                            st.success(f"{status_alert['msg']}")
+                            st.success(f"{status_alert['msg']}\n{status_alert['detail']}")
                         elif status_alert["type"] == "info":
-                             st.info(f"{status_alert['msg']}")
+                             st.info(f"{status_alert['msg']}\n{status_alert['detail']}")
                     else:
                         st.info(f"Mengedit Sheet: **{st.session_state['super_sheet_target']}** ({len(df_old)} baris)")
 
@@ -4812,7 +4856,7 @@ elif menu_nav == "📊 Dashboard Admin":
                                             # Data Baru (dari editor)
                                             new_row_data = edited_df.iloc[r_idx]
 
-                                            # Data Lama (dari state awal) -- [PENGGABUNGAN CODE KEDUA]
+                                            # Data Lama (dari state awal)
                                             old_row_data = df_old.iloc[r_idx]
                                             
                                             # Kirim ke helper submit_change_request
@@ -4820,7 +4864,7 @@ elif menu_nav == "📊 Dashboard Admin":
                                                 target_sheet=st.session_state["super_sheet_target"],
                                                 row_idx_0based=r_idx,
                                                 new_df_row=new_row_data,
-                                                old_df_row=old_row_data, # <--- Parameter tambahan
+                                                old_df_row=old_row_data, # Parameter penting untuk diff check
                                                 reason=edit_reason,
                                                 requestor=st.session_state["user_name"]
                                             )
