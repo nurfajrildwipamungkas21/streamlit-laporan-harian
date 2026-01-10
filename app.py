@@ -1294,6 +1294,34 @@ def get_actor_fallback(default="-") -> str:
             return safe_str(st.session_state.get(k)).strip()
     return default
 
+def dynamic_column_mapper(df):
+    """
+    Mendeteksi dan mengganti nama kolom secara dinamis berdasarkan kata kunci.
+    """
+    mapping = {}
+    # Key: Kata kunci yang dicari, Value: Nama kolom standar yang diinginkan kode
+    keywords = {
+        "Waktu": "Waktu",
+        "User": "User",
+        "Pelaku": "User",
+        "Aksi": "Status",
+        "Status": "Status",
+        "Sheet": "Target Data",
+        "Target": "Target Data",
+        "Alasan": "Chat & Catatan",
+        "Chat": "Chat & Catatan",
+        "Rincian": "Detail Perubahan",
+        "Detail": "Detail Perubahan"
+    }
+    
+    for col in df.columns:
+        for key, standard_name in keywords.items():
+            if key.lower() in col.lower():
+                mapping[col] = standard_name
+                break # Berhenti jika sudah ketemu pasangan kunci
+                
+    return df.rename(columns=mapping)
+
 
 # =========================================================
 # ADMIN PASSWORD HELPERS
@@ -3880,82 +3908,39 @@ def render_audit_mobile():
     st.markdown("### 📜 Global Audit Log (Mobile)")
     st.caption("Rekaman jejak perubahan data admin.")
 
-    # Import fungsi load
     from audit_service import load_audit_log
 
-    # Tombol Refresh
     if st.button("🔄 Refresh", use_container_width=True, key="mob_refresh_log"):
         st.cache_data.clear()
         st.rerun()
 
-    # Load Data
-    df_log = load_audit_log(spreadsheet)
+    df_raw = load_audit_log(spreadsheet)
 
-    if not df_log.empty:
-        # --- [FIX] NORMALISASI HEADER (Agar Format Lama & Baru terbaca) ---
-        # Kita buat mapping untuk mengubah Header Google Sheet Asli -> Header Standar Aplikasi
-        header_map = {
-            # Format Lama (Sesuai Screenshot Anda)
-            "Waktu & Tanggal": "Waktu",
-            "Pelaku (User)": "User",
-            "Aksi Dilakukan": "Status",
-            "Nama Data / Sheet": "Target Data",
-            "Alasan Perubahan": "Chat & Catatan",
-            "Rincian (Sebelum ➡ Sesudah)": "Detail Perubahan",
-            # Format Baru (Force Audit Log)
-            "Target Data": "Target Data", 
-            "Chat & Catatan": "Chat & Catatan",
-            "Detail Perubahan": "Detail Perubahan"
-        }
+    if not df_raw.empty:
+        # Gunakan mapper dinamis agar kolom terdeteksi otomatis
+        df_log = dynamic_column_mapper(df_raw)
         
-        # Rename kolom yang ada di dataframe
-        df_log = df_log.rename(columns=header_map)
-
-        # Sortir data terbaru diatas
+        # Sortir data terbaru
         try:
-            # Pastikan kolom "Waktu" ada hasil rename tadi
-            if "Waktu" in df_log.columns:
-                df_log["Waktu"] = pd.to_datetime(
-                    df_log["Waktu"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
-                df_log = df_log.sort_values(by="Waktu", ascending=False)
-        except:
-            pass
+            df_log["Waktu"] = pd.to_datetime(df_log["Waktu"], errors="coerce")
+            df_log = df_log.sort_values(by="Waktu", ascending=False)
+        except: pass
 
-        # Tampilan Mobile (Card View Sederhana)
-        # Kita ambil 10 data terbaru saja biar ringan di HP
         st.markdown("#### 🕒 10 Aktivitas Terakhir")
         
         for i, row in df_log.head(10).iterrows():
             with st.container(border=True):
-                # Ambil data dengan aman (.get) menggunakan nama kolom standar
-                user_val = row.get('User', '-')
-                waktu_val = row.get('Waktu', '-')
-                status_val = row.get('Status', '-')
-                target_val = row.get('Target Data', '-')
-                chat_val = row.get('Chat & Catatan', '-')
-                detail_val = row.get('Detail Perubahan', '-')
-
-                # Baris 1: Siapa & Kapan
-                st.markdown(f"**{user_val}**")
-                st.caption(f"📅 {waktu_val} | 🔧 {status_val}")
-
-                # Baris 2: Apa yang diubah
-                st.text(f"Data: {target_val}")
+                # Gunakan .get() agar aman jika kolom tetap tidak terdeteksi
+                st.markdown(f"**{row.get('User', '-')}**")
+                st.caption(f"📅 {row.get('Waktu', '-')} | Status: {row.get('Status', '-')}")
+                st.text(f"Data: {row.get('Target Data', '-')}")
                 
-                # Baris 3: Chat/Alasan
+                chat_val = row.get('Chat & Catatan', '-')
                 if chat_val not in ["-", ""]:
                     st.info(f"📝 {chat_val}")
 
-                # Expander untuk detail teknis
-                with st.expander("Lihat Detail Perubahan"):
-                    st.code(detail_val, language="text")
-
-        # Tombol Download Excel (Penting buat admin cek di HP)
-        if HAS_OPENPYXL:
-            xb = df_to_excel_bytes(df_log, sheet_name="Audit_Log")
-            if xb:
-                st.download_button("⬇️ Download Full Log (Excel)", data=xb,
-                                   file_name="audit_log_full.xlsx", use_container_width=True)
+                with st.expander("Lihat Detail"):
+                    st.code(row.get('Detail Perubahan', '-'), language="text")
     else:
         st.info("Belum ada data log.")
 
@@ -4362,48 +4347,32 @@ elif menu_nav == "📜 Global Audit Log":
             st.rerun()
 
         with st.spinner("Memuat data log..."):
-            df_log = load_audit_log(spreadsheet)
+            df_raw = load_audit_log(spreadsheet)
 
-        if not df_log.empty:
-            # --- [FIX UTAMA] NORMALISASI HEADER ---
-            # Mapping ini menyatukan Header Lama (GSheet Anda) dengan Header Baru (Code Python)
-            # Format: "Nama Kolom di Excel": "Nama Kolom Standar di Code"
-            safe_mapping = {
-                # Header Lama (Sesuai Gambar 3)
-                "Waktu & Tanggal": "Waktu",
-                "Pelaku (User)": "User",
-                "Aksi Dilakukan": "Status",
-                "Nama Data / Sheet": "Target Data",
-                "Alasan Perubahan": "Chat & Catatan",
-                "Rincian (Sebelum ➡ Sesudah)": "Detail Perubahan",
-                
-                # Header Baru (Jika nanti sheet di-reset)
-                "Waktu": "Waktu",
-                "User": "User",
-                "Status": "Status", 
-                "Target Data": "Target Data",
-                "Chat & Catatan": "Chat & Catatan",
-                "Detail Perubahan": "Detail Perubahan"
-            }
-            
-            # Terapkan Rename
-            df_log = df_log.rename(columns=safe_mapping)
+        if not df_raw.empty:
+            # --- [FIX DINAMIS] MENGGUNAKAN MAPPER OTOMATIS ---
+            # Mengganti safe_mapping manual dengan fungsi dinamis
+            df_log = dynamic_column_mapper(df_raw)
+
+            # Pastikan kolom standar yang dibutuhkan UI tersedia (fallback jika mismatch total)
+            standard_cols = ["Waktu", "User", "Status", "Target Data", "Chat & Catatan", "Detail Perubahan"]
+            for c in standard_cols:
+                if c not in df_log.columns:
+                    df_log[c] = "-"
 
             # Konversi kolom Waktu agar bisa di-sort
             try:
-                if "Waktu" in df_log.columns:
-                    df_log["Waktu"] = pd.to_datetime(
-                        df_log["Waktu"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
-                    df_log = df_log.sort_values(by="Waktu", ascending=False)
+                df_log["Waktu"] = pd.to_datetime(
+                    df_log["Waktu"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+                df_log = df_log.sort_values(by="Waktu", ascending=False)
             except Exception:
                 pass
 
             # --- FITUR FILTERING ---
             with st.expander("🔍 Filter Pencarian"):
                 c1, c2 = st.columns(2)
-                # Gunakan .get() agar tidak error jika kolom User belum ada
-                all_users = df_log["User"].unique() if "User" in df_log.columns else []
-                all_sheets = df_log["Target Data"].unique() if "Target Data" in df_log.columns else []
+                all_users = df_log["User"].unique().tolist()
+                all_sheets = df_log["Target Data"].unique().tolist()
                 
                 with c1:
                     filter_user = st.multiselect("Pilih Pelaku (User)", all_users)
@@ -4412,29 +4381,17 @@ elif menu_nav == "📜 Global Audit Log":
 
             # Terapkan Filter
             df_show = df_log.copy()
-            if filter_user and "User" in df_show.columns:
+            if filter_user:
                 df_show = df_show[df_show["User"].isin(filter_user)]
-            if filter_sheet and "Target Data" in df_show.columns:
+            if filter_sheet:
                 df_show = df_show[df_show["Target Data"].isin(filter_sheet)]
 
-            # --- TAMPILAN DATA UI (COLUMN CONFIG) ---
+            # --- TAMPILKAN DATA UI ---
             st.markdown(f"**Total Record:** {len(df_show)}")
 
-            # Kita mapping lagi untuk Label Tampilan di Tabel
-            ui_rename = {
-                "Target Data": "Data",
-                "Chat & Catatan": "Percakapan / Alasan",
-                "Detail Perubahan": "Diff (Before -> After)"
-            }
-            df_display = df_show.rename(columns=ui_rename)
-            
-            # Kolom yang akan ditampilkan (Pastikan kuncinya cocok dengan ui_rename atau standar)
-            cols_target = ["Waktu", "User", "Status", "Percakapan / Alasan", "Diff (Before -> After)"]
-            cols_final = [c for c in cols_target if c in df_display.columns]
-
-            # 3. RENDER: Tampilkan Dataframe
+            # Render: Tampilkan Dataframe dengan mapping label UI
             st.dataframe(
-                df_display[cols_final],
+                df_show[standard_cols],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
@@ -4443,22 +4400,12 @@ elif menu_nav == "📜 Global Audit Log":
                         format="D MMM YYYY, HH:mm",
                         width="small"
                     ),
-                    "Status": st.column_config.TextColumn(
-                        "Status",
-                        width="small"
-                    ),
-                    "Diff (Before -> After)": st.column_config.TextColumn(
+                    "Target Data": st.column_config.TextColumn("Data"),
+                    "Chat & Catatan": st.column_config.TextColumn("💬 Catatan / Chat", width="medium"),
+                    "Detail Perubahan": st.column_config.TextColumn(
                         "📄 Detail Perubahan (Diff)",
                         width="large",
                         help="Menampilkan detail perubahan data"
-                    ),
-                    "Percakapan / Alasan": st.column_config.TextColumn(
-                        "💬 Catatan / Chat",
-                        width="medium" 
-                    ),
-                    "User": st.column_config.TextColumn(
-                        "👤 User",
-                        width="small"
                     )
                 }
             )
