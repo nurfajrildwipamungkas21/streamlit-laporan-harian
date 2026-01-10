@@ -63,28 +63,56 @@ def init_pending_db():
 
 def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, reason, requestor):
     """
-    UPDATE: Sekarang menerima old_df_row untuk perbandingan.
+    UPDATE: Sekarang otomatis mencatat ke Global Audit Log saat Admin mengajukan.
     """
     ws = init_pending_db()
     if not ws: return False, "DB Error"
 
-    # Konversi row dataframe ke dictionary -> JSON string
+    # Konversi row dataframe ke dictionary
     row_dict_new = new_df_row.astype(str).to_dict()
     json_new = json.dumps(row_dict_new)
 
     # Proses Data Lama
-    row_dict_old = old_df_row.astype(
-        str).to_dict() if old_df_row is not None else {}
+    row_dict_old = old_df_row.astype(str).to_dict() if old_df_row is not None else {}
     json_old = json.dumps(row_dict_old)
 
     ts = now_ts_str()
 
-    # Simpan request lengkap
+    # 1. Simpan request lengkap ke database pending
     ws.append_row(
         [ts, requestor, target_sheet, row_idx_0based, json_new, reason, json_old],
         value_input_option="USER_ENTERED"
     )
-    return True, "Permintaan perubahan terkirim ke Manager!"
+
+    # 2. [BARU] Catat ke Global Audit Log (Status: REQUEST)
+    # Hitung perbedaan data (Diff) agar tercatat di log apa yang mau diubah
+    diff_log = {}
+    for k, v_new in row_dict_new.items():
+        v_old = row_dict_old.get(k, "")
+        if str(v_new).strip() != str(v_old).strip():
+            diff_log[k] = f"{v_old} ➡ {v_new}"
+    
+    # Panggil fungsi logging
+    try:
+        log_admin_action(
+            spreadsheet=spreadsheet,
+            actor=requestor,
+            role="Admin (Requestor)",
+            feature="Super Editor (Request)",
+            target_sheet=target_sheet,
+            row_idx=row_idx_0based + 2,
+            action="REQUEST_UPDATE",   # Status khusus pengajuan
+            reason=reason,
+            changes_dict={
+                "Status": "⏳ MENUNGGU APPROVAL",
+                "Info": "Pengajuan perubahan data dikirim ke Manager.",
+                "Rincian Perubahan": diff_log
+            }
+        )
+    except Exception as e:
+        print(f"Warning: Gagal mencatat log request: {e}")
+
+    return True, "Permintaan perubahan terkirim ke Manager & Tercatat di Log!"
 
 
 def get_pending_approvals():
@@ -96,8 +124,7 @@ def get_pending_approvals():
 
 def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval oleh Manager (REVISED FINAL).
-    Memastikan Reject Note masuk ke Changes Dict agar pasti tercatat di Log.
+    Fungsi Eksekusi Approval dengan Logging yang diperkuat & presisi.
     """
     try:
         # Inisialisasi koneksi ke sheet pending
@@ -114,12 +141,13 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
         req = all_requests[request_index_0based]
         target_sheet_name = req["Target Sheet"]
         row_target_idx = int(req["Row Index (0-based)"])
+        requestor_name = req.get("Requestor", "Unknown")  # Ambil nama pengaju
 
-        # --- PERSIAPAN LOGGING (Diff Checker) ---
+        # --- PERSIAPAN LOGGING (Diff Checker Aman) ---
         old_data_str = req.get("Old Data JSON", "{}")
         new_data_str = req.get("New Data JSON", "{}")
-
         diff_str = ""
+        
         try:
             old_d = json.loads(old_data_str) if old_data_str else {}
             new_d = json.loads(new_data_str) if new_data_str else {}
@@ -128,19 +156,18 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 old_v = old_d.get(k, "")
                 if str(old_v).strip() != str(v).strip():
                     diff_list.append(f"{k}: {old_v} ➡ {v}")
-            diff_str = "\n".join(diff_list)
-        except Exception as e_json:
-            diff_str = f"Diff Error: {e_json}"
+            diff_str = "\n".join(diff_list) if diff_list else "Tidak ada perubahan nilai."
+        except Exception:
+            diff_str = "Detail perubahan tidak dapat diproses (JSON Error)."
 
         # --- ACTION: REJECT ---
         if action == "REJECT":
-            # Pastikan catatan string valid
+            # Validasi catatan
             final_reason = str(rejection_note).strip()
-            if not final_reason or final_reason == "-":
-                final_reason = "Ditolak tanpa catatan khusus."
+            if not final_reason or final_reason in ["-", ""]:
+                final_reason = "Ditolak oleh Manager (Tanpa Catatan)."
 
-            # 1. Catat ke Audit Log
-            # TRICK: Masukkan alasan ke changes_dict juga agar muncul di kolom 'Rincian' sebagai backup
+            # 1. Catat ke Audit Log (Pastikan reason masuk ke kolom 'Alasan')
             log_admin_action(
                 spreadsheet=spreadsheet,
                 actor=admin_name,
@@ -148,12 +175,13 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 feature="Approval System",
                 target_sheet=target_sheet_name,
                 row_idx=row_target_idx + 2,
-                action="REJECTED",
-                reason=final_reason, 
+                action="REJECTED",     # Keyword penting untuk Dashboard
+                reason=final_reason,   # Alasan utama
                 changes_dict={
-                    "Status": "DITOLAK",
-                    "Catatan Manager": final_reason,  # <--- INI YG MEMASTIKAN MUNCUL DI LOG
-                    "Detail Data": diff_str
+                    "Keputusan": "❌ DITOLAK",
+                    "Pengaju Awal": requestor_name,
+                    "Alasan Penolakan": final_reason, # Redundan agar pasti muncul di detail
+                    "Data Yang Ditolak": diff_str
                 }
             )
 
@@ -167,6 +195,8 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             new_data_dict = json.loads(req["New Data JSON"])
             ws_target = spreadsheet.worksheet(target_sheet_name)
             headers = ws_target.row_values(1)
+            
+            # Pastikan urutan kolom sesuai
             row_values = [new_data_dict.get(h, "") for h in headers]
 
             gsheet_row = row_target_idx + 2
@@ -183,9 +213,10 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 action="APPROVED",
                 reason="Disetujui oleh Manager",
                 changes_dict={
-                    "Status": "DISETUJUI",
+                    "Status": "✅ DISETUJUI",
+                    "Pengaju Awal": requestor_name,
                     "Info": "Data berhasil diperbarui ke database.",
-                    "Diff": diff_str
+                    "Rincian Perubahan": diff_str
                 }
             )
 
