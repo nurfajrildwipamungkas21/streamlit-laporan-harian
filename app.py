@@ -4233,10 +4233,10 @@ elif menu_nav == "📜 Global Audit Log":
                 xb = df_to_excel_bytes(df_show, sheet_name="Audit_Log")
                 if xb:
                     st.download_button("⬇️ Download Log (Excel)", data=xb, file_name="global_audit_log.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            else:
-                st.info("Belum ada riwayat perubahan data.")
+        else:
+            st.info("Belum ada riwayat perubahan data.")
 
-                render_section_watermark()
+        render_section_watermark()
 
 # =========================================================
 # MENU: DASHBOARD ADMIN (MIGRATED & UPGRADED)
