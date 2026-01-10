@@ -96,8 +96,8 @@ def get_pending_approvals():
 
 def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval oleh Manager (REVISED).
-    Memastikan Reject Note tercatat di Audit Log.
+    Fungsi Eksekusi Approval oleh Manager (REVISED FINAL).
+    Memastikan Reject Note masuk ke Changes Dict agar pasti tercatat di Log.
     """
     try:
         # Inisialisasi koneksi ke sheet pending
@@ -121,12 +121,11 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
 
         diff_str = ""
         try:
-            old_d = json.loads(old_data_str)
-            new_d = json.loads(new_data_str)
+            old_d = json.loads(old_data_str) if old_data_str else {}
+            new_d = json.loads(new_data_str) if new_data_str else {}
             diff_list = []
             for k, v in new_d.items():
                 old_v = old_d.get(k, "")
-                # Bandingkan nilai dengan strip()
                 if str(old_v).strip() != str(v).strip():
                     diff_list.append(f"{k}: {old_v} ➡ {v}")
             diff_str = "\n".join(diff_list)
@@ -135,10 +134,13 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
 
         # --- ACTION: REJECT ---
         if action == "REJECT":
-            # Pastikan catatan tidak kosong
-            final_reason = rejection_note if rejection_note and rejection_note.strip() != "" else "Ditolak tanpa catatan."
+            # Pastikan catatan string valid
+            final_reason = str(rejection_note).strip()
+            if not final_reason or final_reason == "-":
+                final_reason = "Ditolak tanpa catatan khusus."
 
             # 1. Catat ke Audit Log
+            # TRICK: Masukkan alasan ke changes_dict juga agar muncul di kolom 'Rincian' sebagai backup
             log_admin_action(
                 spreadsheet=spreadsheet,
                 actor=admin_name,
@@ -147,10 +149,11 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 target_sheet=target_sheet_name,
                 row_idx=row_target_idx + 2,
                 action="REJECTED",
-                reason=final_reason, # INI KUNCINYA: Pastikan masuk ke kolom Reason
+                reason=final_reason, 
                 changes_dict={
                     "Status": "DITOLAK",
-                    "Detail Perubahan": diff_str
+                    "Catatan Manager": final_reason,  # <--- INI YG MEMASTIKAN MUNCUL DI LOG
+                    "Detail Data": diff_str
                 }
             )
 
@@ -161,23 +164,15 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
 
         # --- ACTION: APPROVE ---
         elif action == "APPROVE":
-            # 1. Parsing Data Baru
             new_data_dict = json.loads(req["New Data JSON"])
-
-            # 2. Update Sheet Target Asli
             ws_target = spreadsheet.worksheet(target_sheet_name)
             headers = ws_target.row_values(1)
-            row_values = []
-            for h in headers:
-                val = new_data_dict.get(h, "")
-                row_values.append(val)
+            row_values = [new_data_dict.get(h, "") for h in headers]
 
-            # Update Cell di Sheet Target
             gsheet_row = row_target_idx + 2
             cell_range = f"A{gsheet_row}"
             ws_target.update(range_name=cell_range, values=[row_values], value_input_option="USER_ENTERED")
 
-            # 3. Catat ke Audit Log
             log_admin_action(
                 spreadsheet=spreadsheet,
                 actor=admin_name,
@@ -189,14 +184,13 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 reason="Disetujui oleh Manager",
                 changes_dict={
                     "Status": "DISETUJUI",
-                    "Detail Perubahan": diff_str
+                    "Info": "Data berhasil diperbarui ke database.",
+                    "Diff": diff_str
                 }
             )
 
-            # 4. Hapus Request
             ws_pending.delete_rows(request_index_0based + 2)
-
-            return True, "Perubahan DISETUJUI & diterapkan ke Database."
+            return True, "Perubahan DISETUJUI & diterapkan."
 
     except Exception as e:
         return False, f"System Error: {e}"
@@ -4511,9 +4505,6 @@ elif menu_nav == "📜 Global Audit Log":
         # Watermark ditaruh di sini (Indentasi sejajar dengan blok logika desktop utama)
         render_section_watermark()
 
-# =========================================================
-# MENU: DASHBOARD ADMIN (MIGRATED & UPGRADED)
-# =========================================================
 elif menu_nav == "📊 Dashboard Admin":
     if IS_MOBILE:
         render_admin_mobile()
@@ -4523,13 +4514,11 @@ elif menu_nav == "📊 Dashboard Admin":
 
         # 1. Cek Login Session
         if not st.session_state.get("is_admin"):
-            # Tampilan Login (Jika belum login / sesi habis)
             c_login1, c_login2, c_login3 = st.columns([1, 1, 1])
             with c_login2:
                 with st.container(border=True):
                     st.markdown("### 🔐 Login Admin")
                     # (Opsional: Bisa dihapus jika Login utama sudah via OTP di awal)
-                    # Tapi dibiarkan sebagai fallback re-login tanpa refresh halaman
                     pwd = st.text_input(
                         "Password", type="password", key="desk_adm_pwd")
                     if st.button("Login Masuk", use_container_width=True, type="primary"):
@@ -4639,9 +4628,9 @@ elif menu_nav == "📊 Dashboard Admin":
                                 # --- LOGIC DIFF (DATA LAMA VS BARU) ---
                                 try:
                                     old_d = json.loads(
-                                        req.get("Old Data JSON", "{}"))
+                                        req.get("Old Data JSON", "{}") or "{}")
                                     new_d = json.loads(
-                                        req.get("New Data JSON", "{}"))
+                                        req.get("New Data JSON", "{}") or "{}")
 
                                     # Cari kolom yang berubah saja
                                     changes_table = []
@@ -4711,7 +4700,7 @@ elif menu_nav == "📊 Dashboard Admin":
                                         # Tombol Konfirmasi Tolak
                                         if c_confirm.form_submit_button("🚫 Konfirmasi Tolak", type="primary"):
                                             # Ambil nilai note_input di sini
-                                            final_note = note_input if note_input.strip() else "Ditolak (Tanpa Catatan)"
+                                            final_note = note_input.strip() if note_input.strip() else "Ditolak (Tanpa Catatan)"
                                             
                                             # Panggil fungsi execute_approval dengan parameter rejection_note
                                             ok, msg = execute_approval(
