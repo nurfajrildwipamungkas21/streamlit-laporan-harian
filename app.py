@@ -4236,7 +4236,8 @@ elif menu_nav == "📜 Global Audit Log":
         else:
             st.info("Belum ada riwayat perubahan data.")
 
-            render_section_watermark()
+        # Watermark ditaruh di sini (Indentasi sejajar dengan blok logika desktop utama)
+        render_section_watermark()
 
 # =========================================================
 # MENU: DASHBOARD ADMIN (MIGRATED & UPGRADED)
