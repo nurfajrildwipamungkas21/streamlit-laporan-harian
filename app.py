@@ -74,47 +74,23 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
     )
     return True, "Permintaan perubahan terkirim ke Manager!"
 
-def submit_change_request(target_sheet, row_idx_0based, new_df_row, reason, requestor):
-    """
-    Fungsi untuk Admin mengajukan perubahan.
-    Data baris baru dikonversi menjadi string JSON agar bisa disimpan dalam satu sel.
-    """
-    ws = init_pending_db()
-    if not ws: return False, "DB Error"
-    
-    # Konversi row dataframe ke dictionary, lalu ke JSON string
-    # Menggunakan astype(str) untuk memastikan format tanggal/angka aman saat serialisasi
-    row_dict = new_df_row.astype(str).to_dict()
-    json_data = json.dumps(row_dict)
-    
-    ts = now_ts_str()
-    
-    # Simpan request ke sheet pending
-    ws.append_row(
-        [ts, requestor, target_sheet, row_idx_0based, json_data, reason],
-        value_input_option="USER_ENTERED"
-    )
-    return True, "Permintaan perubahan terkirim ke Manager!"
-
 def get_pending_approvals():
     """Fungsi untuk Manager mengambil semua daftar request yang pending."""
     ws = init_pending_db()
     if not ws: return []
     return ws.get_all_records()
 
+import json
+
 def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval oleh Manager (TERBARU).
-    Fitur:
-    - Bisa 'APPROVE' (terapkan ke sheet target) atau 'REJECT'.
-    - Mencatat Log Audit lengkap (termasuk Diff data lama vs baru).
-    - Menangani catatan penolakan (rejection note).
+    Fungsi Eksekusi Approval oleh Manager.
+    Menggabungkan logika update data dan pencatatan Audit Log (Approve/Reject).
     """
     try:
+        # Inisialisasi koneksi ke sheet pending (pastikan fungsi init_pending_db tersedia di scope global)
         ws_pending = init_pending_db()
-        if not ws_pending:
-            return False, "Database Pending tidak ditemukan."
-
+        
         # Ambil data terbaru dari sheet pending
         all_requests = ws_pending.get_all_records()
         
@@ -123,82 +99,75 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             
         req = all_requests[request_index_0based]
         target_sheet_name = req["Target Sheet"]
+        row_target_idx = int(req["Row Index (0-based)"])
         
-        # Pastikan index target valid integer
-        try:
-            row_target_idx = int(req["Row Index (0-based)"])
-        except:
-            row_target_idx = 0
-
-        # --- 1. SIAPKAN DIFF (PERBANDINGAN DATA) UNTUK AUDIT LOG ---
-        # Ambil string JSON
+        # --- PERSIAPAN LOGGING (Diff Checker) ---
+        # Ambil detail perubahan untuk Log (Membandingkan Old Data vs New Data)
         old_data_str = req.get("Old Data JSON", "{}")
         new_data_str = req.get("New Data JSON", "{}")
         
-        diff_str = "-"
+        # Buat String Diff Sederhana untuk Audit Log
+        diff_str = ""
         try:
-            old_d = json.loads(old_data_str) if old_data_str else {}
-            new_d = json.loads(new_data_str) if new_data_str else {}
-            
+            old_d = json.loads(old_data_str)
+            new_d = json.loads(new_data_str)
             diff_list = []
-            # Bandingkan key yang ada di data baru
-            for k, v_new in new_d.items():
-                v_old = old_d.get(k, "")
-                # Normalisasi string untuk perbandingan agar tidak false alarm beda spasi
-                if str(v_new).strip() != str(v_old).strip():
-                    diff_list.append(f"{k}: {v_old} -> {v_new}")
-            
-            if diff_list:
-                diff_str = "\n".join(diff_list)
-            else:
-                diff_str = "Tidak ada perubahan nilai (Re-save)."
-        except Exception as e:
-            diff_str = f"Gagal parsing diff: {e}"
+            for k, v in new_d.items():
+                old_v = old_d.get(k, "")
+                # Bandingkan nilai lama dan baru
+                if str(old_v) != str(v):
+                    diff_list.append(f"{k}: {old_v} -> {v}")
+            diff_str = "\n".join(diff_list)
+        except Exception as e_json:
+            diff_str = f"Data parsing error: {e_json}"
 
-        # --- 2. LOGIKA ACTION ---
-        
+        # --- ACTION: REJECT ---
         if action == "REJECT":
-            # A. Catat ke Global Audit Log bahwa Manager MENOLAK
-            # Ini penting agar Admin tahu kenapa datanya ditolak saat buka Super Editor
+            # 1. Catat ke Audit Log bahwa Manager MENOLAK
+            # (Pastikan fungsi log_admin_action tersedia di scope global/main script)
             log_admin_action(
                 spreadsheet=spreadsheet,
                 actor=admin_name,
                 role="Manager",
                 feature="Approval System",
                 target_sheet=target_sheet_name,
-                row_idx=row_target_idx + 2, # +2 karena header gsheet
-                action="REJECTED",          # Status khusus
-                reason=f"Ditolak Manager. Catatan: {rejection_note}",
-                changes_dict={"Diff Detail": diff_str}
+                row_idx=row_target_idx + 2,
+                action="REJECTED", 
+                reason=f"Ditolak Manager. Alasan: {rejection_note}",
+                changes_dict={"Diff": diff_str}
             )
             
-            # B. Hapus baris dari sheet pending
-            # Row index di GSheet = index list + 2 (header row)
+            # 2. Hapus request dari sheet pending
+            # Row index di GSheet = index list + 2 (header di baris 1)
             ws_pending.delete_rows(request_index_0based + 2)
             
-            return True, "Request DITOLAK. Alasan telah dicatat di Audit Log."
+            return True, "Permintaan ditolak. Alasan telah dicatat di Log."
             
+        # --- ACTION: APPROVE ---
         elif action == "APPROVE":
-            # A. Update Sheet Target Asli
+            # 1. Parsing Data Baru
+            new_data_dict = json.loads(req["New Data JSON"])
+            
+            # 2. Update Sheet Target Asli
             ws_target = spreadsheet.worksheet(target_sheet_name)
             
             # Susun data sesuai urutan header di sheet target
             headers = ws_target.row_values(1)
             row_values = []
-            new_data_dict = json.loads(new_data_str)
-            
             for h in headers:
+                # Ambil nilai dari JSON berdasarkan nama kolom header
                 val = new_data_dict.get(h, "") 
                 row_values.append(val)
                 
             # Update Cell di Sheet Target
+            # Baris GSheet = index 0-based + 2
             gsheet_row = row_target_idx + 2
             cell_range = f"A{gsheet_row}"
             
-            # Lakukan update fisik ke database utama
+            # Lakukan update ke Google Sheet
             ws_target.update(range_name=cell_range, values=[row_values], value_input_option="USER_ENTERED")
             
-            # B. Catat ke Global Audit Log (APPROVED)
+            # 3. Catat ke Audit Log bahwa Manager MENYETUJUI
             log_admin_action(
                 spreadsheet=spreadsheet,
                 actor=admin_name,
@@ -207,17 +176,17 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 target_sheet=target_sheet_name,
                 row_idx=gsheet_row,
                 action="APPROVED",
-                reason=req.get("Reason", "-"), # Alasan asli dari Admin
-                changes_dict={"Diff Detail": diff_str}
+                reason=req.get("Reason", "Approved by Manager"), 
+                changes_dict={"Diff": diff_str}
             )
 
-            # C. Hapus Request dari Sheet Pending setelah berhasil
+            # 4. Hapus Request dari Sheet Pending setelah berhasil
             ws_pending.delete_rows(request_index_0based + 2)
             
-            return True, "Perubahan DISETUJUI dan telah diterapkan ke Database Utama."
+            return True, "Perubahan disetujui, diterapkan ke Database, dan dicatat di Log."
             
     except Exception as e:
-        return False, f"Error System: {e}"
+        return False, f"Error: {e}"
 
 # --- BAGIAN IMPORT OPTIONAL LIBS JANGAN DIHAPUS (Excel/AgGrid/Plotly) ---
 try:
@@ -4334,525 +4303,526 @@ elif menu_nav == "📊 Dashboard Admin":
             # -----------------------------------------------------------
             # TAB KHUSUS: APPROVAL SYSTEM (Hanya Manager)
             # -----------------------------------------------------------
-if is_manager:
-                        with tab_acc:
-                            st.markdown("### 🔔 Pusat Persetujuan (Manager)")
-                            st.caption("Review detail perubahan (Sebelum vs Sesudah). Gunakan fitur Tolak dengan catatan jika perlu.")
-                            
-                            pending_data = get_pending_approvals()
-                            
-                            if not pending_data:
-                                st.info("✅ Tidak ada permintaan pending. Semua aman.")
-                            else:
-                                # REJECTION DIALOG LOGIC
-                                # Loop melalui setiap request
-                                for i, req in enumerate(pending_data):
-                                    with st.container(border=True):
-                                        # Header Card
-                                        c_h1, c_h2 = st.columns([3, 1])
-                                        with c_h1:
-                                            st.markdown(f"👤 **{req['Requestor']}** | 📂 Sheet: `{req['Target Sheet']}`")
-                                            st.text(f"📝 Alasan Admin: {req['Reason']}")
-                                        with c_h2:
-                                            st.caption(f"🕒 {req['Timestamp']}")
+            if is_manager:
+                with tab_acc:
+                    st.markdown("### 🔔 Pusat Persetujuan (Manager)")
+                    st.caption("Review detail perubahan (Sebelum vs Sesudah). Gunakan fitur Tolak dengan catatan jika perlu.")
+                    
+                    pending_data = get_pending_approvals()
+                    
+                    if not pending_data:
+                        st.info("✅ Tidak ada permintaan pending.")
+                    else:
+                        # REJECTION DIALOG (Membutuhkan Streamlit versi baru st.experimental_dialog atau st.dialog)
+                        # Jika versi lama, gunakan st.expander di dalam loop. 
+                        # Di sini saya gunakan pendekatan session_state expander agar aman untuk semua versi.
 
-                                        st.divider()
-                                        
-                                        # --- LOGIC DIFF (DATA LAMA VS BARU) ---
-                                        try:
-                                            old_d = json.loads(req.get("Old Data JSON", "{}"))
-                                            new_d = json.loads(req.get("New Data JSON", "{}"))
-                                            
-                                            # Cari kolom yang berubah saja
-                                            changes_table = []
-                                            for k, v_new in new_d.items():
-                                                v_old = old_d.get(k, "")
-                                                # Normalisasi string biar gak false alarm (hapus spasi, ubah ke string)
-                                                if str(v_new).strip() != str(v_old).strip():
-                                                    changes_table.append({
-                                                        "Kolom": k,
-                                                        "🔴 Data Lama": str(v_old),
-                                                        "🟢 Data Baru": str(v_new)
-                                                    })
-                                            
-                                            if changes_table:
-                                                st.markdown("**Detail Perubahan:**")
-                                                st.table(pd.DataFrame(changes_table))
-                                            else:
-                                                st.warning("⚠️ Tidak terdeteksi perubahan data signifikan (mungkin hanya re-save).")
-                                                # Tampilkan raw jika diff kosong (fallback)
-                                                with st.expander("Lihat Data Mentah (JSON)"):
-                                                    st.json(new_d)
-                                        except Exception as e:
-                                            st.error(f"Gagal memproses data JSON: {e}")
+                        for i, req in enumerate(pending_data):
+                            with st.container(border=True):
+                                # Header Card
+                                c_h1, c_h2 = st.columns([3, 1])
+                                with c_h1:
+                                    st.markdown(f"👤 **{req['Requestor']}** | 📂 Sheet: `{req['Target Sheet']}`")
+                                    st.text(f"📝 Alasan Admin: {req['Reason']}")
+                                with c_h2:
+                                    st.caption(f"🕒 {req['Timestamp']}")
 
-                                        # --- ACTION BUTTONS ---
-                                        col_act_space, col_act_btn = st.columns([3, 2])
-                                        
-                                        with col_act_btn:
-                                            b_col1, b_col2 = st.columns(2)
-                                            
-                                            # TOMBOL TOLAK (Memicu Expander/Input di bawah)
-                                            key_reject = f"btn_reject_show_{i}"
-                                            if b_col1.button("❌ Tolak", key=key_reject, use_container_width=True):
-                                                 st.session_state[f"show_reject_input_{i}"] = True
-
-                                            # TOMBOL ACC
-                                            if b_col2.button("✅ ACC", key=f"btn_acc_{i}", type="primary", use_container_width=True):
-                                                ok, msg = execute_approval(i, "APPROVE", admin_name=st.session_state["user_name"])
-                                                if ok:
-                                                    st.success(msg)
-                                                    time.sleep(1)
-                                                    st.rerun()
-                                                else:
-                                                    st.error(msg)
-                                        
-                                        # --- AREA INPUT ALASAN PENOLAKAN (Muncul jika tombol Tolak ditekan) ---
-                                        if st.session_state.get(f"show_reject_input_{i}", False):
-                                            st.markdown("---")
-                                            st.warning("Anda akan menolak permintaan ini.")
-                                            with st.form(key=f"form_reject_{i}"):
-                                                note = st.text_area("Catatan Penolakan (Opsional, tapi disarankan):", placeholder="Misal: Nominal salah, tolong cek lagi.")
-                                                
-                                                c_batal, c_confirm = st.columns(2)
-                                                # Tombol Batal
-                                                if c_batal.form_submit_button("Batal"):
-                                                    st.session_state[f"show_reject_input_{i}"] = False
-                                                    st.rerun()
-                                                    
-                                                # Tombol Konfirmasi Tolak
-                                                if c_confirm.form_submit_button("🚫 Konfirmasi Tolak", type="primary"):
-                                                    note_final = note if note.strip() else "Tidak ada catatan."
-                                                    ok, msg = execute_approval(i, "REJECT", admin_name=st.session_state["user_name"], rejection_note=note_final)
-                                                    if ok:
-                                                        st.success(f"Ditolak: {note_final}")
-                                                        st.session_state[f"show_reject_input_{i}"] = False
-                                                        time.sleep(1)
-                                                        st.rerun()
-
-                        # --- TAB 1: PRODUKTIVITAS ---
-                        with tab_prod:
-                            st.markdown("### 🚀 Analisa Produktivitas")
-                            
-                            if df_all.empty:
-                                st.info("Belum ada data laporan.")
-                            else:
-                                # Filter Rentang Waktu
-                                c_filter1, c_filter2 = st.columns([1, 3])
-                                with c_filter1:
-                                    days_opt = st.selectbox("Rentang Waktu:", [7, 14, 30, 60, 90], index=0)
+                                st.divider()
                                 
-                                start_date = datetime.now(tz=TZ_JKT).date() - timedelta(days=days_opt)
-                                df_filt = df_all[df_all["Tanggal_Date"] >= start_date].copy()
-
-                                # Split Sales vs Digital
-                                df_sales = df_filt[df_filt["Kategori"] == "Kunjungan Lapangan"]
-                                df_digital = df_filt[df_filt["Kategori"] == "Digital/Internal"]
-
-                                # 1. SALES STATS
-                                with st.container(border=True):
-                                    st.markdown("#### 🚗 Performance Sales (Lapangan)")
-                                    k1, k2, k3 = st.columns(3)
-                                    k1.metric("Total Kunjungan", len(df_sales))
-                                    k2.metric("Sales Aktif", df_sales[COL_NAMA].nunique())
-                                    k3.metric("Rata-rata/Hari", f"{len(df_sales)/days_opt:.1f}")
+                                # --- LOGIC DIFF (DATA LAMA VS BARU) ---
+                                try:
+                                    old_d = json.loads(req.get("Old Data JSON", "{}"))
+                                    new_d = json.loads(req.get("New Data JSON", "{}"))
                                     
-                                    if not df_sales.empty:
-                                        st.bar_chart(df_sales[COL_NAMA].value_counts(), color="#16a34a") # Green
-
-                                # 2. DIGITAL STATS
-                                with st.container(border=True):
-                                    st.markdown("#### 💻 Performance Digital & Internal")
-                                    d1, d2, d3 = st.columns(3)
-                                    d1.metric("Total Output", len(df_digital))
-                                    d2.metric("Staf Aktif", df_digital[COL_NAMA].nunique())
-                                    d3.metric("Rata-rata/Hari", f"{len(df_digital)/days_opt:.1f}")
-
-                                    if not df_digital.empty:
-                                        if HAS_PLOTLY:
-                                            try:
-                                                fig = px.pie(df_digital, names=COL_NAMA, title="Distribusi Beban Kerja Digital", hole=0.4)
-                                                st.plotly_chart(fig, use_container_width=True)
-                                            except:
-                                                st.bar_chart(df_digital[COL_NAMA].value_counts(), color="#facc15") # Yellow
-                                        else:
-                                            st.bar_chart(df_digital[COL_NAMA].value_counts(), color="#facc15") # Yellow
-
-                        # --- TAB 2: LEADS & INTEREST ---
-                        with tab_leads:
-                            st.markdown("### 🧲 Filter Data Klien (Leads)")
-                            st.caption("Download data klien berdasarkan tingkat ketertarikan (Interest).")
-
-                            if df_all.empty:
-                                st.info("Data kosong.")
-                            else:
-                                if COL_INTEREST not in df_all.columns:
-                                    st.warning("Kolom Interest belum tersedia di database.")
-                                else:
-                                    st.session_state.setdefault("filter_interest_admin", "Under 50% (A)")
+                                    # Cari kolom yang berubah saja
+                                    changes_table = []
+                                    for k, v_new in new_d.items():
+                                        v_old = old_d.get(k, "")
+                                        # Normalisasi string biar gak false alarm
+                                        if str(v_new).strip() != str(v_old).strip():
+                                            changes_table.append({
+                                                "Kolom": k,
+                                                "🔴 Data Lama": str(v_old),
+                                                "🟢 Data Baru": str(v_new)
+                                            })
                                     
-                                    # Button Filter
-                                    b1, b2, b3 = st.columns(3)
-                                    if b1.button("Tarik: Under 50% (A)", use_container_width=True):
-                                        st.session_state["filter_interest_admin"] = "Under 50% (A)"
-                                    if b2.button("Tarik: 50-75% (B)", use_container_width=True):
-                                        st.session_state["filter_interest_admin"] = "50-75% (B)"
-                                    if b3.button("Tarik: 75%-100%", use_container_width=True):
-                                        st.session_state["filter_interest_admin"] = "75%-100%"
+                                    if changes_table:
+                                        st.markdown("**Detail Perubahan:**")
+                                        st.table(pd.DataFrame(changes_table))
+                                    else:
+                                        st.warning("⚠️ Tidak terdeteksi perubahan data (mungkin hanya re-save).")
+                                        # Tampilkan raw jika diff kosong (fallback)
+                                        with st.expander("Lihat Data Mentah (JSON)"):
+                                            st.json(new_d)
+                                except Exception as e:
+                                    st.error("Gagal memproses data JSON.")
+
+                                # --- ACTION BUTTONS ---
+                                col_act_space, col_act_btn = st.columns([3, 2])
+                                
+                                with col_act_btn:
+                                    b_col1, b_col2 = st.columns(2)
                                     
-                                    sel_interest = st.session_state["filter_interest_admin"]
-                                    st.success(f"📂 Menampilkan Filter: **{sel_interest}**")
+                                    # TOMBOL TOLAK (Memicu Expander/Input)
+                                    key_reject = f"btn_reject_show_{i}"
+                                    if b_col1.button("❌ Tolak", key=key_reject, use_container_width=True):
+                                        st.session_state[f"show_reject_input_{i}"] = True
 
-                                    # Filtering logic
-                                    df_leads = df_all.copy()
-                                    df_leads[COL_INTEREST] = df_leads[COL_INTEREST].astype(str).fillna("").str.strip()
-                                    df_filtered = df_leads[df_leads[COL_INTEREST] == sel_interest].copy()
-
-                                    with st.container(border=True):
-                                        st.success(f"📂 Menampilkan Data: **{sel_interest}** (Total: {len(df_leads)})")
-                                        
-                                        cols_display = [c for c in [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_TEMPAT, COL_DESKRIPSI, COL_KENDALA_KLIEN] if c in df_leads.columns]
-                                        st.dataframe(df_leads[cols_display], use_container_width=True, hide_index=True)
-
-                                        # Export Buttons
-                                        c_ex, c_csv = st.columns(2)
-                                        safe_name = sel_interest.replace("%", "").replace(" ", "_").replace("/", "")
-                                        
-                                        with c_ex:
-                                            if HAS_OPENPYXL:
-                                                xb = df_to_excel_bytes(df_filtered[cols_display], sheet_name="Leads", wrap_cols=[COL_DESKRIPSI, COL_TEMPAT])
-                                                if xb:
-                                                    st.download_button(f"⬇️ Excel ({sel_interest})", data=xb, file_name=f"leads_{safe_name}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                                        with c_csv:
-                                            csv_data = df_filtered[cols_display].to_csv(index=False).encode('utf-8')
-                                            st.download_button(f"⬇️ Download CSV ({sel_interest})", data=csv_data, file_name=f"leads_{safe_name}.csv", mime="text/csv", use_container_width=True)
-
-                        # --- TAB 3: REVIEW & FEEDBACK ---
-                        with tab_review:
-                            st.markdown("### 📝 Review Laporan & Kirim Feedback")
-                            st.caption("Monitoring detail kendala dan memberikan feedback langsung per laporan.")
-
-                            if df_all.empty:
-                                st.info("Data kosong.")
-                            else:
-                                # Sort by newest
-                                df_rev = df_all.sort_values(by=COL_TIMESTAMP, ascending=False).head(50) # Limit 50 terbaru agar ringan
-                                
-                                for i, row in df_rev.iterrows():
-                                    with st.container(border=True):
-                                        # Header Card
-                                        c_head1, c_head2 = st.columns([4, 1])
-                                        with c_head1:
-                                            st.markdown(f"**{row.get(COL_NAMA, '-')}** | 📅 {row.get(COL_TIMESTAMP, '-')}")
-                                            st.caption(f"📍 {row.get(COL_TEMPAT, '-')} ({row.get('Kategori', '-')})")
-                                        with c_head2:
-                                            # Tampilkan Interest sebagai badge jika ada
-                                            intr = row.get(COL_INTEREST, "-")
-                                            if intr and intr != "-" and intr != "":
-                                                st.markdown(f"🔥 `{intr}`")
-
-                                        st.markdown(f"📄 **Deskripsi:** {row.get(COL_DESKRIPSI, '-')}")
-                                        
-                                        # Info Klien
-                                        if row.get(COL_NAMA_KLIEN) not in ["-", ""]:
-                                            st.markdown(f"👤 **Klien:** {row.get(COL_NAMA_KLIEN)} | 📞 {row.get(COL_KONTAK_KLIEN)}")
-
-                                        st.divider()
-                                        
-                                        # 3 Kolom detail
-                                        rc1, rc2, rc3 = st.columns(3)
-                                        with rc1:
-                                            st.info(f"💡 **Hasil:**\n\n{row.get(COL_KESIMPULAN, '-')}")
-                                        with rc2:
-                                            st.warning(f"🚧 **Kendala:**\n\n{row.get(COL_KENDALA, '-')}")
-                                        with rc3:
-                                            st.error(f"📌 **Pending/Next:**\n\n{row.get(COL_PENDING, '-')}")
-
-                                        # Foto Bukti
-                                        link_foto = str(row.get(COL_LINK_FOTO, ""))
-                                        if "http" in link_foto:
-                                            with st.expander("🖼️ Lihat Bukti Foto"):
-                                                direct_url = link_foto.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
-                                                st.image(direct_url, width=300)
-                                                st.caption(f"Link: {link_foto}")
-
-                                        # Form Feedback
-                                        existing_fb = row.get(COL_FEEDBACK, "")
-                                        with st.expander(f"💬 Beri Feedback ({row.get(COL_NAMA)})", expanded=False):
-                                            uk = f"fb_desk_{i}_{row.get(COL_TIMESTAMP)}"
-                                            fb_in = st.text_area("Tulis Masukan/Arahan:", value=str(existing_fb), key=uk)
-                                            if st.button("Kirim Feedback 🚀", key=f"btn_{uk}"):
-                                                ts_val = row.get(COL_TIMESTAMP)
-                                                ts_str = ts_val.strftime("%d-%m-%Y %H:%M:%S") if hasattr(ts_val, "strftime") else str(ts_val)
-                                                ok, msg = kirim_feedback_admin(row.get(COL_NAMA), ts_str, fb_in)
-                                                if ok:
-                                                    st.success("Terkirim!")
-                                                    st.cache_data.clear()
-                                                else:
-                                                    st.error(msg)
-
-                        # --- TAB 4: GALERI ---
-                        with tab_galeri:
-                            st.markdown("### 🖼️ Galeri Aktivitas Terbaru")
-                            if df_all.empty or COL_LINK_FOTO not in df_all.columns:
-                                st.info("Belum ada foto.")
-                            else:
-                                # Filter link http valid
-                                df_foto = df_all[df_all[COL_LINK_FOTO].astype(str).str.contains("http", na=False, case=False)].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
-                                
-                                if df_foto.empty:
-                                    st.warning("Tidak ada data foto valid.")
-                                else:
-                                    cols = st.columns(4)
-                                    for idx, row in enumerate(df_foto.to_dict("records")):
-                                        with cols[idx % 4]:
-                                            with st.container(border=True):
-                                                url_asli = str(row.get(COL_LINK_FOTO, ""))
-                                                direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
-                                                try:
-                                                    st.image(direct_url, use_container_width=True)
-                                                    st.caption(f"**{row.get(COL_NAMA)}**\n\n{row.get(COL_TEMPAT)}")
-                                                    st.link_button("🔗 Buka", url_asli)
-                                                except:
-                                                    st.error("Gagal load")
-
-                        # --- TAB 5: MASTER DATA ---
-                        with tab_data:
-                            st.markdown("### 📦 Data Mentah")
-                            if st.button("🔄 Refresh Data", key="refresh_master"):
-                                st.cache_data.clear()
-                                st.rerun()
-                            
-                            st.dataframe(df_all, use_container_width=True, hide_index=True)
-                            
-                            if HAS_OPENPYXL:
-                                xb = df_to_excel_bytes(df_all, sheet_name="All_Reports")
-                                if xb:
-                                    st.download_button("⬇️ Download Full Excel", data=xb, file_name="master_laporan.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-                        # --- TAB 6: CONFIG & STAFF ---
-                        with tab_config:
-                            c_conf1, c_conf2 = st.columns(2)
-                            
-                            with c_conf1:
-                                st.markdown("#### 👥 Manajemen Staf")
-                                staff_df = pd.DataFrame({"Nama Staf": staff_list})
-                                st.dataframe(staff_df, hide_index=True, use_container_width=True)
-                                
-                                with st.form("add_staff_admin"):
-                                    new_staff = st.text_input("Tambah Staf Baru")
-                                    if st.form_submit_button("Simpan Staf"):
-                                        if new_staff:
-                                            tambah_staf_baru(new_staff)
-                                            st.success("Tersimpan")
-                                            st.cache_data.clear()
-                                            st.rerun()
-                            
-                            with c_conf2:
-                                st.markdown("#### ⚙️ Config Team")
-                                df_team_cfg = load_team_config()
-                                st.dataframe(df_team_cfg, hide_index=True, use_container_width=True)
-                                
-                                with st.form("add_team_admin"):
-                                    tm_name = st.text_input("Nama Team")
-                                    tm_pos = st.text_input("Posisi")
-                                    tm_mem = st.text_area("Anggota (1 per baris)")
-                                    if st.form_submit_button("Simpan Team"):
-                                        mem_list = [x.strip() for x in tm_mem.splitlines() if x.strip()]
-                                        ok, msg = tambah_team_baru(tm_name, tm_pos, mem_list)
-                                        if ok: 
+                                    # TOMBOL ACC
+                                    if b_col2.button("✅ ACC", key=f"btn_acc_{i}", type="primary", use_container_width=True):
+                                        ok, msg = execute_approval(i, "APPROVE", admin_name=st.session_state["user_name"])
+                                        if ok:
                                             st.success(msg)
-                                            st.cache_data.clear()
+                                            time.sleep(1)
                                             st.rerun()
                                         else:
                                             st.error(msg)
+                                
+                                # --- AREA INPUT ALASAN PENOLAKAN (Muncul jika tombol Tolak ditekan) ---
+                                if st.session_state.get(f"show_reject_input_{i}", False):
+                                    st.markdown("---")
+                                    st.warning("Anda akan menolak permintaan ini.")
+                                    with st.form(key=f"form_reject_{i}"):
+                                        note = st.text_area("Catatan Penolakan (Opsional, tapi disarankan):", placeholder="Misal: Nominal salah, tolong cek lagi.")
+                                        
+                                        c_batal, c_confirm = st.columns(2)
+                                        if c_batal.form_submit_button("Batal"):
+                                            st.session_state[f"show_reject_input_{i}"] = False
+                                            st.rerun()
                                             
-                        # --- TAB 7: AKUN STAFF (Username & Password - Legacy) ---
-                        with tab_users:
-                            st.markdown("### 👥 Manajemen Akun Staff")
-                            st.caption("Fitur legacy. Staff sekarang bisa masuk langsung tanpa password.")
-                            
-                            # Menampilkan tabel user hanya untuk referensi
-                            ws_u = init_user_db()
-                            if ws_u:
-                                all_users = ws_u.get_all_records()
-                                df_users = pd.DataFrame(all_users)
-                                if "Password" in df_users.columns:
-                                    df_users["Password"] = "••••••"
-                                st.dataframe(df_users, use_container_width=True, hide_index=True)
-                            else:
-                                st.info("Tidak ada data akun.")
+                                        if c_confirm.form_submit_button("🚫 Konfirmasi Tolak", type="primary"):
+                                            note_final = note if note.strip() else "Tidak ada catatan."
+                                            ok, msg = execute_approval(i, "REJECT", admin_name=st.session_state["user_name"], rejection_note=note_final)
+                                            if ok:
+                                                st.success(f"Ditolak: {note_final}")
+                                                st.session_state[f"show_reject_input_{i}"] = False
+                                                time.sleep(1)
+                                                st.rerun()
 
-                        # --- TAB 8: SUPER ADMIN EDITOR (FITUR KHUSUS ADMIN) ---
-                        with tab_super:
-                            st.markdown("### ⚡ Super Admin Data Editor")
-                            
-                            # 1. Pilih Sheet yang mau diedit
-                            sheet_options = {
-                                "Laporan Harian": "Laporan Kegiatan Harian", 
-                                "Target Team": SHEET_TARGET_TEAM,
-                                "Target Individu": SHEET_TARGET_INDIVIDU,
-                                "Closing Deal": SHEET_CLOSING_DEAL,
-                                "Pembayaran": SHEET_PEMBAYARAN,
-                                "📜 Global Audit Log": "Global_Audit_Log"
-                            }
-                            
-                            staff_list = get_daftar_staf_terbaru()
-                            for s in staff_list:
-                                sheet_options[f"Laporan: {s}"] = s
+            # --- TAB 1: PRODUKTIVITAS ---
+            with tab_prod:
+                st.markdown("### 🚀 Analisa Produktivitas")
+                
+                if df_all.empty:
+                    st.info("Belum ada data laporan.")
+                else:
+                    # Filter Rentang Waktu
+                    c_filter1, c_filter2 = st.columns([1, 3])
+                    with c_filter1:
+                        days_opt = st.selectbox("Rentang Waktu:", [7, 14, 30, 60, 90], index=0)
+                    
+                    start_date = datetime.now(tz=TZ_JKT).date() - timedelta(days=days_opt)
+                    df_filt = df_all[df_all["Tanggal_Date"] >= start_date].copy()
 
-                            selected_label = st.selectbox("Pilih Data / Sheet:", list(sheet_options.keys()))
-                            target_sheet_name = sheet_options[selected_label]
+                    # Split Sales vs Digital
+                    df_sales = df_filt[df_filt["Kategori"] == "Kunjungan Lapangan"]
+                    df_digital = df_filt[df_filt["Kategori"] == "Digital/Internal"]
 
-                            # 2. Load Data Existing
-                            if st.button("📂 Load Data", key="btn_load_super"):
-                                st.session_state["super_df_old"] = None 
-                                
+                    # 1. SALES STATS
+                    with st.container(border=True):
+                        st.markdown("#### 🚗 Performance Sales (Lapangan)")
+                        k1, k2, k3 = st.columns(3)
+                        k1.metric("Total Kunjungan", len(df_sales))
+                        k2.metric("Sales Aktif", df_sales[COL_NAMA].nunique())
+                        k3.metric("Rata-rata/Hari", f"{len(df_sales)/days_opt:.1f}")
+                        
+                        if not df_sales.empty:
+                            st.bar_chart(df_sales[COL_NAMA].value_counts(), color="#16a34a") # Green
+
+                    # 2. DIGITAL STATS
+                    with st.container(border=True):
+                        st.markdown("#### 💻 Performance Digital & Internal")
+                        d1, d2, d3 = st.columns(3)
+                        d1.metric("Total Output", len(df_digital))
+                        d2.metric("Staf Aktif", df_digital[COL_NAMA].nunique())
+                        d3.metric("Rata-rata/Hari", f"{len(df_digital)/days_opt:.1f}")
+
+                        if not df_digital.empty:
+                            if HAS_PLOTLY:
                                 try:
-                                    ws = spreadsheet.worksheet(target_sheet_name)
-                                    data = ws.get_all_records()
-                                    df = pd.DataFrame(data)
-                                    st.session_state["super_df_old"] = df.copy()
-                                    st.session_state["super_sheet_target"] = target_sheet_name
-                                except Exception as e:
-                                    st.error(f"Gagal load sheet: {e}")
+                                    fig = px.pie(df_digital, names=COL_NAMA, title="Distribusi Beban Kerja Digital", hole=0.4)
+                                    st.plotly_chart(fig, use_container_width=True)
+                                except:
+                                    st.bar_chart(df_digital[COL_NAMA].value_counts(), color="#facc15") # Yellow
+                            else:
+                                st.bar_chart(df_digital[COL_NAMA].value_counts(), color="#facc15") # Yellow
 
-                            # 3. Editor Interface & NOTIFIKASI STATUS
-                            if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
-                                df_old = st.session_state["super_df_old"]
-                                target_s = st.session_state["super_sheet_target"]
-                                
-                                # --- [FITUR BARU] CEK STATUS TERAKHIR DARI AUDIT LOG ---
-                                # Logika: Ambil log terakhir untuk sheet ini, cek statusnya.
-                                from audit_service import load_audit_log
-                                logs = load_audit_log(spreadsheet)
-                                
-                                status_alert = None
-                                if not logs.empty:
-                                    # Filter log khusus sheet ini
-                                    logs_sheet = logs[logs["Nama Data / Sheet"] == target_s]
-                                    if not logs_sheet.empty:
-                                        # Ambil log paling baru (baris pertama jika sudah disort, atau sort dulu)
-                                        # Asumsi load_audit_log sudah return dataframe.
-                                        # Kita cari log REJECTED atau APPROVED terakhir
-                                        last_action = logs_sheet.iloc[0] # Mengambil row paling atas (terbaru)
-                                        action_type = str(last_action.get("Aksi Dilakukan", "")).upper()
-                                        reason_log = last_action.get("Alasan Perubahan", "-")
-                                        actor_log = last_action.get("Pelaku (User)", "Manager")
-                                        
-                                        if "REJECTED" in action_type:
-                                            status_alert = {
-                                                "type": "error",
-                                                "msg": f"⛔ Perubahan terakhir DITOLAK oleh {actor_log}.",
-                                                "detail": f"Catatan: {reason_log}"
-                                            }
-                                        elif "APPROVED" in action_type:
-                                            status_alert = {
-                                                "type": "success",
-                                                "msg": "✅ Perubahan terakhir SUDAH DISETUJUI.",
-                                                "detail": f"Oleh: {actor_log}"
-                                            }
-                                        elif "System_Pending" in str(target_s): # Kalau user buka sheet pending
-                                            status_alert = {"type": "info", "msg": "Sedang Menunggu Persetujuan...", "detail": ""}
+            # --- TAB 2: LEADS & INTEREST ---
+            with tab_leads:
+                st.markdown("### 🧲 Filter Data Klien (Leads)")
+                st.caption("Download data klien berdasarkan tingkat ketertarikan (Interest).")
 
-                                # TAMPILKAN ALERT STATUS DI ATAS EDITOR
-                                if status_alert:
-                                    if status_alert["type"] == "error":
-                                        st.error(f"{status_alert['msg']}\n\n{status_alert['detail']}")
-                                    elif status_alert["type"] == "success":
-                                        st.success(f"{status_alert['msg']}")
-                                else:
-                                    st.info(f"Mengedit Sheet: **{target_s}** ({len(df_old)} baris)")
+                if df_all.empty:
+                    st.info("Data kosong.")
+                else:
+                    if COL_INTEREST not in df_all.columns:
+                        st.warning("Kolom Interest belum tersedia di database.")
+                    else:
+                        st.session_state.setdefault("filter_interest_admin", "Under 50% (A)")
+                        
+                        # Button Filter
+                        b1, b2, b3 = st.columns(3)
+                        if b1.button("Tarik: Under 50% (A)", use_container_width=True):
+                            st.session_state["filter_interest_admin"] = "Under 50% (A)"
+                        if b2.button("Tarik: 50-75% (B)", use_container_width=True):
+                            st.session_state["filter_interest_admin"] = "50-75% (B)"
+                        if b3.button("Tarik: 75%-100%", use_container_width=True):
+                            st.session_state["filter_interest_admin"] = "75%-100%"
+                        
+                        sel_interest = st.session_state["filter_interest_admin"]
+                        st.success(f"📂 Menampilkan Filter: **{sel_interest}**")
 
-                                edit_reason = st.text_input("📝 Alasan Perubahan (Wajib diisi):", placeholder="Contoh: Koreksi typo nominal")
+                        # Filtering logic
+                        df_leads = df_all.copy()
+                        df_leads[COL_INTEREST] = df_leads[COL_INTEREST].astype(str).fillna("").str.strip()
+                        df_filtered = df_leads[df_leads[COL_INTEREST] == sel_interest].copy()
 
-                                edited_df = st.data_editor(df_old, use_container_width=True, num_rows="dynamic", key="super_editor")
+                        with st.container(border=True):
+                            st.success(f"📂 Menampilkan Data: **{sel_interest}** (Total: {len(df_leads)})")
+                            
+                            cols_display = [c for c in [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_TEMPAT, COL_DESKRIPSI, COL_KENDALA_KLIEN] if c in df_leads.columns]
+                            st.dataframe(df_leads[cols_display], use_container_width=True, hide_index=True)
 
-                                # 4. Tombol Simpan (MODIFIKASI LOGIKA ACC)
-                                # Cek Role
-                                current_role = st.session_state.get("user_role", "admin")
-                                
-                                # Label & Aksi Tombol Berbeda Sesuai Role
-                                if current_role == "manager":
-                                    btn_label = "💾 SIMPAN PERUBAHAN (LANGSUNG)"
-                                    btn_type = "primary"
-                                else:
-                                    btn_label = "📤 AJUKAN PERUBAHAN (REQUEST ACC)"
-                                    btn_type = "primary"
+                            # Export Buttons
+                            c_ex, c_csv = st.columns(2)
+                            safe_name = sel_interest.replace("%", "").replace(" ", "_").replace("/", "")
+                            
+                            with c_ex:
+                                if HAS_OPENPYXL:
+                                    xb = df_to_excel_bytes(df_filtered[cols_display], sheet_name="Leads", wrap_cols=[COL_DESKRIPSI, COL_TEMPAT])
+                                    if xb:
+                                        st.download_button(f"⬇️ Excel ({sel_interest})", data=xb, file_name=f"leads_{safe_name}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                            with c_csv:
+                                csv_data = df_filtered[cols_display].to_csv(index=False).encode('utf-8')
+                                st.download_button(f"⬇️ Download CSV ({sel_interest})", data=csv_data, file_name=f"leads_{safe_name}.csv", mime="text/csv", use_container_width=True)
 
-                                if st.button(btn_label, type=btn_type, use_container_width=True):
-                                    if not edit_reason:
-                                        st.error("❌ Alasan perubahan wajib diisi!")
+            # --- TAB 3: REVIEW & FEEDBACK ---
+            with tab_review:
+                st.markdown("### 📝 Review Laporan & Kirim Feedback")
+                st.caption("Monitoring detail kendala dan memberikan feedback langsung per laporan.")
+
+                if df_all.empty:
+                    st.info("Data kosong.")
+                else:
+                    # Sort by newest
+                    df_rev = df_all.sort_values(by=COL_TIMESTAMP, ascending=False).head(50) # Limit 50 terbaru agar ringan
+                    
+                    for i, row in df_rev.iterrows():
+                        with st.container(border=True):
+                            # Header Card
+                            c_head1, c_head2 = st.columns([4, 1])
+                            with c_head1:
+                                st.markdown(f"**{row.get(COL_NAMA, '-')}** | 📅 {row.get(COL_TIMESTAMP, '-')}")
+                                st.caption(f"📍 {row.get(COL_TEMPAT, '-')} ({row.get('Kategori', '-')})")
+                            with c_head2:
+                                # Tampilkan Interest sebagai badge jika ada
+                                intr = row.get(COL_INTEREST, "-")
+                                if intr and intr != "-" and intr != "":
+                                    st.markdown(f"🔥 `{intr}`")
+
+                            st.markdown(f"📄 **Deskripsi:** {row.get(COL_DESKRIPSI, '-')}")
+                            
+                            # Info Klien
+                            if row.get(COL_NAMA_KLIEN) not in ["-", ""]:
+                                st.markdown(f"👤 **Klien:** {row.get(COL_NAMA_KLIEN)} | 📞 {row.get(COL_KONTAK_KLIEN)}")
+
+                            st.divider()
+                            
+                            # 3 Kolom detail
+                            rc1, rc2, rc3 = st.columns(3)
+                            with rc1:
+                                st.info(f"💡 **Hasil:**\n\n{row.get(COL_KESIMPULAN, '-')}")
+                            with rc2:
+                                st.warning(f"🚧 **Kendala:**\n\n{row.get(COL_KENDALA, '-')}")
+                            with rc3:
+                                st.error(f"📌 **Pending/Next:**\n\n{row.get(COL_PENDING, '-')}")
+
+                            # Foto Bukti
+                            link_foto = str(row.get(COL_LINK_FOTO, ""))
+                            if "http" in link_foto:
+                                with st.expander("🖼️ Lihat Bukti Foto"):
+                                    direct_url = link_foto.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                                    st.image(direct_url, width=300)
+                                    st.caption(f"Link: {link_foto}")
+
+                            # Form Feedback
+                            existing_fb = row.get(COL_FEEDBACK, "")
+                            with st.expander(f"💬 Beri Feedback ({row.get(COL_NAMA)})", expanded=False):
+                                uk = f"fb_desk_{i}_{row.get(COL_TIMESTAMP)}"
+                                fb_in = st.text_area("Tulis Masukan/Arahan:", value=str(existing_fb), key=uk)
+                                if st.button("Kirim Feedback 🚀", key=f"btn_{uk}"):
+                                    ts_val = row.get(COL_TIMESTAMP)
+                                    ts_str = ts_val.strftime("%d-%m-%Y %H:%M:%S") if hasattr(ts_val, "strftime") else str(ts_val)
+                                    ok, msg = kirim_feedback_admin(row.get(COL_NAMA), ts_str, fb_in)
+                                    if ok:
+                                        st.success("Terkirim!")
+                                        st.cache_data.clear()
                                     else:
-                                        # Deteksi Perubahan
-                                        changes = compare_and_get_changes(df_old, edited_df)
+                                        st.error(msg)
+
+            # --- TAB 4: GALERI ---
+            with tab_galeri:
+                st.markdown("### 🖼️ Galeri Aktivitas Terbaru")
+                if df_all.empty or COL_LINK_FOTO not in df_all.columns:
+                    st.info("Belum ada foto.")
+                else:
+                    # Filter link http valid
+                    df_foto = df_all[df_all[COL_LINK_FOTO].astype(str).str.contains("http", na=False, case=False)].sort_values(by=COL_TIMESTAMP, ascending=False).head(12)
+                    
+                    if df_foto.empty:
+                        st.warning("Tidak ada data foto valid.")
+                    else:
+                        cols = st.columns(4)
+                        for idx, row in enumerate(df_foto.to_dict("records")):
+                            with cols[idx % 4]:
+                                with st.container(border=True):
+                                    url_asli = str(row.get(COL_LINK_FOTO, ""))
+                                    direct_url = url_asli.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "")
+                                    try:
+                                        st.image(direct_url, use_container_width=True)
+                                        st.caption(f"**{row.get(COL_NAMA)}**\n\n{row.get(COL_TEMPAT)}")
+                                        st.link_button("🔗 Buka", url_asli)
+                                    except:
+                                        st.error("Gagal load")
+
+            # --- TAB 5: MASTER DATA ---
+            with tab_data:
+                st.markdown("### 📦 Data Mentah")
+                if st.button("🔄 Refresh Data", key="refresh_master"):
+                    st.cache_data.clear()
+                    st.rerun()
+                
+                st.dataframe(df_all, use_container_width=True, hide_index=True)
+                
+                if HAS_OPENPYXL:
+                    xb = df_to_excel_bytes(df_all, sheet_name="All_Reports")
+                    if xb:
+                        st.download_button("⬇️ Download Full Excel", data=xb, file_name="master_laporan.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            # --- TAB 6: CONFIG & STAFF ---
+            with tab_config:
+                c_conf1, c_conf2 = st.columns(2)
+                
+                with c_conf1:
+                    st.markdown("#### 👥 Manajemen Staf")
+                    staff_df = pd.DataFrame({"Nama Staf": staff_list})
+                    st.dataframe(staff_df, hide_index=True, use_container_width=True)
+                    
+                    with st.form("add_staff_admin"):
+                        new_staff = st.text_input("Tambah Staf Baru")
+                        if st.form_submit_button("Simpan Staf"):
+                            if new_staff:
+                                tambah_staf_baru(new_staff)
+                                st.success("Tersimpan")
+                                st.cache_data.clear()
+                                st.rerun()
+                
+                with c_conf2:
+                    st.markdown("#### ⚙️ Config Team")
+                    df_team_cfg = load_team_config()
+                    st.dataframe(df_team_cfg, hide_index=True, use_container_width=True)
+                    
+                    with st.form("add_team_admin"):
+                        tm_name = st.text_input("Nama Team")
+                        tm_pos = st.text_input("Posisi")
+                        tm_mem = st.text_area("Anggota (1 per baris)")
+                        if st.form_submit_button("Simpan Team"):
+                            mem_list = [x.strip() for x in tm_mem.splitlines() if x.strip()]
+                            ok, msg = tambah_team_baru(tm_name, tm_pos, mem_list)
+                            if ok: 
+                                st.success(msg)
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error(msg)
+                                
+            # --- TAB 7: AKUN STAFF (Username & Password - Legacy) ---
+            with tab_users:
+                st.markdown("### 👥 Manajemen Akun Staff")
+                st.caption("Fitur legacy. Staff sekarang bisa masuk langsung tanpa password.")
+                
+                # Menampilkan tabel user hanya untuk referensi
+                ws_u = init_user_db()
+                if ws_u:
+                    all_users = ws_u.get_all_records()
+                    df_users = pd.DataFrame(all_users)
+                    if "Password" in df_users.columns:
+                        df_users["Password"] = "••••••"
+                    st.dataframe(df_users, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Tidak ada data akun.")
+
+            # --- TAB 8: SUPER ADMIN EDITOR (FITUR KHUSUS ADMIN) ---
+            with tab_super:
+                st.markdown("### ⚡ Super Admin Data Editor")
+                
+                # 1. Pilih Sheet yang mau diedit
+                sheet_options = {
+                    "Laporan Harian": "Laporan Kegiatan Harian", 
+                    "Target Team": SHEET_TARGET_TEAM,
+                    "Target Individu": SHEET_TARGET_INDIVIDU,
+                    "Closing Deal": SHEET_CLOSING_DEAL,
+                    "Pembayaran": SHEET_PEMBAYARAN,
+                    "📜 Global Audit Log": "Global_Audit_Log"
+                }
+                
+                staff_list = get_daftar_staf_terbaru()
+                for s in staff_list:
+                    sheet_options[f"Laporan: {s}"] = s
+
+                selected_label = st.selectbox("Pilih Data / Sheet:", list(sheet_options.keys()))
+                target_sheet_name = sheet_options[selected_label]
+
+                # 2. Load Data Existing
+                if st.button("📂 Load Data", key="btn_load_super"):
+                    st.session_state["super_df_old"] = None 
+                    
+                    try:
+                        ws = spreadsheet.worksheet(target_sheet_name)
+                        data = ws.get_all_records()
+                        df = pd.DataFrame(data)
+                        st.session_state["super_df_old"] = df.copy()
+                        st.session_state["super_sheet_target"] = target_sheet_name
+                    except Exception as e:
+                        st.error(f"Gagal load sheet: {e}")
+
+                # 3. Editor Interface & NOTIFIKASI STATUS
+                if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
+                    df_old = st.session_state["super_df_old"]
+                    target_s = st.session_state["super_sheet_target"]
+                    
+                    # --- CEK STATUS TERAKHIR DARI AUDIT LOG ---
+                    try:
+                        from audit_service import load_audit_log
+                        logs = load_audit_log(spreadsheet)
+                        
+                        status_alert = None
+                        if not logs.empty:
+                            # Filter log khusus sheet ini
+                            logs_sheet = logs[logs["Nama Data / Sheet"] == target_s]
+                            if not logs_sheet.empty:
+                                # Ambil log paling baru
+                                last_action = logs_sheet.iloc[0] 
+                                action_type = str(last_action.get("Aksi Dilakukan", "")).upper()
+                                reason_log = last_action.get("Alasan Perubahan", "-")
+                                actor_log = last_action.get("Pelaku (User)", "Manager")
+                                
+                                if "REJECTED" in action_type:
+                                     status_alert = {
+                                         "type": "error",
+                                         "msg": f"⛔ Perubahan terakhir DITOLAK oleh {actor_log}.",
+                                         "detail": f"Catatan: {reason_log}"
+                                     }
+                                elif "APPROVED" in action_type:
+                                     status_alert = {
+                                         "type": "success",
+                                         "msg": "✅ Perubahan terakhir SUDAH DISETUJUI.",
+                                         "detail": f"Oleh: {actor_log}"
+                                     }
+                                elif "System_Pending" in str(target_s): 
+                                     status_alert = {"type": "info", "msg": "Sedang Menunggu Persetujuan...", "detail": ""}
+                    except ImportError:
+                        status_alert = None 
+                        pass
+
+                    # TAMPILKAN ALERT STATUS DI ATAS EDITOR
+                    if status_alert:
+                        if status_alert["type"] == "error":
+                            st.error(f"{status_alert['msg']}\n\n{status_alert['detail']}")
+                        elif status_alert["type"] == "success":
+                            st.success(f"{status_alert['msg']}")
+                        elif status_alert["type"] == "info":
+                             st.info(f"{status_alert['msg']}")
+                    else:
+                        st.info(f"Mengedit Sheet: **{st.session_state['super_sheet_target']}** ({len(df_old)} baris)")
+
+                    # --- EDITOR ---
+                    edit_reason = st.text_input("📝 Alasan Perubahan (Wajib diisi):", placeholder="Contoh: Koreksi typo nominal")
+
+                    edited_df = st.data_editor(df_old, use_container_width=True, num_rows="dynamic", key="super_editor")
+
+                    # 4. Tombol Simpan
+                    current_role = st.session_state.get("user_role", "admin")
+                    
+                    if current_role == "manager":
+                        btn_label = "💾 SIMPAN PERUBAHAN (LANGSUNG)"
+                        btn_type = "primary"
+                    else:
+                        btn_label = "📤 AJUKAN PERUBAHAN (REQUEST ACC)"
+                        btn_type = "primary"
+
+                    if st.button(btn_label, type=btn_type, use_container_width=True):
+                        if not edit_reason:
+                            st.error("❌ Alasan perubahan wajib diisi!")
+                        else:
+                            # Deteksi Perubahan
+                            changes = compare_and_get_changes(df_old, edited_df)
+                            
+                            if not changes:
+                                st.warning("Tidak ada perubahan data yang terdeteksi.")
+                            else:
+                                # SKENARIO 1: MANAGER (Langsung Simpan)
+                                if current_role == "manager":
+                                    with st.spinner("Menyimpan ke Google Sheets & Mencatat Audit..."):
+                                        try:
+                                            # Update Google Sheets
+                                            ws = spreadsheet.worksheet(st.session_state["super_sheet_target"])
+                                            ws.clear()
+                                            params = [edited_df.columns.values.tolist()] + edited_df.astype(str).values.tolist()
+                                            ws.update(range_name="A1", values=params, value_input_option="USER_ENTERED")
+                                            
+                                            # Catat Log Audit
+                                            real_actor = st.session_state.get("user_name") or "Manager"
+                                            success_log = 0
+                                            for chg in changes:
+                                                real_row = chg['row_idx'] + 2 
+                                                log_admin_action(
+                                                    spreadsheet=spreadsheet,
+                                                    actor=real_actor,
+                                                    role="Manager (Super)",
+                                                    feature="Super Editor",
+                                                    target_sheet=st.session_state["super_sheet_target"],
+                                                    row_idx=real_row,
+                                                    action="UPDATE",
+                                                    reason=edit_reason,
+                                                    changes_dict=chg['diff']
+                                                )
+                                                success_log += 1
+                                            
+                                            st.success(f"✅ Berhasil! {success_log} baris data diperbarui.")
+                                            st.session_state["super_df_old"] = edited_df.copy() # Update state
+                                            
+                                        except Exception as e:
+                                            st.error(f"Terjadi kesalahan saat menyimpan: {e}")
+
+                                # SKENARIO 2: ADMIN (Ajukan Request ke Pending List)
+                                else:
+                                    with st.spinner("Mengirim permintaan persetujuan ke Manager..."):
+                                        success_count = 0
+                                        for chg in changes:
+                                            r_idx = chg['row_idx']
+                                            
+                                            # Data Baru (dari editor)
+                                            new_row_data = edited_df.iloc[r_idx]
+
+                                            # Data Lama (dari state awal) -- [PENGGABUNGAN CODE KEDUA]
+                                            old_row_data = df_old.iloc[r_idx]
+                                            
+                                            # Kirim ke helper submit_change_request
+                                            ok, msg = submit_change_request(
+                                                target_sheet=st.session_state["super_sheet_target"],
+                                                row_idx_0based=r_idx,
+                                                new_df_row=new_row_data,
+                                                old_df_row=old_row_data, # <--- Parameter tambahan
+                                                reason=edit_reason,
+                                                requestor=st.session_state["user_name"]
+                                            )
+                                            if ok: success_count += 1
                                         
-                                        if not changes:
-                                            st.warning("Tidak ada perubahan data yang terdeteksi.")
+                                        if success_count > 0:
+                                            st.success(f"✅ {success_count} Perubahan berhasil diajukan! Menunggu ACC Manager.")
                                         else:
-                                            # SKENARIO 1: MANAGER (Langsung Simpan - Bypass Approval)
-                                            if current_role == "manager":
-                                                with st.spinner("Menyimpan ke Google Sheets & Mencatat Audit..."):
-                                                    try:
-                                                        # Update Google Sheets (Override Full)
-                                                        ws = spreadsheet.worksheet(st.session_state["super_sheet_target"])
-                                                        ws.clear()
-                                                        params = [edited_df.columns.values.tolist()] + edited_df.astype(str).values.tolist()
-                                                        ws.update(range_name="A1", values=params, value_input_option="USER_ENTERED")
-                                                        
-                                                        # Catat Log Audit
-                                                        real_actor = st.session_state.get("user_name") or "Manager"
-                                                        success_log = 0
-                                                        for chg in changes:
-                                                            real_row = chg['row_idx'] + 2 
-                                                            log_admin_action(
-                                                                spreadsheet=spreadsheet,
-                                                                actor=real_actor,
-                                                                role="Manager (Super)",
-                                                                feature="Super Editor",
-                                                                target_sheet=st.session_state["super_sheet_target"],
-                                                                row_idx=real_row,
-                                                                action="UPDATE",
-                                                                reason=edit_reason,
-                                                                changes_dict=chg['diff']
-                                                            )
-                                                            success_log += 1
-                                                        
-                                                        st.success(f"✅ Berhasil! {success_log} baris data diperbarui.")
-                                                        st.session_state["super_df_old"] = edited_df.copy() # Update state
-                                                        
-                                                    except Exception as e:
-                                                        st.error(f"Terjadi kesalahan saat menyimpan: {e}")
+                                            st.error("Gagal mengajukan perubahan.")
 
-                                            # SKENARIO 2: ADMIN (Ajukan Request ke Pending List)
-                                            else:
-                                                with st.spinner("Mengirim permintaan persetujuan ke Manager..."):
-                                                    success_count = 0
-                                                    for chg in changes:
-                                                        r_idx = chg['row_idx']
-                                                        
-                                                        # Data Baru (Series)
-                                                        new_row_data = edited_df.iloc[r_idx]
-                                                        
-                                                        # Data Lama (Series) - untuk diff checker di approval
-                                                        old_row_data = df_old.iloc[r_idx] 
-                                                        
-                                                        # Kirim ke helper submit_change_request
-                                                        ok, msg = submit_change_request(
-                                                            target_sheet=st.session_state["super_sheet_target"],
-                                                            row_idx_0based=r_idx,
-                                                            new_df_row=new_row_data,
-                                                            old_df_row=old_row_data, # <--- DIKIRIM KE SINI
-                                                            reason=edit_reason,
-                                                            requestor=st.session_state["user_name"]
-                                                        )
-                                                        if ok: success_count += 1
-                                                    
-                                                    if success_count > 0:
-                                                        st.success(f"✅ {success_count} Perubahan berhasil diajukan! Menunggu ACC Manager.")
-                                                        # Jangan update st.session_state["super_df_old"] agar admin sadar data belum berubah di DB utama
-                                                    else:
-                                                        st.error("Gagal mengajukan perubahan.")
-
-                        # Render watermark di luar tabs
-                        render_section_watermark()
+            # Render watermark di luar tabs
+            render_section_watermark()
