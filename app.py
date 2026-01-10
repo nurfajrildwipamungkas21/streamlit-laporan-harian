@@ -1964,6 +1964,20 @@ def get_daftar_staf_terbaru():
         return default_staf
 
 
+def hapus_staf_by_name(nama_staf):
+    """Menghapus nama staf dari worksheet Config_Staf."""
+    try:
+        ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
+        # Cari sel yang berisi nama tersebut
+        cell = ws.find(nama_staf)
+        if cell:
+            ws.delete_rows(cell.row)
+            return True, f"Staf '{nama_staf}' berhasil dihapus."
+        return False, "Nama staf tidak ditemukan di database."
+    except Exception as e:
+        return False, f"Gagal menghapus: {e}"
+
+
 def tambah_staf_baru(nama_baru):
     try:
         try:
@@ -3820,14 +3834,7 @@ def render_admin_mobile():
         st.session_state["is_admin"] = False
         st.rerun()
 
-    # --- CODE DASHBOARD ADMIN (Versi Compact untuk Mobile) ---
-
-    # Helper sederhana (copy dari desktop logic)
-    def get_cat(val):
-        s = str(val)
-        if any(k in s for k in ["Digital", "Ads", "Konten"]): return "Digital"
-        return "Sales"
-
+    # --- LOADING DATA ---
     staff_list = get_daftar_staf_terbaru()
     df_all = load_all_reports(staff_list)
 
@@ -3836,7 +3843,8 @@ def render_admin_mobile():
             df_all[COL_TIMESTAMP] = pd.to_datetime(
                 df_all[COL_TIMESTAMP], format="%d-%m-%Y %H:%M:%S", errors="coerce")
             df_all["Tgl"] = df_all[COL_TIMESTAMP].dt.date
-            df_all["Kat"] = df_all[COL_TEMPAT].apply(get_cat)
+            # Helper kategori sederhana
+            df_all["Kat"] = df_all[COL_TEMPAT].apply(lambda x: "Digital" if any(k in str(x) for k in ["Digital", "Ads", "Konten"]) else "Sales")
         except: pass
 
     # TABS NAVIGATION MOBILE
@@ -3847,55 +3855,84 @@ def render_admin_mobile():
     with tab_prod:
         st.caption("Analisa Kinerja")
         if not df_all.empty:
-            days = st.selectbox("Hari Terakhir:", [
-                                7, 30, 90], key="mob_adm_days")
+            days = st.selectbox("Hari Terakhir:", [7, 30, 90], key="mob_adm_days")
             start_d = datetime.now(tz=TZ_JKT).date() - timedelta(days=days)
             df_f = df_all[df_all["Tgl"] >= start_d].copy()
-
             st.metric("Total Laporan", len(df_f))
             st.bar_chart(df_f[COL_NAMA].value_counts())
         else: st.info("No data")
 
-    # B. Tab Leads (Download Excel)
+    # B. Tab Leads
     with tab_leads:
         st.caption("Filter & Download Leads")
-        sel_int = st.selectbox(
-            "Interest:", ["Under 50% (A)", "50-75% (B)", "75%-100%"], key="mob_adm_int")
+        sel_int = st.selectbox("Interest:", ["Under 50% (A)", "50-75% (B)", "75%-100%"], key="mob_adm_int")
         if not df_all.empty and COL_INTEREST in df_all.columns:
-            df_leads = df_all[df_all[COL_INTEREST].astype(
-                str).str.strip() == sel_int]
-            st.dataframe(
-                df_leads[[COL_NAMA_KLIEN, COL_KONTAK_KLIEN]], use_container_width=True)
-
+            df_leads = df_all[df_all[COL_INTEREST].astype(str).str.strip() == sel_int]
+            st.dataframe(df_leads[[COL_NAMA_KLIEN, COL_KONTAK_KLIEN]], use_container_width=True)
             if HAS_OPENPYXL:
                 xb = df_to_excel_bytes(df_leads, sheet_name="Leads")
-                if xb:
-                    st.download_button("⬇️ Excel Leads", data=xb, file_name=f"leads_{sel_int}.xlsx",
-                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                       use_container_width=True)
+                if xb: st.download_button("⬇️ Excel Leads", data=xb, file_name=f"leads_{sel_int}.xlsx", use_container_width=True)
 
     # C. Tab Data Master
     with tab_data:
         st.caption("Master Data Laporan")
         if st.button("Refresh Data", use_container_width=True, key="mob_ref_data"):
             st.cache_data.clear(); st.rerun()
-
         st.dataframe(df_all, use_container_width=True)
 
-        if HAS_OPENPYXL:
-            xb = df_to_excel_bytes(df_all, sheet_name="Master")
-            if xb: st.download_button(
-                "⬇️ Download Full Excel", data=xb, file_name="master.xlsx", use_container_width=True)
-
-    # D. Tab Config (Tambah Staf)
+    # D. Tab Config (INTEGRASI TAMBAH & HAPUS STAF)
     with tab_cfg:
-        st.caption("Kelola Staf & Tim")
+        st.markdown("#### 👥 Kelola Personel (Staf)")
+        
+        # --- SUB-BAGIAN: TAMBAH STAF ---
         with st.form("mob_add_staff"):
-            new_st = st.text_input("Nama Staf Baru")
-            if st.form_submit_button("Simpan"):
-                tambah_staf_baru(new_st)
-                st.success("Tersimpan")
-                st.cache_data.clear(); st.rerun()
+            st.markdown("➕ **Tambah Staf Baru**")
+            new_st = st.text_input("Nama Staf", placeholder="Ketik nama baru...")
+            if st.form_submit_button("Simpan Staf", use_container_width=True):
+                if new_st.strip():
+                    ok, msg = tambah_staf_baru(new_st)
+                    if ok:
+                        st.success("Berhasil ditambahkan!")
+                        st.cache_data.clear(); time.sleep(1); st.rerun()
+                    else: st.error(msg)
+                else: st.error("Nama tidak boleh kosong.")
+
+        st.markdown("---") # Pembatas visual
+
+        # --- SUB-BAGIAN: HAPUS STAF (FITUR BARU) ---
+        st.markdown("#### 🗑️ Hapus Staf")
+        st.caption("Menghapus nama dari daftar pelapor.")
+        
+        # Ambil daftar staf terbaru untuk dropdown hapus
+        staff_now = get_daftar_staf_terbaru()
+        hapus_select = st.selectbox("Pilih staf yang akan dihapus:", ["-- Pilih Staf --"] + staff_now, key="mob_del_st")
+        
+        # Checkbox konfirmasi agar tidak sengaja terpencet
+        confirm_del = st.checkbox("Konfirmasi penghapusan permanen", key="mob_del_confirm")
+
+        if st.button("🔥 Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
+            if hapus_select == "-- Pilih Staf --":
+                st.error("Pilih nama staf terlebih dahulu!")
+            elif not confirm_del:
+                st.error("Silakan centang kotak konfirmasi penghapusan.")
+            else:
+                with st.spinner("Menghapus..."):
+                    ok, m = hapus_staf_by_name(hapus_select)
+                    if ok:
+                        # Log Audit (Penting agar terekam siapa yang menghapus via HP)
+                        force_audit_log(
+                            actor=st.session_state.get("user_name", "Admin Mobile"),
+                            action="❌ DELETE USER",
+                            target_sheet="Config_Staf",
+                            chat_msg=f"Menghapus staf via HP: {hapus_select}",
+                            details_input=f"User {hapus_select} telah dihapus dari sistem mobile."
+                        )
+                        st.success(f"Staf {hapus_select} Berhasil dihapus!")
+                        st.cache_data.clear()
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error(m)
 
 
 def render_audit_mobile():
@@ -4918,24 +4955,56 @@ elif menu_nav == "📊 Dashboard Admin":
                             else:
                                 st.error(msg)
 
-            # --- TAB 7: AKUN STAFF (Username & Password - Legacy) ---
+            # --- TAB 7: AKUN STAFF (Manajemen & Penghapusan) ---
             with tab_users:
-                st.markdown("### 👥 Manajemen Akun Staff")
-                st.caption(
-                    "Fitur legacy. Staff sekarang bisa masuk langsung tanpa password.")
+                st.markdown("### 👥 Manajemen Akun & Personel")
+                st.caption("Kelola staf yang terdaftar. Menghapus staf di sini akan menghilangkannya dari daftar pilihan di form laporan.")
 
-                # Menampilkan tabel user hanya untuk referensi
-                ws_u = init_user_db()
-                if ws_u:
-                    all_users = ws_u.get_all_records()
-                    df_users = pd.DataFrame(all_users)
-                    if "Password" in df_users.columns:
-                        df_users["Password"] = "••••••"
-                    st.dataframe(
-                        df_users, use_container_width=True, hide_index=True)
+                # Ambil data terbaru
+                staff_list = get_daftar_staf_terbaru() # Fungsi ini mengambil dari SHEET_CONFIG_NAMA
+                
+                if staff_list:
+                    # Tampilkan tabel daftar staf agar admin bisa melihat siapa saja yang ada
+                    df_staff_view = pd.DataFrame({"Nama Staf Terdaftar": staff_list})
+                    st.dataframe(df_staff_view, use_container_width=True, hide_index=True)
+
+                    st.divider()
+                    
+                    # Area Penghapusan
+                    st.markdown("#### 🗑️ Hapus Akun/Staf")
+                    with st.form("form_delete_staff"):
+                        st.warning("⚠️ Perhatian: Menghapus staf tidak akan menghapus laporan lama mereka, namun nama mereka tidak akan muncul lagi di pilihan pelapor.")
+                        
+                        pilih_hapus = st.selectbox("Pilih staf yang akan dihapus:", ["-- Pilih Staf --"] + staff_list)
+                        konfirmasi = st.checkbox("Saya yakin ingin menghapus staf ini secara permanen.")
+                        
+                        submit_hapus = st.form_submit_button("Hapus Staf Sekarang", type="primary")
+
+                        if submit_hapus:
+                            if pilih_hapus == "-- Pilih Staf --":
+                                st.error("Silakan pilih nama staf terlebih dahulu.")
+                            elif not konfirmasi:
+                                st.error("Silakan centang kotak konfirmasi terlebih dahulu.")
+                            else:
+                                with st.spinner("Menghapus data..."):
+                                    ok, msg = hapus_staf_by_name(pilih_hapus)
+                                    if ok:
+                                        # Catat ke Global Audit Log agar transparan
+                                        force_audit_log(
+                                            actor=st.session_state.get("user_name", "Admin"),
+                                            action="❌ DELETE USER",
+                                            target_sheet="Config_Staf",
+                                            chat_msg=f"Menghapus staf: {pilih_hapus}",
+                                            details_input=f"Staf {pilih_hapus} telah dihapus dari sistem."
+                                        )
+                                        st.success(msg)
+                                        st.cache_data.clear() # Penting agar daftar selectbox di tempat lain terupdate
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
                 else:
-                    st.info("Tidak ada data akun.")
-
+                    st.info("Belum ada data staf yang terdaftar.")
             # --- TAB 8: SUPER ADMIN EDITOR (FITUR KHUSUS ADMIN) ---
             with tab_super:
                 st.markdown("### ⚡ Super Admin Data Editor")
