@@ -5053,7 +5053,7 @@ elif menu_nav == "📊 Dashboard Admin":
                         st.error(f"Gagal load sheet: {e}")
 
                 # 3. Editor Interface & NOTIFIKASI STATUS
-if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
+                if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
                     df_old = st.session_state["super_df_old"]
                     target_s = st.session_state["super_sheet_target"]
 
