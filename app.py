@@ -103,6 +103,10 @@ def send_email_otp(target_email, otp_code):
 def generate_otp():
     return ''.join(random.choices(string.digits, k=6))
 
+# =========================================================
+# SYSTEM LOGIN (MODIFIED: Direct Staff Access)
+# =========================================================
+
 def login_page():
     st.markdown("<br><br>", unsafe_allow_html=True)
     st.markdown("<h1 style='text-align: center;'>🔐 Access Portal</h1>", unsafe_allow_html=True)
@@ -111,33 +115,25 @@ def login_page():
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # MEMBUAT TABS: Staff vs Admin
-        tab_staff, tab_admin = st.tabs(["👤 Login Staff", "🛡️ Login Admin (OTP)"])
+        # MEMBUAT TABS: Staff (Langsung) vs Admin (OTP)
+        tab_staff, tab_admin = st.tabs(["🚀 Akses Staff", "🛡️ Login Admin"])
         
-        # --- TAB 1: LOGIN STAFF (USERNAME & PASSWORD) ---
+        # --- TAB 1: AKSES STAFF (LANGSUNG) ---
         with tab_staff:
-            with st.form("form_login_staff"):
-                st.caption("Masuk menggunakan akun yang diberikan Admin.")
-                u_staff = st.text_input("Username")
-                p_staff = st.text_input("Password", type="password")
+            st.markdown("### 👋 Halo, Team!")
+            st.info("Klik tombol di bawah untuk masuk dan mulai membuat laporan.")
+            
+            if st.button("Masuk Aplikasi (Staff)", type="primary", use_container_width=True):
+                # SET SESSION STAFF (GENERIC)
+                st.session_state["logged_in"] = True
+                st.session_state["user_email"] = "staff_entry" 
+                st.session_state["user_name"] = "Staff Member" # Nama spesifik nanti dipilih di dalam form
+                st.session_state["user_role"] = "staff" 
+                st.session_state["is_admin"] = False    # KUNCI: Staff tidak bisa akses dashboard admin
                 
-                if st.form_submit_button("Masuk", type="primary", use_container_width=True):
-                    # Cek ke database Google Sheet
-                    user_data = check_staff_login(u_staff, p_staff)
-                    
-                    if user_data:
-                        # SET SESSION STAFF
-                        st.session_state["logged_in"] = True
-                        st.session_state["user_email"] = u_staff # Username jadi ID unik
-                        st.session_state["user_name"] = user_data["Nama"]
-                        st.session_state["user_role"] = "staff" # Hardcode staff
-                        st.session_state["is_admin"] = False    # Staff bukan admin
-                        
-                        st.success(f"Selamat datang, {user_data['Nama']}!")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.error("Username atau Password salah.")
+                st.success("Berhasil masuk! Mengalihkan...")
+                time.sleep(0.5)
+                st.rerun()
 
         # --- TAB 2: LOGIN ADMIN (EMAIL & OTP) ---
         with tab_admin:
