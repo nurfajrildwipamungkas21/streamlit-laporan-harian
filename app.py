@@ -107,7 +107,8 @@ def init_pending_db():
 
 def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, reason, requestor):
     """
-    UPDATE: Menggunakan force_audit_log agar pengajuan PASTI tercatat.
+    UPDATE: Menggunakan force_audit_log dengan format FLAT (String) agar terbaca di UI Audit Log.
+    Status: PENDING | Detail: List Perubahan | Alasan: [Request Admin] ...
     """
     ws = init_pending_db()
     if not ws: return False, "DB Error"
@@ -122,30 +123,40 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
 
     ts = now_ts_str()
 
-    # 1. Simpan request ke database pending
+    # 1. Simpan request ke database pending (System_Pending_Approval)
+    # (Ini tetap diperlukan untuk logic approval Manager nanti mengambil datanya)
     ws.append_row(
         [ts, requestor, target_sheet, row_idx_0based, json_new, reason, json_old],
         value_input_option="USER_ENTERED"
     )
 
-    # 2. [BARU] Catat Log via Force Log
+    # 2. [PERBAIKAN UTAMA] Catat Log via Force Log
     # Hitung perbedaan untuk log
     diff_log = {}
     for k, v_new in row_dict_new.items():
         v_old = row_dict_old.get(k, "")
+        # Normalisasi string agar tidak false alarm (spasi, dll)
         if str(v_new).strip() != str(v_old).strip():
             diff_log[k] = f"{v_old} ➡ {v_new}"
 
+    # --- UPDATE FIX: Flatten Dictionary ke String ---
+    # Mengubah dictionary diff menjadi string teks biasa agar muncul di kolom 'Detail Perubahan'
+    if not diff_log:
+        diff_str = "Tidak ada perubahan data terdeteksi (Re-save)."
+    else:
+        # Join setiap item dengan enter (\n) agar rapi list ke bawah
+        diff_str = "\n".join([f"{k}: {v}" for k, v in diff_log.items()])
+
+    # --- UPDATE FIX: Parameter Status & Reason ---
     force_audit_log(
         actor=requestor,
-        action="REQUEST_UPDATE",
+        # ACTION diubah jadi status yang mudah dibaca (bukan kode teknis "REQUEST_UPDATE")
+        action="⏳ PENDING",
         target_sheet=target_sheet,
-        reason=reason,
-        details_dict={
-            "Status": "⏳ MENUNGGU APPROVAL",
-            "Info": "Pengajuan dikirim ke Manager",
-            "Perubahan": diff_log
-        }
+        # REASON diberi prefix agar jelas ini chat dari Admin
+        reason=f"[Request Admin] {reason}",
+        # DETAILS_DICT diisi string diff langsung (bukan dict nested) agar UI membacanya sebagai teks
+        details_dict=diff_str
     )
 
     return True, "Permintaan terkirim & Log tercatat!"
@@ -160,8 +171,8 @@ def get_pending_approvals():
 
 def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval dengan Direct Logging.
-    Memastikan alasan penolakan tercatat jelas di Global Audit Log.
+    Fungsi Eksekusi Approval dengan Direct Logging yang diperbaiki (FLAT STRING).
+    Memastikan status ACC/REJECT dan Alasan Manager muncul jelas di Global Audit Log.
     """
     try:
         # Inisialisasi koneksi ke sheet pending
@@ -178,17 +189,25 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
         row_target_idx = int(req["Row Index (0-based)"])
         requestor_name = req.get("Requestor", "Unknown")
 
-        # --- PERSIAPAN DIFF LOG ---
-        diff_dict = {}
+        # --- PERSIAPAN DIFF LOG (FLATTEN TO STRING) ---
+        diff_str = ""
         try:
             old_d = json.loads(req.get("Old Data JSON", "{}"))
             new_d = json.loads(req.get("New Data JSON", "{}"))
+            
+            diff_list = []
             for k, v in new_d.items():
                 old_v = old_d.get(k, "")
+                # Bandingkan nilai lama vs baru
                 if str(old_v).strip() != str(v).strip():
-                    diff_dict[k] = f"{old_v} ➡ {v}"
+                    diff_list.append(f"{k}: {old_v} ➡ {v}")
+            
+            if diff_list:
+                diff_str = "\n".join(diff_list)
+            else:
+                diff_str = "Tidak ada perubahan signifikan."
         except:
-            diff_dict = {"Info": "Detail diff tidak tersedia (error parsing)."}
+            diff_str = "Error parsing detail perubahan."
 
         # --- ACTION: REJECT ---
         if action == "REJECT":
@@ -197,21 +216,16 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             if not final_reason or final_reason in ["-", ""]:
                 final_reason = "Ditolak (Tanpa Catatan Khusus)."
 
-            # 1. CATAT LOG (Direct Write)
+            # 1. CATAT LOG (Format Baru: String Flat)
             force_audit_log(
                 actor=admin_name,
-                action="REJECTED",          # Status
+                action="❌ DITOLAK",
                 target_sheet=target_sheet_name,
-                reason=final_reason,        # <--- Catatan Manager Masuk Sini
-                details_dict={
-                    "Keputusan": "❌ DITOLAK",
-                    "Pengaju Awal": requestor_name,
-                    "Catatan Manager": final_reason, 
-                    "Data Yang Ditolak": diff_dict
-                }
+                reason=f"[Note Manager] {final_reason}",
+                details_dict=f"Pengaju: {requestor_name}\n\nDetail Data Ditolak:\n{diff_str}"
             )
 
-            # 2. Hapus request
+            # 2. Hapus request dari pending list
             ws_pending.delete_rows(request_index_0based + 2)
             return True, f"DITOLAK. Alasan: {final_reason}"
 
@@ -222,25 +236,20 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             headers = ws_target.row_values(1)
             row_values = [new_data_dict.get(h, "") for h in headers]
 
-            # Update Data Real
+            # Update Data Real ke Database Target
             gsheet_row = row_target_idx + 2
             ws_target.update(range_name=f"A{gsheet_row}", values=[row_values], value_input_option="USER_ENTERED")
 
-            # 1. CATAT LOG (Direct Write)
+            # 1. CATAT LOG (Format Baru: String Flat)
             force_audit_log(
                 actor=admin_name,
-                action="APPROVED",
+                action="✅ DI ACC",
                 target_sheet=target_sheet_name,
-                reason="Disetujui Manager",
-                details_dict={
-                    "Status": "✅ DISETUJUI",
-                    "Info": "Data berhasil diperbarui ke database.",
-                    "Pengaju Awal": requestor_name,
-                    "Perubahan": diff_dict
-                }
+                reason="[Auto] Perubahan disetujui & diterapkan.",
+                details_dict=f"Pengaju: {requestor_name}\n\nData Berhasil Diubah:\n{diff_str}"
             )
 
-            # 2. Hapus request
+            # 2. Hapus request dari pending list
             ws_pending.delete_rows(request_index_0based + 2)
             return True, "DISETUJUI & Database Terupdate."
 
@@ -4509,37 +4518,51 @@ elif menu_nav == "📜 Global Audit Log":
             st.markdown(f"**Total Record:** {len(df_show)}")
 
             # Kita fokuskan kolom yang penting saja
-            cols_to_show = ["Waktu & Tanggal", "Aksi Dilakukan",
-                "Rincian (Sebelum ➡ Sesudah)", "Alasan Perubahan", "Pelaku (User)"]
+            # 1. MAPPING: Rename Header Asli (Database) ke Header Cantik (UI)
+            # Tujuannya agar config kolom tidak bingung membaca datanya.
+            rename_mapping = {
+                "Waktu & Tanggal": "Waktu",
+                "Aksi Dilakukan": "Status",
+                "Rincian (Sebelum ➡ Sesudah)": "Detail Perubahan",
+                "Alasan Perubahan": "Catatan / Alasan",
+                "Pelaku (User)": "Oleh"
+            }
 
-            # Pastikan kolom ada (untuk menghindari error jika CSV header berubah)
-            cols_final = [c for c in cols_to_show if c in df_show.columns]
+            # Buat dataframe baru (df_display) dengan nama kolom yang sudah dirapikan
+            df_display = df_show.rename(columns=rename_mapping)
 
+            # 2. FILTER: Tentukan urutan kolom yang mau ditampilkan
+            cols_target = ["Waktu", "Status", "Detail Perubahan", "Catatan / Alasan", "Oleh"]
+            
+            # Safety Check: Hanya ambil kolom yang benar-benar ada (cegah error jika data kosong)
+            cols_final = [c for c in cols_target if c in df_display.columns]
+
+            # 3. RENDER: Tampilkan Dataframe dengan Config yang Pas
             st.dataframe(
-                df_show[cols_final],
+                df_display[cols_final],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "Waktu & Tanggal": st.column_config.DatetimeColumn(
+                    "Waktu": st.column_config.DatetimeColumn(
                         "🕒 Waktu",
-                        format="D MMM YYYY, HH:mm:ss",
-                        width="medium"
+                        format="D MMM YYYY, HH:mm",
+                        width="small"
                     ),
-                    "Rincian (Sebelum ➡ Sesudah)": st.column_config.TextColumn(
-                        "📝 Detail Perubahan (Diff)",
-                        width="large",
-                        help="Menampilkan nilai lama vs nilai baru"
-                    ),
-                    "Alasan Perubahan": st.column_config.TextColumn(
-                        "💬 Catatan / Alasan",
-                        width="medium"  # Kolom ini akan menampilkan pesan dari Manager/Admin
-                    ),
-                    "Aksi Dilakukan": st.column_config.TextColumn(
+                    "Status": st.column_config.TextColumn(
                         "Status",
                         width="small"
                     ),
-                    "Pelaku (User)": st.column_config.TextColumn(
-                        "Oleh",
+                    "Detail Perubahan": st.column_config.TextColumn(
+                        "📄 Detail Perubahan (Diff)",
+                        width="large",
+                        help="Menampilkan detail perubahan data (Sebelum -> Sesudah)"
+                    ),
+                    "Catatan / Alasan": st.column_config.TextColumn(
+                        "💬 Catatan / Chat",
+                        width="medium" 
+                    ),
+                    "Oleh": st.column_config.TextColumn(
+                        "👤 User",
                         width="small"
                     )
                 }
