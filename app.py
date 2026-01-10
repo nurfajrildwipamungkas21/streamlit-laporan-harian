@@ -33,36 +33,46 @@ def force_audit_log(actor, action, target_sheet, chat_msg, details_input):
         try:
             ws = spreadsheet.worksheet(SHEET_NAME)
         except gspread.WorksheetNotFound:
+            # Buat baru jika tidak ada dengan header standar
             ws = spreadsheet.add_worksheet(title=SHEET_NAME, rows=1000, cols=6)
-            # Header harus konsisten dengan Mapper
-            ws.append_row(
-                ["Waktu", "User", "Status", "Target Data", "Chat & Catatan", "Detail Perubahan"], 
-                value_input_option="USER_ENTERED"
-            )
-
+            ws.append_row(["Waktu", "User", "Status", "Target Data", "Chat & Catatan", "Detail Perubahan"], value_input_option="USER_ENTERED")
+        
+        # Ambil header untuk tahu urutan kolom
+        headers = ws.row_values(1)
+        
         ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
+        final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()]) if isinstance(details_input, dict) else (str(details_input) if details_input else "-")
         
-        # Safe String Conversion
-        final_details = ""
-        if isinstance(details_input, dict):
-            final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()])
-        else:
-            final_details = str(details_input) if details_input else "-"
-        
-        final_details = final_details.replace("{", "").replace("}", "").replace('"', '')
-        final_chat = str(chat_msg) if chat_msg else "-"
+        # Data yang akan dimasukkan (Mapping Keyword ke Value)
+        payload = {
+            "waktu": f"'{ts}",
+            "user": str(actor),
+            "pelaku": str(actor),
+            "status": str(action),
+            "aksi": str(action), # Menangkap "Aksi Dilakukan"
+            "target": str(target_sheet),
+            "nama data": str(target_sheet),
+            "chat": str(chat_msg),
+            "catatan": str(chat_msg),
+            "alasan": str(chat_msg),
+            "detail": str(final_details),
+            "rincian": str(final_details)
+        }
 
-        # SUSUNAN BARIS: Waktu, User, Status, Target, Chat, Detail
-        row_data = [
-            f"'{ts}",           # Kolom 1: Waktu
-            str(actor),         # Kolom 2: User
-            str(action),        # Kolom 3: Status (PENDING/ACC)
-            str(target_sheet),  # Kolom 4: Target Data
-            str(final_chat),    # Kolom 5: Chat
-            str(final_details)  # Kolom 6: Detail
-        ]
+        # Susun baris baru mengikuti urutan header di GSheet secara dinamis
+        row_to_append = [""] * len(headers)
+        for i, h in enumerate(headers):
+            h_lower = h.lower()
+            for key, val in payload.items():
+                if key in h_lower:
+                    row_to_append[i] = val
+                    break
         
-        ws.append_row(row_data, value_input_option="USER_ENTERED")
+        # Jika baris masih kosong (header tidak cocok), gunakan format default di akhir
+        if all(x == "" for x in row_to_append):
+            row_to_append = [f"'{ts}", str(actor), str(action), str(target_sheet), str(chat_msg), str(final_details)]
+
+        ws.append_row(row_to_append, value_input_option="USER_ENTERED")
         return True
     except Exception as e:
         print(f"⚠️ FORCE LOG ERROR: {e}")
@@ -1282,15 +1292,16 @@ def get_actor_fallback(default="-") -> str:
 
 def dynamic_column_mapper(df):
     mapping = {}
-    # Prioritas deteksi berdasarkan kata kunci di header GSheet Anda
+    # Tambahkan keyword yang mungkin ada di GSheet Anda
     keywords = {
         "Waktu": "Waktu",
         "Pelaku": "User",
         "User": "User",
-        "Aksi": "Status",     # Menangkap "Aksi Dilakukan" (GSheet Gambar 1)
-        "Status": "Status",   # Menangkap "Status" (GSheet Baru)
+        "Aksi": "Status",     # Menangkap "Aksi Dilakukan"
+        "Status": "Status",   # Menangkap "Status"
         "Nama Data": "Target Data",
         "Target": "Target Data",
+        "Sheet": "Target Data",
         "Alasan": "Chat & Catatan",
         "Chat": "Chat & Catatan",
         "Rincian": "Detail Perubahan",
