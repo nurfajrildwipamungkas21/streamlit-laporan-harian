@@ -4318,190 +4318,91 @@ elif menu_nav == "🤝 Closing Deal":
 # =========================================================
 # MENU: PEMBAYARAN (FULL FEATURE RESTORED)
 # =========================================================
-elif menu_nav == "💳 Pembayaran":
-    if IS_MOBILE:
-        render_payment_mobile()
-    else:
-        # --- TAMPILAN DESKTOP LENGKAP ---
-        st.markdown("## 💳 Pembayaran (DP / Termin / Pelunasan)")
-        st.caption(
-            "Input pembayaran, monitoring jatuh tempo, dan audit log otomatis.")
-
-        # 1. FORM INPUT PEMBAYARAN
-        with st.container(border=True):
-            st.markdown("### ➕ Input Pembayaran")
-            with st.form("form_pay_desk_full", clear_on_submit=True):
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    p_group = st.text_input(
-                        "Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada")
-                    p_marketing = st.text_input(
-                        "Nama Marketing (Wajib)", placeholder="Contoh: Andi")
-                    p_tgl_event = st.date_input(
-                        "Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
-                    p_jenis_opt = st.selectbox(
-                        "Jenis Pembayaran", ["Down Payment (DP)", "Termin", "Pelunasan", "Lainnya"])
-
-                with col_b:
-                    p_nominal = st.text_input(
-                        "Nominal (Rp)", placeholder="Contoh: 5.000.000")
-                    p_jatuh_tempo = st.date_input("Batas Waktu Bayar (Jatuh Tempo)", value=datetime.now(
-                        tz=TZ_JKT).date() + timedelta(days=7))
-                    p_status = st.checkbox("✅ Sudah Dibayar?", value=False)
-                    p_catatan = st.text_area(
-                        "Catatan", height=100, placeholder="Keterangan transfer...")
-                    p_bukti = st.file_uploader(
-                        "Upload Bukti", disabled=not KONEKSI_DROPBOX_BERHASIL)
-
-                # Logic Custom Jenis Bayar
-                p_jenis_final = p_jenis_opt
-                if p_jenis_opt == "Lainnya":
-                    p_jenis_final = st.text_input(
-                        "Tulis Jenis Pembayaran Lainnya:", placeholder="Misal: Refund")
-
-                if st.form_submit_button("✅ Simpan Pembayaran", type="primary", use_container_width=True):
-                    if not p_marketing or not p_nominal:
-                        st.error("Nama Marketing dan Nominal wajib diisi!")
-                    else:
-                        res, msg = tambah_pembayaran_dp(
-                            p_group, p_marketing, p_tgl_event, p_jenis_final,
-                            p_nominal, p_jatuh_tempo, p_status, p_bukti, p_catatan
-                        )
-                        if res:
-                            st.success(msg)
-                            st.cache_data.clear()
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-        # 2. TABEL DATA & EDIT (AUDIT LOG)
-        with st.container(border=True):
-            st.markdown("### 📋 Data Pembayaran + Audit Log")
-            df_pay = load_pembayaran_dp()
-
-            if df_pay.empty:
-                st.info("Belum ada data pembayaran.")
-            else:
-                # Alert System
-                overdue, due_soon = build_alert_pembayaran(df_pay)
-                c1, c2 = st.columns(2)
-                c1.metric("⛔ Overdue", len(overdue))
-                c2.metric("⚠️ Due Soon (3 Hari)", len(due_soon))
-
-                if not overdue.empty:
-                    st.error(
-                        f"Ada {len(overdue)} pembayaran jatuh tempo yang belum lunas!")
-
-                # Editor Data (Fitur Edit Langsung di Tabel)
-                st.caption(
-                    "Edit data di bawah ini (Status, Jatuh Tempo, Catatan) lalu klik Simpan.")
-
-                # Setup Editor Actor
-                current_user = get_actor_fallback(default="Admin")
-
-                df_view = payment_df_for_display(df_pay)
-
-                # Config kolom agar user tidak edit sembarangan
-                disabled_cols = [c for c in df_view.columns if c not in [
-                    COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_JENIS_BAYAR]]
-
-                edited_pay = st.data_editor(
-                    df_view,
-                    disabled=disabled_cols,
-                    column_config={
-                        COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Lunas?", width="small"),
-                        COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo"),
-                        COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True),
-                        COL_TS_UPDATE: st.column_config.TextColumn("Log Perubahan", width="large", disabled=True),
-                    },
-                    use_container_width=True,
-                    hide_index=True,
-                    key="editor_pay_desktop"
-                )
-
-                if st.button("💾 Simpan Perubahan Data", use_container_width=True):
-                    # Logic Simpan Perubahan ke GSheet + Audit Log
-                    df_after = df_pay.copy()
-                    # Mapping perubahan dari editor kembali ke format asli
-                    # (Simplified logic for brevity - assumes direct mapping works or use previous generic update logic)
-                    # Agar aman, kita pakai logic apply_audit_payments_changes yang sudah dibuat
-
-                    # Reconstruct df_after from edited_pay view (careful with types)
-                    # Karena data_editor return dataframe visual, kita hanya ambil kolom yg diedit
-                    for idx, row in edited_pay.iterrows():
-                        real_idx = idx  # Assuming index aligns
-                        if COL_STATUS_BAYAR in row:
-                            df_after.at[real_idx,
-                                COL_STATUS_BAYAR] = row[COL_STATUS_BAYAR]
-                        if COL_JATUH_TEMPO in row:
-                            df_after.at[real_idx,
-                                COL_JATUH_TEMPO] = row[COL_JATUH_TEMPO]
-                        if COL_CATATAN_BAYAR in row:
-                            df_after.at[real_idx,
-                                COL_CATATAN_BAYAR] = row[COL_CATATAN_BAYAR]
-                        if COL_JENIS_BAYAR in row:
-                            df_after.at[real_idx,
-                                COL_JENIS_BAYAR] = row[COL_JENIS_BAYAR]
-
-                    final_df = apply_audit_payments_changes(
-                        df_pay, df_after, actor=current_user)
-
-                    if save_pembayaran_dp(final_df):
-                        st.success("Data berhasil diperbarui!")
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("Gagal menyimpan.")
-
-        # 3. UPDATE BUKTI (Expander)
-        with st.expander("📎 Update Bukti Pembayaran (Susulan)", expanded=False):
-            st.info(
-                "Gunakan fitur ini jika ingin upload bukti bayar untuk data yang sudah ada.")
-            df_pay_reset = df_pay.reset_index(drop=True)
-
-            opts = [
-                f"{i+1}. {r[COL_MARKETING]} - {format_rupiah_display(r[COL_NOMINAL_BAYAR])}" for i, r in df_pay_reset.iterrows()]
-            sel_idx = st.selectbox("Pilih Data", range(
-                len(opts)), format_func=lambda x: opts[x])
-
-            file_susulan = st.file_uploader(
-                "Upload Bukti Baru", key="pay_susulan")
-            if st.button("⬆️ Upload Bukti Susulan"):
-                if file_susulan:
-                    mk_name = df_pay_reset.iloc[sel_idx][COL_MARKETING]
-                    ok, msg = update_bukti_pembayaran_by_index(
-                        sel_idx, file_susulan, mk_name, actor="Admin")
-                    if ok:
-                        st.success("Bukti terupload!")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(msg)
-                else:
-                    st.error("Pilih file dulu.")
-
 # =========================================================
 # MENU: GLOBAL AUDIT LOG
 # =========================================================
-# 1. MAPPING: Rename Header Asli (Database) ke Header Cantik (UI)
-            # Tujuannya agar config kolom tidak bingung membaca datanya.
-            rename_mapping = {
-                "Waktu & Tanggal": "Waktu",
-                "Aksi Dilakukan": "Status",
-                "Rincian (Sebelum ➡ Sesudah)": "Detail Perubahan",
-                "Alasan Perubahan": "Catatan / Alasan",
-                "Pelaku (User)": "Oleh"
-            }
+elif menu_nav == "📜 Global Audit Log":
+    if IS_MOBILE:
+        render_audit_mobile()
+    else:
+        # --- LOGIC DESKTOP ---
+        st.markdown("## 📜 Global Audit Log")
+        st.caption("Rekaman jejak perubahan data yang dilakukan oleh Admin (Super Editor). Transparansi data.")
 
-            # Buat dataframe baru (df_display) dengan nama kolom yang sudah dirapikan
+        # Load Data dari Service
+        from audit_service import load_audit_log
+
+        # Tombol Refresh
+        if st.button("🔄 Refresh Log", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+        with st.spinner("Memuat data log..."):
+            df_log = load_audit_log(spreadsheet)
+
+        if not df_log.empty:
+            # Konversi kolom Waktu agar bisa di-sort
+            try:
+                col_waktu = "Waktu & Tanggal"
+                df_log[col_waktu] = pd.to_datetime(
+                    df_log[col_waktu], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+                df_log = df_log.sort_values(by=col_waktu, ascending=False)
+            except Exception:
+                pass
+
+            # --- FITUR FILTERING ---
+            with st.expander("🔍 Filter Pencarian"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    filter_user = st.multiselect(
+                        "Pilih Pelaku (User)", df_log["Pelaku (User)"].unique())
+                with c2:
+                    filter_sheet = st.multiselect(
+                        "Pilih Sheet/Data", df_log["Nama Data / Sheet"].unique())
+
+            # Terapkan Filter
+            df_show = df_log.copy()
+            if filter_user:
+                df_show = df_show[df_show["Pelaku (User)"].isin(filter_user)]
+            if filter_sheet:
+                df_show = df_show[df_show["Nama Data / Sheet"].isin(filter_sheet)]
+
+            # --- TAMPILAN DATA BERSIH (CLEAN VIEW) ---
+            st.markdown(f"**Total Record:** {len(df_show)}")
+
+            # 1. MAPPING: Rename Header Asli (Database) ke Header Cantik (UI)
+            # Tujuannya agar config kolom tidak bingung membaca datanya.
+            # Header GSheet Asli: ["Waktu & Tanggal", "Pelaku (User)", "Aksi Dilakukan", "Nama Data / Sheet", "Alasan Perubahan", "Rincian (Sebelum ➡ Sesudah)"]
+            # REVISI: Header di force_audit_log baru adalah ["Waktu", "User", "Status", "Target Data", "Chat & Catatan", "Detail Perubahan"]
+            
+            # Kita lakukan mapping aman (Safe Mapping)
+            # Cek dulu kolom mana yang tersedia di df_show (karena bisa jadi ada data lama vs baru)
+            cols_available = df_show.columns.tolist()
+            
+            # Mapping Universal (Cover Format Lama & Baru)
+            rename_mapping = {}
+            
+            # Jika pakai format lama
+            if "Waktu & Tanggal" in cols_available:
+                rename_mapping["Waktu & Tanggal"] = "Waktu"
+                rename_mapping["Aksi Dilakukan"] = "Status"
+                rename_mapping["Rincian (Sebelum ➡ Sesudah)"] = "Detail Perubahan"
+                rename_mapping["Alasan Perubahan"] = "Catatan / Alasan"
+                rename_mapping["Pelaku (User)"] = "Oleh"
+            
+            # Jika pakai format baru (force_audit_log v2)
+            if "User" in cols_available:
+                rename_mapping["User"] = "Oleh"
+            if "Chat & Catatan" in cols_available:
+                rename_mapping["Chat & Catatan"] = "Catatan / Alasan"
+            
+            # Terapkan Rename
             df_display = df_show.rename(columns=rename_mapping)
 
             # 2. FILTER: Tentukan urutan kolom yang mau ditampilkan
             cols_target = ["Waktu", "Status", "Detail Perubahan", "Catatan / Alasan", "Oleh"]
             
-            # Safety Check: Hanya ambil kolom yang benar-benar ada (cegah error jika data kosong)
+            # Safety Check: Hanya ambil kolom yang benar-benar ada
             cols_final = [c for c in cols_target if c in df_display.columns]
 
             # 3. RENDER: Tampilkan Dataframe dengan Config yang Pas
