@@ -4335,100 +4335,100 @@ elif menu_nav == "📊 Dashboard Admin":
             # TAB KHUSUS: APPROVAL SYSTEM (Hanya Manager)
             # -----------------------------------------------------------
 if is_manager:
-                with tab_acc:
-                    st.markdown("### 🔔 Pusat Persetujuan (Manager)")
-                    st.caption("Review detail perubahan (Sebelum vs Sesudah). Gunakan fitur Tolak dengan catatan jika perlu.")
-                    
-                    pending_data = get_pending_approvals()
-                    
-                    if not pending_data:
-                        st.info("✅ Tidak ada permintaan pending. Semua aman.")
-                    else:
-                        # REJECTION DIALOG LOGIC
-                        # Loop melalui setiap request
-                        for i, req in enumerate(pending_data):
-                            with st.container(border=True):
-                                # Header Card
-                                c_h1, c_h2 = st.columns([3, 1])
-                                with c_h1:
-                                    st.markdown(f"👤 **{req['Requestor']}** | 📂 Sheet: `{req['Target Sheet']}`")
-                                    st.text(f"📝 Alasan Admin: {req['Reason']}")
-                                with c_h2:
-                                    st.caption(f"🕒 {req['Timestamp']}")
+                        with tab_acc:
+                            st.markdown("### 🔔 Pusat Persetujuan (Manager)")
+                            st.caption("Review detail perubahan (Sebelum vs Sesudah). Gunakan fitur Tolak dengan catatan jika perlu.")
+                            
+                            pending_data = get_pending_approvals()
+                            
+                            if not pending_data:
+                                st.info("✅ Tidak ada permintaan pending. Semua aman.")
+                            else:
+                                # REJECTION DIALOG LOGIC
+                                # Loop melalui setiap request
+                                for i, req in enumerate(pending_data):
+                                    with st.container(border=True):
+                                        # Header Card
+                                        c_h1, c_h2 = st.columns([3, 1])
+                                        with c_h1:
+                                            st.markdown(f"👤 **{req['Requestor']}** | 📂 Sheet: `{req['Target Sheet']}`")
+                                            st.text(f"📝 Alasan Admin: {req['Reason']}")
+                                        with c_h2:
+                                            st.caption(f"🕒 {req['Timestamp']}")
 
-                                st.divider()
-                                
-                                # --- LOGIC DIFF (DATA LAMA VS BARU) ---
-                                try:
-                                    old_d = json.loads(req.get("Old Data JSON", "{}"))
-                                    new_d = json.loads(req.get("New Data JSON", "{}"))
-                                    
-                                    # Cari kolom yang berubah saja
-                                    changes_table = []
-                                    for k, v_new in new_d.items():
-                                        v_old = old_d.get(k, "")
-                                        # Normalisasi string biar gak false alarm (hapus spasi, ubah ke string)
-                                        if str(v_new).strip() != str(v_old).strip():
-                                            changes_table.append({
-                                                "Kolom": k,
-                                                "🔴 Data Lama": str(v_old),
-                                                "🟢 Data Baru": str(v_new)
-                                            })
-                                    
-                                    if changes_table:
-                                        st.markdown("**Detail Perubahan:**")
-                                        st.table(pd.DataFrame(changes_table))
-                                    else:
-                                        st.warning("⚠️ Tidak terdeteksi perubahan data signifikan (mungkin hanya re-save).")
-                                        # Tampilkan raw jika diff kosong (fallback)
-                                        with st.expander("Lihat Data Mentah (JSON)"):
-                                            st.json(new_d)
-                                except Exception as e:
-                                    st.error(f"Gagal memproses data JSON: {e}")
-
-                                # --- ACTION BUTTONS ---
-                                col_act_space, col_act_btn = st.columns([3, 2])
-                                
-                                with col_act_btn:
-                                    b_col1, b_col2 = st.columns(2)
-                                    
-                                    # TOMBOL TOLAK (Memicu Expander/Input di bawah)
-                                    key_reject = f"btn_reject_show_{i}"
-                                    if b_col1.button("❌ Tolak", key=key_reject, use_container_width=True):
-                                         st.session_state[f"show_reject_input_{i}"] = True
-
-                                    # TOMBOL ACC
-                                    if b_col2.button("✅ ACC", key=f"btn_acc_{i}", type="primary", use_container_width=True):
-                                        ok, msg = execute_approval(i, "APPROVE", admin_name=st.session_state["user_name"])
-                                        if ok:
-                                            st.success(msg)
-                                            time.sleep(1)
-                                            st.rerun()
-                                        else:
-                                            st.error(msg)
-                                
-                                # --- AREA INPUT ALASAN PENOLAKAN (Muncul jika tombol Tolak ditekan) ---
-                                if st.session_state.get(f"show_reject_input_{i}", False):
-                                    st.markdown("---")
-                                    st.warning("Anda akan menolak permintaan ini.")
-                                    with st.form(key=f"form_reject_{i}"):
-                                        note = st.text_area("Catatan Penolakan (Opsional, tapi disarankan):", placeholder="Misal: Nominal salah, tolong cek lagi.")
+                                        st.divider()
                                         
-                                        c_batal, c_confirm = st.columns(2)
-                                        # Tombol Batal
-                                        if c_batal.form_submit_button("Batal"):
-                                            st.session_state[f"show_reject_input_{i}"] = False
-                                            st.rerun()
+                                        # --- LOGIC DIFF (DATA LAMA VS BARU) ---
+                                        try:
+                                            old_d = json.loads(req.get("Old Data JSON", "{}"))
+                                            new_d = json.loads(req.get("New Data JSON", "{}"))
                                             
-                                        # Tombol Konfirmasi Tolak
-                                        if c_confirm.form_submit_button("🚫 Konfirmasi Tolak", type="primary"):
-                                            note_final = note if note.strip() else "Tidak ada catatan."
-                                            ok, msg = execute_approval(i, "REJECT", admin_name=st.session_state["user_name"], rejection_note=note_final)
-                                            if ok:
-                                                st.success(f"Ditolak: {note_final}")
-                                                st.session_state[f"show_reject_input_{i}"] = False
-                                                time.sleep(1)
-                                                st.rerun()
+                                            # Cari kolom yang berubah saja
+                                            changes_table = []
+                                            for k, v_new in new_d.items():
+                                                v_old = old_d.get(k, "")
+                                                # Normalisasi string biar gak false alarm (hapus spasi, ubah ke string)
+                                                if str(v_new).strip() != str(v_old).strip():
+                                                    changes_table.append({
+                                                        "Kolom": k,
+                                                        "🔴 Data Lama": str(v_old),
+                                                        "🟢 Data Baru": str(v_new)
+                                                    })
+                                            
+                                            if changes_table:
+                                                st.markdown("**Detail Perubahan:**")
+                                                st.table(pd.DataFrame(changes_table))
+                                            else:
+                                                st.warning("⚠️ Tidak terdeteksi perubahan data signifikan (mungkin hanya re-save).")
+                                                # Tampilkan raw jika diff kosong (fallback)
+                                                with st.expander("Lihat Data Mentah (JSON)"):
+                                                    st.json(new_d)
+                                        except Exception as e:
+                                            st.error(f"Gagal memproses data JSON: {e}")
+
+                                        # --- ACTION BUTTONS ---
+                                        col_act_space, col_act_btn = st.columns([3, 2])
+                                        
+                                        with col_act_btn:
+                                            b_col1, b_col2 = st.columns(2)
+                                            
+                                            # TOMBOL TOLAK (Memicu Expander/Input di bawah)
+                                            key_reject = f"btn_reject_show_{i}"
+                                            if b_col1.button("❌ Tolak", key=key_reject, use_container_width=True):
+                                                 st.session_state[f"show_reject_input_{i}"] = True
+
+                                            # TOMBOL ACC
+                                            if b_col2.button("✅ ACC", key=f"btn_acc_{i}", type="primary", use_container_width=True):
+                                                ok, msg = execute_approval(i, "APPROVE", admin_name=st.session_state["user_name"])
+                                                if ok:
+                                                    st.success(msg)
+                                                    time.sleep(1)
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg)
+                                        
+                                        # --- AREA INPUT ALASAN PENOLAKAN (Muncul jika tombol Tolak ditekan) ---
+                                        if st.session_state.get(f"show_reject_input_{i}", False):
+                                            st.markdown("---")
+                                            st.warning("Anda akan menolak permintaan ini.")
+                                            with st.form(key=f"form_reject_{i}"):
+                                                note = st.text_area("Catatan Penolakan (Opsional, tapi disarankan):", placeholder="Misal: Nominal salah, tolong cek lagi.")
+                                                
+                                                c_batal, c_confirm = st.columns(2)
+                                                # Tombol Batal
+                                                if c_batal.form_submit_button("Batal"):
+                                                    st.session_state[f"show_reject_input_{i}"] = False
+                                                    st.rerun()
+                                                    
+                                                # Tombol Konfirmasi Tolak
+                                                if c_confirm.form_submit_button("🚫 Konfirmasi Tolak", type="primary"):
+                                                    note_final = note if note.strip() else "Tidak ada catatan."
+                                                    ok, msg = execute_approval(i, "REJECT", admin_name=st.session_state["user_name"], rejection_note=note_final)
+                                                    if ok:
+                                                        st.success(f"Ditolak: {note_final}")
+                                                        st.session_state[f"show_reject_input_{i}"] = False
+                                                        time.sleep(1)
+                                                        st.rerun()
 
             # --- TAB 1: PRODUKTIVITAS ---
             with tab_prod:
