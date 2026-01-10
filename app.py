@@ -28,54 +28,40 @@ from audit_service import log_admin_action, compare_and_get_changes
 # =========================================================
 # Ganti fungsi force_audit_log dengan ini
 def force_audit_log(actor, action, target_sheet, chat_msg, details_input):
-    """
-    [FIXED] Memastikan semua input menjadi STRING murni sebelum dikirim ke GSheet.
-    Menggabungkan logika chat agar satu alur.
-    """
     try:
         SHEET_NAME = "Global_Audit_Log"
         try:
             ws = spreadsheet.worksheet(SHEET_NAME)
         except gspread.WorksheetNotFound:
             ws = spreadsheet.add_worksheet(title=SHEET_NAME, rows=1000, cols=6)
-            # Header Pasti
+            # Header harus konsisten dengan Mapper
             ws.append_row(
                 ["Waktu", "User", "Status", "Target Data", "Chat & Catatan", "Detail Perubahan"], 
                 value_input_option="USER_ENTERED"
             )
 
-        # 1. Waktu Jakarta
         ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
         
-        # 2. KONVERSI PAKSA JADI STRING (Safe String)
-        # Apapun bentuk details_input (Dict, List, None), ubah jadi teks rapi
+        # Safe String Conversion
         final_details = ""
         if isinstance(details_input, dict):
-            # Format: "Kolom: Lama -> Baru"
-            lines = [f"• {k}: {v}" for k, v in details_input.items()]
-            final_details = "\n".join(lines)
-        elif isinstance(details_input, list):
-            final_details = "\n".join([str(x) for x in details_input])
+            final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()])
         else:
             final_details = str(details_input) if details_input else "-"
-
-        # Bersihkan karakter aneh JSON jika masih ada
+        
         final_details = final_details.replace("{", "").replace("}", "").replace('"', '')
-
-        # Pastikan Chat tidak None
         final_chat = str(chat_msg) if chat_msg else "-"
 
-        # 3. Susun Baris Data (Semua String)
+        # SUSUNAN BARIS: Waktu, User, Status, Target, Chat, Detail
         row_data = [
-            f"'{ts}",           # Pakai tanda kutip satu di awal agar GSheet membacanya sebagai Teks (bukan angka/date error)
-            str(actor),
-            str(action),        # PENDING / ACC / TOLAK
-            str(target_sheet),
-            str(final_chat),    # Kolom Chat Gabungan
-            str(final_details)  # Detail Perubahan
+            f"'{ts}",           # Kolom 1: Waktu
+            str(actor),         # Kolom 2: User
+            str(action),        # Kolom 3: Status (PENDING/ACC)
+            str(target_sheet),  # Kolom 4: Target Data
+            str(final_chat),    # Kolom 5: Chat
+            str(final_details)  # Kolom 6: Detail
         ]
         
-        # 4. Eksekusi Tulis
         ws.append_row(row_data, value_input_option="USER_ENTERED")
         return True
     except Exception as e:
@@ -1295,18 +1281,15 @@ def get_actor_fallback(default="-") -> str:
     return default
 
 def dynamic_column_mapper(df):
-    """
-    Mendeteksi dan mengganti nama kolom secara dinamis berdasarkan kata kunci.
-    """
     mapping = {}
-    # Key: Kata kunci yang dicari, Value: Nama kolom standar yang diinginkan kode
+    # Prioritas deteksi berdasarkan kata kunci di header GSheet Anda
     keywords = {
         "Waktu": "Waktu",
-        "User": "User",
         "Pelaku": "User",
-        "Aksi": "Status",
-        "Status": "Status",
-        "Sheet": "Target Data",
+        "User": "User",
+        "Aksi": "Status",     # Menangkap "Aksi Dilakukan" (GSheet Gambar 1)
+        "Status": "Status",   # Menangkap "Status" (GSheet Baru)
+        "Nama Data": "Target Data",
         "Target": "Target Data",
         "Alasan": "Chat & Catatan",
         "Chat": "Chat & Catatan",
@@ -1316,9 +1299,9 @@ def dynamic_column_mapper(df):
     
     for col in df.columns:
         for key, standard_name in keywords.items():
-            if key.lower() in col.lower():
+            if key.lower() in str(col).lower():
                 mapping[col] = standard_name
-                break # Berhenti jika sudah ketemu pasangan kunci
+                break 
                 
     return df.rename(columns=mapping)
 
@@ -4350,17 +4333,16 @@ elif menu_nav == "📜 Global Audit Log":
             df_raw = load_audit_log(spreadsheet)
 
         if not df_raw.empty:
-            # --- [FIX DINAMIS] MENGGUNAKAN MAPPER OTOMATIS ---
-            # Mengganti safe_mapping manual dengan fungsi dinamis
+            # 1. Jalankan Mapper Dinamis (Mengubah header GSheet lama/baru ke standar aplikasi)
             df_log = dynamic_column_mapper(df_raw)
 
-            # Pastikan kolom standar yang dibutuhkan UI tersedia (fallback jika mismatch total)
+            # 2. Pastikan kolom standar yang dibutuhkan UI tersedia (fallback "-" jika benar-benar tidak ketemu)
             standard_cols = ["Waktu", "User", "Status", "Target Data", "Chat & Catatan", "Detail Perubahan"]
             for c in standard_cols:
                 if c not in df_log.columns:
                     df_log[c] = "-"
 
-            # Konversi kolom Waktu agar bisa di-sort
+            # 3. Urutkan Waktu (Terbaru di atas)
             try:
                 df_log["Waktu"] = pd.to_datetime(
                     df_log["Waktu"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
@@ -4371,6 +4353,7 @@ elif menu_nav == "📜 Global Audit Log":
             # --- FITUR FILTERING ---
             with st.expander("🔍 Filter Pencarian"):
                 c1, c2 = st.columns(2)
+                # Ambil list unik untuk filter
                 all_users = df_log["User"].unique().tolist()
                 all_sheets = df_log["Target Data"].unique().tolist()
                 
@@ -4379,7 +4362,7 @@ elif menu_nav == "📜 Global Audit Log":
                 with c2:
                     filter_sheet = st.multiselect("Pilih Sheet/Data", all_sheets)
 
-            # Terapkan Filter
+            # Terapkan Filter jika dipilih
             df_show = df_log.copy()
             if filter_user:
                 df_show = df_show[df_show["User"].isin(filter_user)]
@@ -4389,7 +4372,7 @@ elif menu_nav == "📜 Global Audit Log":
             # --- TAMPILKAN DATA UI ---
             st.markdown(f"**Total Record:** {len(df_show)}")
 
-            # Render: Tampilkan Dataframe dengan mapping label UI
+            # 4. Render Dataframe (Pastikan Key Column Config sesuai hasil Mapping)
             st.dataframe(
                 df_show[standard_cols],
                 use_container_width=True,
@@ -4403,19 +4386,23 @@ elif menu_nav == "📜 Global Audit Log":
                     "Target Data": st.column_config.TextColumn("Data"),
                     "Chat & Catatan": st.column_config.TextColumn("💬 Catatan / Chat", width="medium"),
                     "Detail Perubahan": st.column_config.TextColumn(
-                        "📄 Detail Perubahan (Diff)",
+                        "📄 Detail Perubahan",
                         width="large",
                         help="Menampilkan detail perubahan data"
                     )
                 }
             )
 
-            # Download Button
+            # Download Button (Excel)
             if HAS_OPENPYXL:
                 xb = df_to_excel_bytes(df_show, sheet_name="Audit_Log")
                 if xb:
-                    st.download_button("⬇️ Download Log (Excel)", data=xb, file_name="global_audit_log.xlsx",
-                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    st.download_button(
+                        "⬇️ Download Log (Excel)", 
+                        data=xb, 
+                        file_name="global_audit_log.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
         else:
             st.info("Belum ada riwayat perubahan data.")
 
