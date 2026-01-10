@@ -92,6 +92,7 @@ SHEET_PENDING = "System_Pending_Approval"
 def init_pending_db():
     """Memastikan sheet pending approval ada dengan kolom untuk DATA LAMA."""
     try:
+        # Blok Try Dalam (Mencoba ambil worksheet)
         try:
             ws = spreadsheet.worksheet(SHEET_PENDING)
             # Cek apakah header sudah update (punya Old Data JSON)
@@ -104,17 +105,19 @@ def init_pending_db():
                     ws.resize(cols=new_col_idx)  # Tambah kolom jika kurang
 
                 ws.update_cell(1, new_col_idx, "Old Data JSON")
+        
         except gspread.WorksheetNotFound:
-            # Header Baru: Tambah "Old Data JSON"
-            # Pastikan cols=7 agar cukup menampung kolom baru
+            # Jika tidak ada, buat baru
             ws = spreadsheet.add_worksheet(
                 title=SHEET_PENDING, rows=1000, cols=7)
             headers = ["Timestamp", "Requestor", "Target Sheet",
-                "Row Index (0-based)", "New Data JSON", "Reason", "Old Data JSON"]
+                        "Row Index (0-based)", "New Data JSON", "Reason", "Old Data JSON"]
             ws.append_row(headers, value_input_option="USER_ENTERED")
             maybe_auto_format_sheet(ws, force=True)
+        
         return ws
-    except Exception as e:
+
+    except Exception as e:  # <--- PASTIKAN BAGIAN INI ADA DAN SEJAJAR DENGAN TRY PERTAMA
         # Tampilkan error di terminal untuk debugging jika terjadi lagi
         print(f"Error init_pending_db: {e}")
         return None
