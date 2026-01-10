@@ -23,6 +23,50 @@ import textwrap
 
 from audit_service import log_admin_action, compare_and_get_changes
 
+# =========================================================
+# [BARU] SISTEM LOGGING LANGSUNG (ANTI-GAGAL)
+# =========================================================
+def force_audit_log(actor, action, target_sheet, reason, details_dict):
+    """
+    Fungsi ini menulis langsung ke Sheet 'Global_Audit_Log' tanpa audit_service.
+    Mengonversi semua data menjadi TEXT agar tidak ditolak oleh Google Sheets.
+    """
+    try:
+        SHEET_NAME = "Global_Audit_Log"
+        # 1. Pastikan Sheet Ada
+        try:
+            ws = spreadsheet.worksheet(SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(title=SHEET_NAME, rows=1000, cols=6)
+            # Header Standar
+            ws.append_row(
+                ["Waktu & Tanggal", "Pelaku (User)", "Aksi Dilakukan", 
+                 "Nama Data / Sheet", "Alasan Perubahan", "Rincian (Sebelum ➡ Sesudah)"], 
+                value_input_option="USER_ENTERED"
+            )
+
+        # 2. Waktu Jakarta
+        ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
+        
+        # 3. Konversi Dict ke String JSON (PENTING: GSheet tidak bisa simpan Dict mentah)
+        if isinstance(details_dict, dict):
+            # ensure_ascii=False agar Rupiah/Emoji tidak error
+            details_str = json.dumps(details_dict, indent=2, ensure_ascii=False, default=str)
+            # Bersihkan kurung kurawal agar lebih rapi dibaca manusia
+            details_str = details_str.replace('"', '').replace('{', '').replace('}', '')
+        else:
+            details_str = str(details_dict)
+
+        # 4. Susun Baris Data
+        row_data = [ts, str(actor), str(action).upper(), str(target_sheet), str(reason), details_str]
+        
+        # 5. Eksekusi Tulis
+        ws.append_row(row_data, value_input_option="USER_ENTERED")
+        return True
+    except Exception as e:
+        print(f"⚠️ FORCE LOG ERROR: {e}")
+        return False
+
 import json
 
 # --- HELPER: APPROVAL SYSTEM ---
@@ -63,7 +107,7 @@ def init_pending_db():
 
 def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, reason, requestor):
     """
-    UPDATE: Sekarang otomatis mencatat ke Global Audit Log saat Admin mengajukan.
+    UPDATE: Menggunakan force_audit_log agar pengajuan PASTI tercatat.
     """
     ws = init_pending_db()
     if not ws: return False, "DB Error"
@@ -78,41 +122,33 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
 
     ts = now_ts_str()
 
-    # 1. Simpan request lengkap ke database pending
+    # 1. Simpan request ke database pending
     ws.append_row(
         [ts, requestor, target_sheet, row_idx_0based, json_new, reason, json_old],
         value_input_option="USER_ENTERED"
     )
 
-    # 2. [BARU] Catat ke Global Audit Log (Status: REQUEST)
-    # Hitung perbedaan data (Diff) agar tercatat di log apa yang mau diubah
+    # 2. [BARU] Catat Log via Force Log
+    # Hitung perbedaan untuk log
     diff_log = {}
     for k, v_new in row_dict_new.items():
         v_old = row_dict_old.get(k, "")
         if str(v_new).strip() != str(v_old).strip():
             diff_log[k] = f"{v_old} ➡ {v_new}"
-    
-    # Panggil fungsi logging
-    try:
-        log_admin_action(
-            spreadsheet=spreadsheet,
-            actor=requestor,
-            role="Admin (Requestor)",
-            feature="Super Editor (Request)",
-            target_sheet=target_sheet,
-            row_idx=row_idx_0based + 2,
-            action="REQUEST_UPDATE",   # Status khusus pengajuan
-            reason=reason,
-            changes_dict={
-                "Status": "⏳ MENUNGGU APPROVAL",
-                "Info": "Pengajuan perubahan data dikirim ke Manager.",
-                "Rincian Perubahan": diff_log
-            }
-        )
-    except Exception as e:
-        print(f"Warning: Gagal mencatat log request: {e}")
 
-    return True, "Permintaan perubahan terkirim ke Manager & Tercatat di Log!"
+    force_audit_log(
+        actor=requestor,
+        action="REQUEST_UPDATE",
+        target_sheet=target_sheet,
+        reason=reason,
+        details_dict={
+            "Status": "⏳ MENUNGGU APPROVAL",
+            "Info": "Pengajuan dikirim ke Manager",
+            "Perubahan": diff_log
+        }
+    )
+
+    return True, "Permintaan terkirim & Log tercatat!"
 
 
 def get_pending_approvals():
@@ -124,104 +160,89 @@ def get_pending_approvals():
 
 def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval dengan Logging yang diperkuat & presisi.
+    Fungsi Eksekusi Approval dengan Direct Logging.
+    Memastikan alasan penolakan tercatat jelas di Global Audit Log.
     """
     try:
         # Inisialisasi koneksi ke sheet pending
         ws_pending = init_pending_db()
-        if not ws_pending:
-            return False, "DB Error: Sheet Pending tidak ditemukan."
+        if not ws_pending: return False, "DB Error: Sheet Pending tidak ditemukan."
 
-        # Ambil data terbaru dari sheet pending
+        # Ambil data terbaru
         all_requests = ws_pending.get_all_records()
-
         if request_index_0based >= len(all_requests):
-            return False, "Data tidak ditemukan (mungkin sudah diproses user lain)."
+            return False, "Data tidak ditemukan (mungkin sudah diproses)."
 
         req = all_requests[request_index_0based]
         target_sheet_name = req["Target Sheet"]
         row_target_idx = int(req["Row Index (0-based)"])
-        requestor_name = req.get("Requestor", "Unknown")  # Ambil nama pengaju
+        requestor_name = req.get("Requestor", "Unknown")
 
-        # --- PERSIAPAN LOGGING (Diff Checker Aman) ---
-        old_data_str = req.get("Old Data JSON", "{}")
-        new_data_str = req.get("New Data JSON", "{}")
-        diff_str = ""
-        
+        # --- PERSIAPAN DIFF LOG ---
+        diff_dict = {}
         try:
-            old_d = json.loads(old_data_str) if old_data_str else {}
-            new_d = json.loads(new_data_str) if new_data_str else {}
-            diff_list = []
+            old_d = json.loads(req.get("Old Data JSON", "{}"))
+            new_d = json.loads(req.get("New Data JSON", "{}"))
             for k, v in new_d.items():
                 old_v = old_d.get(k, "")
                 if str(old_v).strip() != str(v).strip():
-                    diff_list.append(f"{k}: {old_v} ➡ {v}")
-            diff_str = "\n".join(diff_list) if diff_list else "Tidak ada perubahan nilai."
-        except Exception:
-            diff_str = "Detail perubahan tidak dapat diproses (JSON Error)."
+                    diff_dict[k] = f"{old_v} ➡ {v}"
+        except:
+            diff_dict = {"Info": "Detail diff tidak tersedia (error parsing)."}
 
         # --- ACTION: REJECT ---
         if action == "REJECT":
-            # Validasi catatan
+            # Pastikan catatan valid
             final_reason = str(rejection_note).strip()
             if not final_reason or final_reason in ["-", ""]:
-                final_reason = "Ditolak oleh Manager (Tanpa Catatan)."
+                final_reason = "Ditolak (Tanpa Catatan Khusus)."
 
-            # 1. Catat ke Audit Log (Pastikan reason masuk ke kolom 'Alasan')
-            log_admin_action(
-                spreadsheet=spreadsheet,
+            # 1. CATAT LOG (Direct Write)
+            force_audit_log(
                 actor=admin_name,
-                role="Manager",
-                feature="Approval System",
+                action="REJECTED",          # Status
                 target_sheet=target_sheet_name,
-                row_idx=row_target_idx + 2,
-                action="REJECTED",     # Keyword penting untuk Dashboard
-                reason=final_reason,   # Alasan utama
-                changes_dict={
+                reason=final_reason,        # <--- Catatan Manager Masuk Sini
+                details_dict={
                     "Keputusan": "❌ DITOLAK",
                     "Pengaju Awal": requestor_name,
-                    "Alasan Penolakan": final_reason, # Redundan agar pasti muncul di detail
-                    "Data Yang Ditolak": diff_str
+                    "Catatan Manager": final_reason, 
+                    "Data Yang Ditolak": diff_dict
                 }
             )
 
-            # 2. Hapus request dari sheet pending
+            # 2. Hapus request
             ws_pending.delete_rows(request_index_0based + 2)
-
-            return True, f"Permintaan DITOLAK. Catatan: {final_reason}"
+            return True, f"DITOLAK. Alasan: {final_reason}"
 
         # --- ACTION: APPROVE ---
         elif action == "APPROVE":
             new_data_dict = json.loads(req["New Data JSON"])
             ws_target = spreadsheet.worksheet(target_sheet_name)
             headers = ws_target.row_values(1)
-            
-            # Pastikan urutan kolom sesuai
             row_values = [new_data_dict.get(h, "") for h in headers]
 
+            # Update Data Real
             gsheet_row = row_target_idx + 2
-            cell_range = f"A{gsheet_row}"
-            ws_target.update(range_name=cell_range, values=[row_values], value_input_option="USER_ENTERED")
+            ws_target.update(range_name=f"A{gsheet_row}", values=[row_values], value_input_option="USER_ENTERED")
 
-            log_admin_action(
-                spreadsheet=spreadsheet,
+            # 1. CATAT LOG (Direct Write)
+            force_audit_log(
                 actor=admin_name,
-                role="Manager",
-                feature="Approval System",
-                target_sheet=target_sheet_name,
-                row_idx=gsheet_row,
                 action="APPROVED",
-                reason="Disetujui oleh Manager",
-                changes_dict={
+                target_sheet=target_sheet_name,
+                reason="Disetujui Manager",
+                details_dict={
                     "Status": "✅ DISETUJUI",
-                    "Pengaju Awal": requestor_name,
                     "Info": "Data berhasil diperbarui ke database.",
-                    "Rincian Perubahan": diff_str
+                    "Pengaju Awal": requestor_name,
+                    "Perubahan": diff_dict
                 }
             )
 
+            # 2. Hapus request
             ws_pending.delete_rows(request_index_0based + 2)
-            return True, "Perubahan DISETUJUI & diterapkan."
+            return True, "DISETUJUI & Database Terupdate."
 
     except Exception as e:
         return False, f"System Error: {e}"
