@@ -4236,7 +4236,7 @@ elif menu_nav == "📜 Global Audit Log":
         else:
             st.info("Belum ada riwayat perubahan data.")
 
-    render_section_watermark()
+            render_section_watermark()
 
 # =========================================================
 # MENU: DASHBOARD ADMIN (MIGRATED & UPGRADED)
