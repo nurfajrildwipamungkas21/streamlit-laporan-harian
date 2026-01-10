@@ -221,19 +221,30 @@ def init_user_db():
         return None
 
 def check_staff_login(username, password):
-    """Cek login untuk staff biasa via GSheet."""
+    """Cek login untuk staff biasa via GSheet (Versi Robust/Kuat)."""
     ws = init_user_db()
     if not ws: return None
     
-    # Ambil semua data
+    # Ambil semua data (list of dicts)
     records = ws.get_all_records()
+    
+    # Normalisasi input user (hapus spasi, lowercase jika perlu)
+    input_user = str(username).strip()
+    input_pass = str(password).strip()
+
     for user in records:
-        # Konversi ke string agar aman
+        # Konversi data DATABASE ke String & Hapus Spasi
+        # PENTING: Gunakan str() untuk menangani jika password berupa angka di Excel
         u_db = str(user.get("Username", "")).strip()
         p_db = str(user.get("Password", "")).strip()
         
-        if u_db == username and p_db == password:
-            return user # Mengembalikan dict {Username, Password, Nama, Role}
+        # Debugging (Opsional: Bisa dihapus nanti)
+        # print(f"Cek: Input({input_user}|{input_pass}) vs DB({u_db}|{p_db})") 
+
+        # Bandingkan (Case-sensitive untuk password, Username kita buat sama persis)
+        if u_db == input_user and p_db == input_pass:
+            return user # Login Sukses
+            
     return None
 
 def add_staff_account(username, password, nama):
