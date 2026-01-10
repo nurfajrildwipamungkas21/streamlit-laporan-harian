@@ -235,52 +235,88 @@ def init_user_db():
         print(f"Error Init DB: {e}")
         return None
 
+# =========================================================
+# HELPER: DATABASE STAFF (GOOGLE SHEET) - DENGAN FALLBACK
+# =========================================================
+SHEET_USERS = "Config_Users"
+
+def init_user_db():
+    """
+    Koneksi Database dengan 3 Lapis Fallback (Anti-Gagal).
+    """
+    # --- LAPIS 1: Akses Langsung (Paling Cepat) ---
+    try:
+        return spreadsheet.worksheet(SHEET_USERS)
+    except Exception as e_direct:
+        print(f"[LOG] Akses langsung gagal: {e_direct}. Mencoba Fallback pencarian...")
+
+    # --- LAPIS 2: Pencarian Manual (Abaikan Spasi) ---
+    try:
+        all_sheets = spreadsheet.worksheets()
+        for s in all_sheets:
+            # Bandingkan dengan menghapus spasi kiri/kanan
+            if s.title.strip() == SHEET_USERS:
+                print(f"[LOG] Sheet ditemukan via pencarian: '{s.title}'")
+                return s
+    except Exception as e_search:
+        print(f"[LOG] Pencarian sheet gagal total: {e_search}")
+
+    # --- LAPIS 3: Buat Baru (Jika Hilang Total) ---
+    try:
+        print("[LOG] Membuat sheet Config_Users baru...")
+        ws = spreadsheet.add_worksheet(title=SHEET_USERS, rows=100, cols=4)
+        ws.append_row(["Username", "Password", "Nama", "Role"], value_input_option="USER_ENTERED")
+        maybe_auto_format_sheet(ws, force=True)
+        return ws
+    except Exception as e_create:
+        print(f"[LOG] FATAL: Gagal membuat sheet: {e_create}")
+        return None
+
 def check_staff_login(username, password):
     """
-    Cek login staff dengan pembersihan data otomatis.
-    (Menangani password angka vs string & header kolom berspasi)
+    Cek login dengan Normalisasi Ekstrem & Debug Logging.
     """
     ws = init_user_db()
     if not ws: 
-        st.error("⚠️ Sistem Database tidak terdeteksi (Sheet Error).")
+        st.error("⚠️ Error Fatal: Database tidak dapat diakses (Koneksi GSheet bermasalah).")
         return None
     
     try:
-        # Ambil semua data
         records = ws.get_all_records()
     except Exception as e:
-        st.error(f"Gagal membaca data: {e}")
+        st.error(f"Gagal membaca data record: {e}")
         return None
         
     if not records:
+        st.warning("⚠️ Database kosong/belum ada user.")
         return None
 
-    # Bersihkan inputan user
+    # Normalisasi Input (Kecilkan semua huruf & hapus spasi)
+    # Agar 'Uang' == 'uang' dan 'Testing123 ' == 'testing123'
     input_user = str(username).strip()
     input_pass = str(password).strip()
 
-    # Cek Header Kolom (Normalisasi Key)
-    # Kadang header di sheet tertulis "Username " (ada spasi), ini bikin error.
-    # Kita cari key mana yang mengandung kata "Username" dan "Password"
-    first_row_keys = list(records[0].keys())
-    key_u = next((k for k in first_row_keys if k.strip().lower() == "username"), None)
-    key_p = next((k for k in first_row_keys if k.strip().lower() == "password"), None)
-    key_n = next((k for k in first_row_keys if k.strip().lower() == "nama"), "Nama")
-    key_r = next((k for k in first_row_keys if k.strip().lower() == "role"), "Role")
+    # Cek Header dulu (Debug)
+    headers = list(records[0].keys())
+    # Cari header yang "mirip" dengan Username/Password
+    key_u = next((k for k in headers if k.strip().lower() == "username"), "Username")
+    key_p = next((k for k in headers if k.strip().lower() == "password"), "Password")
+    key_n = next((k for k in headers if k.strip().lower() == "nama"), "Nama")
+    key_r = next((k for k in headers if k.strip().lower() == "role"), "Role")
 
-    if not key_u or not key_p:
-        st.error("⛔ Struktur Database Salah: Header 'Username' atau 'Password' tidak ditemukan di Sheet.")
-        return None
+    print(f"[LOGIN CHECK] Input: {input_user} | Pass: {input_pass}")
 
-    # Loop pencocokan
-    for user in records:
-        # Ambil data menggunakan key yang sudah ditemukan tadi
+    for i, user in enumerate(records):
+        # Ambil data dari DB -> Jadi String -> Hapus Spasi
         u_db = str(user.get(key_u, "")).strip()
         p_db = str(user.get(key_p, "")).strip()
         
-        # Bandingkan (Exact Match)
+        # Log di Console server (bukan di layar user) untuk keamanan
+        print(f"   Baris {i+1}: DB User='{u_db}' Pass='{p_db}'")
+
+        # Bandingkan (Exact Match untuk User & Pass)
         if u_db == input_user and p_db == input_pass:
-            # Sukses! Kembalikan data user yang rapi
+            print("   -> MATCH FOUND!")
             return {
                 "Username": u_db,
                 "Password": p_db,
@@ -288,15 +324,19 @@ def check_staff_login(username, password):
                 "Role": str(user.get(key_r, "staff")).strip()
             }
             
+    print("   -> NO MATCH.")
     return None
 
 def add_staff_account(username, password, nama):
-    """Admin menambah akun staff."""
     ws = init_user_db()
     if not ws: return False, "DB Error"
     
-    # Cek username kembar (Ambil kolom 1 / A)
-    existing_users = [str(x).strip() for x in ws.col_values(1)]
+    # Ambil kolom pertama (Username) dengan aman
+    try:
+        existing_users = [str(x).strip() for x in ws.col_values(1)]
+    except:
+        existing_users = []
+
     if username.strip() in existing_users:
         return False, "Username sudah dipakai!"
         
@@ -304,29 +344,26 @@ def add_staff_account(username, password, nama):
     return True, "Akun berhasil dibuat."
 
 def update_staff_account(username_lama, new_password=None, new_name=None):
-    """Fitur Edit Akun Staff."""
     ws = init_user_db()
     if not ws: return False, "DB Error"
 
     try:
-        # Cari lokasi cell username (Exact match cell)
         cell = ws.find(username_lama)
         row = cell.row
         
         if new_password and new_password.strip():
-            ws.update_cell(row, 2, new_password.strip()) # Kolom 2 = Password
+            ws.update_cell(row, 2, new_password.strip()) # Kolom 2
             
         if new_name and new_name.strip():
-            ws.update_cell(row, 3, new_name.strip()) # Kolom 3 = Nama
+            ws.update_cell(row, 3, new_name.strip()) # Kolom 3
             
-        return True, f"Data user {username_lama} berhasil diperbarui."
+        return True, f"Data {username_lama} updated."
     except gspread.exceptions.CellNotFound:
-        return False, "Username tidak ditemukan di database."
+        return False, "Username tidak ditemukan."
     except Exception as e:
         return False, str(e)
 
 def delete_staff_account(username):
-    """Admin menghapus akun staff."""
     ws = init_user_db()
     if not ws: return False, "DB Error"
     
