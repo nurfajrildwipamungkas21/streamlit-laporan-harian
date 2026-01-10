@@ -227,12 +227,10 @@ def check_staff_login(username, password):
     # Ambil semua data
     records = ws.get_all_records()
     for user in records:
-        # Konversi ke string agar aman
         u_db = str(user.get("Username", "")).strip()
         p_db = str(user.get("Password", "")).strip()
-        
         if u_db == username and p_db == password:
-            return user # Mengembalikan dict {Username, Password, Nama, Role}
+            return user 
     return None
 
 def add_staff_account(username, password, nama):
@@ -240,8 +238,7 @@ def add_staff_account(username, password, nama):
     ws = init_user_db()
     if not ws: return False, "DB Error"
     
-    # Cek username kembar
-    existing_users = ws.col_values(1) # Kolom A = Username
+    existing_users = ws.col_values(1)
     if username in existing_users:
         return False, "Username sudah dipakai!"
         
@@ -254,18 +251,12 @@ def update_staff_account(username_lama, new_password=None, new_name=None):
     if not ws: return False, "DB Error"
 
     try:
-        # Cari lokasi cell username
         cell = ws.find(username_lama)
         row = cell.row
-        
-        # Update Password jika diisi
         if new_password and new_password.strip():
             ws.update_cell(row, 2, new_password) # Kolom 2 = Password
-            
-        # Update Nama jika diisi
         if new_name and new_name.strip():
             ws.update_cell(row, 3, new_name) # Kolom 3 = Nama
-            
         return True, f"Data user {username_lama} berhasil diperbarui."
     except gspread.exceptions.CellNotFound:
         return False, "Username tidak ditemukan."
@@ -5213,13 +5204,13 @@ elif menu_nav == "📊 Dashboard Admin":
                                 st.error(msg)
                                 
 # ---------------------------------------------------------
-            # TAB: MANAJEMEN AKUN STAFF (FULL UPDATE)
+            # TAB: MANAJEMEN AKUN STAFF (Username & Password)
             # ---------------------------------------------------------
             with tab_users:
-                st.markdown("### 👥 Manajemen Akun Staff (Non-Admin)")
-                st.caption("Kelola username & password untuk tim lapangan agar bisa login tanpa Email/OTP.")
+                st.markdown("### 👥 Manajemen Akun Staff")
+                st.caption("Buatkan username & password untuk tim agar bisa login tanpa Email/OTP.")
                 
-                # 1. Load Data User Terbaru dari Google Sheet
+                # 1. Load Data User
                 ws_u = init_user_db()
                 if ws_u:
                     all_users = ws_u.get_all_records()
@@ -5227,56 +5218,49 @@ elif menu_nav == "📊 Dashboard Admin":
                 else:
                     df_users = pd.DataFrame()
 
-                # 2. Bagi Layar jadi 2 Kolom (Kiri: Form, Kanan: Tabel)
+                # 2. Layout Dua Kolom
                 col_left, col_right = st.columns([1, 2], gap="large")
                 
-                # --- KOLOM KIRI: FORM CRUD (Create, Update, Delete) ---
+                # --- KOLOM KIRI: FORM ---
                 with col_left:
-                    # Menu Pilihan Aksi
-                    mode_akun = st.radio("Pilih Aksi:", ["➕ Buat Akun Baru", "✏️ Edit Akun", "🗑️ Hapus Akun"], horizontal=True)
+                    mode_akun = st.radio("Pilih Aksi:", ["➕ Buat Akun", "✏️ Edit Akun", "🗑️ Hapus Akun"], horizontal=True)
                     st.divider()
 
-                    # A. MODE BUAT BARU
-                    if mode_akun == "➕ Buat Akun Baru":
+                    # A. BUAT BARU
+                    if mode_akun == "➕ Buat Akun":
                         st.markdown("#### Buat Akun Baru")
                         with st.form("create_staff_acc"):
-                            new_u = st.text_input("Username (Unik & Tanpa Spasi)", placeholder="cth: sales01")
+                            new_u = st.text_input("Username (Unik)", placeholder="cth: sales01")
                             new_p = st.text_input("Password", type="password")
                             new_n = st.text_input("Nama Lengkap Staff")
                             
                             if st.form_submit_button("Simpan Akun"):
                                 if new_u and new_p and new_n:
-                                    # Panggil Helper add_staff_account
                                     ok, msg = add_staff_account(new_u, new_p, new_n)
                                     if ok:
                                         st.success(msg)
-                                        # Opsional: Tambah ke list 'Nama Pelapor' juga biar sinkron
-                                        tambah_staf_baru(new_n) 
+                                        tambah_staf_baru(new_n) # Sinkronkan nama pelapor
                                         time.sleep(1)
                                         st.rerun()
                                     else:
                                         st.error(msg)
                                 else:
-                                    st.error("Semua field wajib diisi.")
+                                    st.error("Wajib diisi semua.")
 
-                    # B. MODE EDIT (GANTI PASS / NAMA)
+                    # B. EDIT AKUN
                     elif mode_akun == "✏️ Edit Akun":
-                        st.markdown("#### Edit Akun")
+                        st.markdown("#### Edit Password / Nama")
                         if not df_users.empty:
                             list_u = df_users["Username"].tolist()
                             sel_u_edit = st.selectbox("Pilih Username:", list_u)
                             
-                            # Ambil data lama buat preview di form
                             try:
                                 curr_data = df_users[df_users["Username"] == sel_u_edit].iloc[0]
-                                st.info(f"Nama saat ini: **{curr_data['Nama']}**")
-                                
+                                st.info(f"Nama: **{curr_data['Nama']}**")
                                 with st.form("edit_staff_acc"):
-                                    edit_n = st.text_input("Ganti Nama (Opsional)", value=curr_data['Nama'])
-                                    edit_p = st.text_input("Ganti Password (Opsional)", type="password", placeholder="Isi HANYA jika ingin mengganti password")
-                                    
-                                    if st.form_submit_button("Update Perubahan"):
-                                        # Panggil Helper update_staff_account
+                                    edit_n = st.text_input("Ganti Nama", value=curr_data['Nama'])
+                                    edit_p = st.text_input("Ganti Password (Opsional)", type="password", placeholder="Isi HANYA jika ingin ganti")
+                                    if st.form_submit_button("Update"):
                                         ok, msg = update_staff_account(sel_u_edit, new_password=edit_p, new_name=edit_n)
                                         if ok:
                                             st.success(msg)
@@ -5284,22 +5268,18 @@ elif menu_nav == "📊 Dashboard Admin":
                                             st.rerun()
                                         else:
                                             st.error(msg)
-                            except Exception:
-                                st.error("Gagal memuat data user.")
+                            except: st.error("Gagal load data.")
                         else:
-                            st.warning("Belum ada data staff.")
+                            st.warning("Belum ada data.")
 
-                    # C. MODE HAPUS
+                    # C. HAPUS AKUN
                     elif mode_akun == "🗑️ Hapus Akun":
                         st.markdown("#### Hapus Akun")
                         if not df_users.empty:
                             list_u_del = df_users["Username"].tolist()
-                            sel_u_del = st.selectbox("Pilih Username untuk dihapus:", list_u_del)
-                            
-                            st.warning(f"⚠️ Apakah Anda yakin ingin menghapus akun **{sel_u_del}**? Staff tersebut tidak akan bisa login lagi.")
-                            
-                            if st.button("🔥 Hapus Permanen", type="primary"):
-                                # Panggil Helper delete_staff_account
+                            sel_u_del = st.selectbox("Hapus Username:", list_u_del)
+                            st.warning(f"Akun **{sel_u_del}** akan dihapus permanen.")
+                            if st.button("🔥 Hapus Sekarang", type="primary"):
                                 ok, msg = delete_staff_account(sel_u_del)
                                 if ok:
                                     st.success(msg)
@@ -5308,21 +5288,18 @@ elif menu_nav == "📊 Dashboard Admin":
                                 else:
                                     st.error(msg)
                         else:
-                            st.warning("Belum ada data staff.")
+                            st.warning("Belum ada data.")
 
-                # --- KOLOM KANAN: TABEL MONITORING ---
+                # --- KOLOM KANAN: TABEL ---
                 with col_right:
-                    st.markdown("#### 📋 Database Akun Staff")
+                    st.markdown("#### 📋 Daftar Akun Terdaftar")
                     if not df_users.empty:
-                        # Sensor Password untuk tampilan tabel (Security Practice)
                         df_show = df_users.copy()
                         if "Password" in df_show.columns:
-                            df_show["Password"] = "••••••" 
-                        
+                            df_show["Password"] = "••••••" # Sensor password
                         st.dataframe(df_show, use_container_width=True, hide_index=True)
-                        st.caption("ℹ️ Password disensor demi keamanan. Gunakan fitur 'Edit Akun' di sebelah kiri jika ingin mereset password staff.")
                     else:
-                        st.info("Belum ada akun staff yang dibuat.")
+                        st.info("Belum ada akun staff.")
 
 # ---------------------------------------------------------
             # TAB 7: SUPER ADMIN EDITOR (FITUR KHUSUS ADMIN)
