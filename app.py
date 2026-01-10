@@ -96,25 +96,26 @@ def get_pending_approvals():
 
 def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval oleh Manager (MERGED VERSION).
-    Menggabungkan logika update data, pencatatan Audit Log, dan Diff Checker yang lebih presisi.
+    Fungsi Eksekusi Approval oleh Manager (REVISED).
+    Memastikan Reject Note tercatat di Audit Log.
     """
     try:
-        # Inisialisasi koneksi ke sheet pending (pastikan fungsi init_pending_db tersedia di scope global)
+        # Inisialisasi koneksi ke sheet pending
         ws_pending = init_pending_db()
+        if not ws_pending:
+            return False, "DB Error: Sheet Pending tidak ditemukan."
 
         # Ambil data terbaru dari sheet pending
         all_requests = ws_pending.get_all_records()
 
         if request_index_0based >= len(all_requests):
-            return False, "Data tidak ditemukan (mungkin sudah diproses)."
+            return False, "Data tidak ditemukan (mungkin sudah diproses user lain)."
 
         req = all_requests[request_index_0based]
         target_sheet_name = req["Target Sheet"]
         row_target_idx = int(req["Row Index (0-based)"])
 
         # --- PERSIAPAN LOGGING (Diff Checker) ---
-        # Menggunakan logika Code Kedua (lebih presisi dengan .strip())
         old_data_str = req.get("Old Data JSON", "{}")
         new_data_str = req.get("New Data JSON", "{}")
 
@@ -125,17 +126,19 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             diff_list = []
             for k, v in new_d.items():
                 old_v = old_d.get(k, "")
-                # Bandingkan nilai dengan strip() untuk menghindari whitespace false positive
+                # Bandingkan nilai dengan strip()
                 if str(old_v).strip() != str(v).strip():
                     diff_list.append(f"{k}: {old_v} ➡ {v}")
             diff_str = "\n".join(diff_list)
         except Exception as e_json:
-            diff_str = f"Data parsing error: {e_json}"
+            diff_str = f"Diff Error: {e_json}"
 
         # --- ACTION: REJECT ---
         if action == "REJECT":
-            # 1. Catat ke Audit Log bahwa Manager MENOLAK
-            # PENTING: Simpan rejection_note sebagai 'reason' agar muncul di kolom 'Alasan Perubahan'
+            # Pastikan catatan tidak kosong
+            final_reason = rejection_note if rejection_note and rejection_note.strip() != "" else "Ditolak tanpa catatan."
+
+            # 1. Catat ke Audit Log
             log_admin_action(
                 spreadsheet=spreadsheet,
                 actor=admin_name,
@@ -144,15 +147,17 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 target_sheet=target_sheet_name,
                 row_idx=row_target_idx + 2,
                 action="REJECTED",
-                reason=rejection_note,  # Menggunakan input catatan penolakan dari UI
-                changes_dict={"Info": "Request Ditolak",
-                    "Diff Ditolak": diff_str}
+                reason=final_reason, # INI KUNCINYA: Pastikan masuk ke kolom Reason
+                changes_dict={
+                    "Status": "DITOLAK",
+                    "Detail Perubahan": diff_str
+                }
             )
 
             # 2. Hapus request dari sheet pending
             ws_pending.delete_rows(request_index_0based + 2)
 
-            return True, "Permintaan ditolak. Pesan tercatat di Global Audit Log."
+            return True, f"Permintaan DITOLAK. Catatan: {final_reason}"
 
         # --- ACTION: APPROVE ---
         elif action == "APPROVE":
@@ -161,24 +166,18 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
 
             # 2. Update Sheet Target Asli
             ws_target = spreadsheet.worksheet(target_sheet_name)
-
-            # Susun data sesuai urutan header di sheet target
             headers = ws_target.row_values(1)
             row_values = []
             for h in headers:
-                # Ambil nilai dari JSON berdasarkan nama kolom header
                 val = new_data_dict.get(h, "")
                 row_values.append(val)
 
             # Update Cell di Sheet Target
             gsheet_row = row_target_idx + 2
             cell_range = f"A{gsheet_row}"
+            ws_target.update(range_name=cell_range, values=[row_values], value_input_option="USER_ENTERED")
 
-            # Lakukan update ke Google Sheet
-            ws_target.update(range_name=cell_range, values=[
-                             row_values], value_input_option="USER_ENTERED")
-
-            # 3. Catat ke Audit Log bahwa Manager MENYETUJUI
+            # 3. Catat ke Audit Log
             log_admin_action(
                 spreadsheet=spreadsheet,
                 actor=admin_name,
@@ -187,17 +186,20 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 target_sheet=target_sheet_name,
                 row_idx=gsheet_row,
                 action="APPROVED",
-                reason=req.get("Reason", "Approved by Manager"),
-                changes_dict={"Perubahan Disetujui": diff_str}
+                reason="Disetujui oleh Manager",
+                changes_dict={
+                    "Status": "DISETUJUI",
+                    "Detail Perubahan": diff_str
+                }
             )
 
-            # 4. Hapus Request dari Sheet Pending setelah berhasil
+            # 4. Hapus Request
             ws_pending.delete_rows(request_index_0based + 2)
 
-            return True, "Perubahan disetujui & diterapkan ke Database."
+            return True, "Perubahan DISETUJUI & diterapkan ke Database."
 
     except Exception as e:
-        return False, f"Error: {e}"
+        return False, f"System Error: {e}"
 
 
 # --- BAGIAN IMPORT OPTIONAL LIBS JANGAN DIHAPUS (Excel/AgGrid/Plotly) ---
@@ -4545,7 +4547,7 @@ elif menu_nav == "📊 Dashboard Admin":
             def get_category_activity(val):
                 val_str = str(val)
                 keywords_digital = ["Digital", "Marketing",
-                    "Konten", "Ads", "Telesales", "Admin", "Follow"]
+                                    "Konten", "Ads", "Telesales", "Admin", "Follow"]
                 if any(k in val_str for k in keywords_digital):
                     return "Digital/Internal"
                 return "Kunjungan Lapangan"
@@ -4572,7 +4574,7 @@ elif menu_nav == "📊 Dashboard Admin":
 
             # Daftar Tab Standar
             tabs_labels = ["📈 Produktivitas", "🧲 Leads & Interest", "💬 Review & Feedback",
-                "🖼️ Galeri Bukti", "📦 Master Data", "⚙️ Config Staff", "👥 Akun Staff", "⚡ SUPER EDITOR"]
+                           "🖼️ Galeri Bukti", "📦 Master Data", "⚙️ Config Staff", "👥 Akun Staff", "⚡ SUPER EDITOR"]
 
             # Cek Role (Manager vs Admin)
             is_manager = (st.session_state.get("user_role") == "manager")
@@ -4620,10 +4622,7 @@ elif menu_nav == "📊 Dashboard Admin":
                     if not pending_data:
                         st.info("✅ Tidak ada permintaan pending.")
                     else:
-                        # REJECTION DIALOG (Membutuhkan Streamlit versi baru st.experimental_dialog atau st.dialog)
-                        # Jika versi lama, gunakan st.expander di dalam loop.
-                        # Di sini saya gunakan pendekatan session_state expander agar aman untuk semua versi.
-
+                        # REJECTION DIALOG LOGIC FIX
                         for i, req in enumerate(pending_data):
                             with st.container(border=True):
                                 # Header Card
@@ -4674,7 +4673,7 @@ elif menu_nav == "📊 Dashboard Admin":
                                 with col_act_btn:
                                     b_col1, b_col2 = st.columns(2)
 
-                                    # TOMBOL TOLAK (Memicu Expander/Input)
+                                    # TOMBOL TOLAK (Memicu Expander/Input via State)
                                     key_reject = f"btn_reject_show_{i}"
                                     if b_col1.button("❌ Tolak", key=key_reject, use_container_width=True):
                                         st.session_state[f"show_reject_input_{i}"] = True
@@ -4691,29 +4690,44 @@ elif menu_nav == "📊 Dashboard Admin":
                                             st.error(msg)
 
                                 # --- AREA INPUT ALASAN PENOLAKAN (Muncul jika tombol Tolak ditekan) ---
+                                # FIX: Menggunakan st.form agar value textarea tidak hilang
                                 if st.session_state.get(f"show_reject_input_{i}", False):
                                     st.markdown("---")
-                                    st.warning(
-                                        "Anda akan menolak permintaan ini.")
+                                    st.warning("⚠️ Anda akan MENOLAK permintaan ini.")
+                                    
                                     with st.form(key=f"form_reject_{i}"):
-                                        note = st.text_area(
-                                            "Catatan Penolakan (Opsional, tapi disarankan):", placeholder="Misal: Nominal salah, tolong cek lagi.")
-
+                                        note_input = st.text_area(
+                                            "Catatan Penolakan (Wajib/Opsional):", 
+                                            placeholder="Contoh: Nominal salah, tolong cek lagi."
+                                        )
+                                        
                                         c_batal, c_confirm = st.columns(2)
+                                        
+                                        # Tombol Batal
                                         if c_batal.form_submit_button("Batal"):
                                             st.session_state[f"show_reject_input_{i}"] = False
                                             st.rerun()
 
+                                        # Tombol Konfirmasi Tolak
                                         if c_confirm.form_submit_button("🚫 Konfirmasi Tolak", type="primary"):
-                                            note_final = note if note.strip() else "Tidak ada catatan."
+                                            # Ambil nilai note_input di sini
+                                            final_note = note_input if note_input.strip() else "Ditolak (Tanpa Catatan)"
+                                            
+                                            # Panggil fungsi execute_approval dengan parameter rejection_note
                                             ok, msg = execute_approval(
-                                                i, "REJECT", admin_name=st.session_state["user_name"], rejection_note=note_final)
+                                                request_index_0based=i, 
+                                                action="REJECT", 
+                                                admin_name=st.session_state["user_name"], 
+                                                rejection_note=final_note
+                                            )
+                                            
                                             if ok:
-                                                st.success(
-                                                    f"Ditolak: {note_final}")
+                                                st.success(msg)
                                                 st.session_state[f"show_reject_input_{i}"] = False
                                                 time.sleep(1)
                                                 st.rerun()
+                                            else:
+                                                st.error(msg)
 
             # --- TAB 1: PRODUKTIVITAS ---
             with tab_prod:
@@ -4731,13 +4745,13 @@ elif menu_nav == "📊 Dashboard Admin":
                     start_date = datetime.now(
                         tz=TZ_JKT).date() - timedelta(days=days_opt)
                     df_filt = df_all[df_all["Tanggal_Date"]
-                        >= start_date].copy()
+                                     >= start_date].copy()
 
                     # Split Sales vs Digital
                     df_sales = df_filt[df_filt["Kategori"]
-                        == "Kunjungan Lapangan"]
+                                       == "Kunjungan Lapangan"]
                     df_digital = df_filt[df_filt["Kategori"]
-                        == "Digital/Internal"]
+                                         == "Digital/Internal"]
 
                     # 1. SALES STATS
                     with st.container(border=True):
@@ -4793,16 +4807,17 @@ elif menu_nav == "📊 Dashboard Admin":
 
                         # Button Filter
                         b1, b2, b3 = st.columns(3)
-                        if b1.button("Tarik: Under 50% (A)", use_container_width=True):
-                            st.session_state["filter_interest_admin"] = "Under 50% (A)"
-                        if b2.button("Tarik: 50-75% (B)", use_container_width=True):
-                            st.session_state["filter_interest_admin"] = "50-75% (B)"
-                        if b3.button("Tarik: 75%-100%", use_container_width=True):
-                            st.session_state["filter_interest_admin"] = "75%-100%"
+                        with b1:
+                            if st.button("Tarik: Under 50% (A)", use_container_width=True):
+                                st.session_state["filter_interest_admin"] = "Under 50% (A)"
+                        with b2:
+                            if st.button("Tarik: 50-75% (B)", use_container_width=True):
+                                st.session_state["filter_interest_admin"] = "50-75% (B)"
+                        with b3:
+                            if st.button("Tarik: 75%-100%", use_container_width=True):
+                                st.session_state["filter_interest_admin"] = "75%-100%"
 
                         sel_interest = st.session_state["filter_interest_admin"]
-                        st.success(f"📂 Menampilkan Filter: **{sel_interest}**")
-
                         # Filtering logic
                         df_leads = df_all.copy()
                         df_leads[COL_INTEREST] = df_leads[COL_INTEREST].astype(
@@ -4812,12 +4827,12 @@ elif menu_nav == "📊 Dashboard Admin":
 
                         with st.container(border=True):
                             st.success(
-                                f"📂 Menampilkan Data: **{sel_interest}** (Total: {len(df_leads)})")
+                                f"📂 Menampilkan Data: **{sel_interest}** (Total: {len(df_filtered)})")
 
                             cols_display = [c for c in [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN,
-                                COL_TEMPAT, COL_DESKRIPSI, COL_KENDALA_KLIEN] if c in df_leads.columns]
+                                                        COL_TEMPAT, COL_DESKRIPSI, COL_KENDALA_KLIEN] if c in df_leads.columns]
                             st.dataframe(
-                                df_leads[cols_display], use_container_width=True, hide_index=True)
+                                df_filtered[cols_display], use_container_width=True, hide_index=True)
 
                             # Export Buttons
                             c_ex, c_csv = st.columns(2)
@@ -4989,7 +5004,7 @@ elif menu_nav == "📊 Dashboard Admin":
                         tm_mem = st.text_area("Anggota (1 per baris)")
                         if st.form_submit_button("Simpan Team"):
                             mem_list = [x.strip()
-                                                for x in tm_mem.splitlines() if x.strip()]
+                                        for x in tm_mem.splitlines() if x.strip()]
                             ok, msg = tambah_team_baru(
                                 tm_name, tm_pos, mem_list)
                             if ok:
@@ -5083,7 +5098,7 @@ elif menu_nav == "📊 Dashboard Admin":
                         elif not logs.empty:
                             # Filter log khusus sheet ini
                             logs_sheet = logs[logs["Nama Data / Sheet"]
-                                == target_s]
+                                              == target_s]
 
                             if not logs_sheet.empty:
                                 # Ambil log paling baru (baris pertama setelah filter)
