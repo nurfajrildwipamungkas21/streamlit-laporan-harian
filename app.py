@@ -221,29 +221,26 @@ def init_user_db():
         return None
 
 def check_staff_login(username, password):
-    """Cek login untuk staff biasa via GSheet (Versi Robust/Kuat)."""
+    """Cek login untuk staff biasa via GSheet (Versi Robust/Anti-Gagal)."""
     ws = init_user_db()
     if not ws: return None
     
-    # Ambil semua data (list of dicts)
+    # 1. Ambil semua data dari Sheet
     records = ws.get_all_records()
     
-    # Normalisasi input user (hapus spasi, lowercase jika perlu)
+    # 2. Bersihkan Inputan User (Hapus spasi depan/belakang)
     input_user = str(username).strip()
     input_pass = str(password).strip()
 
     for user in records:
-        # Konversi data DATABASE ke String & Hapus Spasi
-        # PENTING: Gunakan str() untuk menangani jika password berupa angka di Excel
+        # 3. Bersihkan Data dari Database (Hapus spasi & paksa jadi string)
+        #    PENTING: .get() harus sama persis dengan Header di Sheet ("Username", "Password")
         u_db = str(user.get("Username", "")).strip()
         p_db = str(user.get("Password", "")).strip()
         
-        # Debugging (Opsional: Bisa dihapus nanti)
-        # print(f"Cek: Input({input_user}|{input_pass}) vs DB({u_db}|{p_db})") 
-
-        # Bandingkan (Case-sensitive untuk password, Username kita buat sama persis)
+        # 4. Bandingkan Data Bersih vs Inputan Bersih
         if u_db == input_user and p_db == input_pass:
-            return user # Login Sukses
+            return user # Login Sukses, kembalikan data user
             
     return None
 
