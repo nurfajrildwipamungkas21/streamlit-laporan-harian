@@ -37,17 +37,24 @@ def init_pending_db():
             # Cek apakah header sudah update (punya Old Data JSON)
             headers = ws.row_values(1)
             if "Old Data JSON" not in headers:
-                # Jika sheet lama, kita tambah kolom manual atau minta user hapus sheet dulu
-                # Untuk aman, kita append cell di baris 1 (ini simplifikasi)
-                ws.update_cell(1, len(headers)+1, "Old Data JSON")
+                # PERBAIKAN: Resize sheet dulu sebelum update cell di kolom baru
+                current_cols = ws.col_count
+                new_col_idx = len(headers) + 1
+                if current_cols < new_col_idx:
+                    ws.resize(cols=new_col_idx) # Tambah kolom jika kurang
+                
+                ws.update_cell(1, new_col_idx, "Old Data JSON")
         except gspread.WorksheetNotFound:
             # Header Baru: Tambah "Old Data JSON"
+            # Pastikan cols=7 agar cukup menampung kolom baru
             ws = spreadsheet.add_worksheet(title=SHEET_PENDING, rows=1000, cols=7)
             headers = ["Timestamp", "Requestor", "Target Sheet", "Row Index (0-based)", "New Data JSON", "Reason", "Old Data JSON"]
             ws.append_row(headers, value_input_option="USER_ENTERED")
             maybe_auto_format_sheet(ws, force=True)
         return ws
-    except Exception:
+    except Exception as e:
+        # Tampilkan error di terminal untuk debugging jika terjadi lagi
+        print(f"Error init_pending_db: {e}") 
         return None
 
 def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, reason, requestor):
