@@ -4189,9 +4189,7 @@ elif menu_nav == "📜 Global Audit Log":
             if filter_sheet:
                 df_show = df_show[df_show["Nama Data / Sheet"].isin(filter_sheet)]
 
-            # ==========================================
-            # MULAI UPDATE CODE (TAMPILAN DATA BERSIH)
-            # ==========================================
+            # --- TAMPILAN DATA BERSIH (CLEAN VIEW) ---
             st.markdown(f"**Total Record:** {len(df_show)}")
             
             # Kita fokuskan kolom yang penting saja
@@ -4229,17 +4227,14 @@ elif menu_nav == "📜 Global Audit Log":
                     )
                 }
             )
-            # ==========================================
-            # AKHIR UPDATE CODE
-            # ==========================================
 
-            # Download Button (Bagian Asli Code Pertama)
+            # Download Button
             if HAS_OPENPYXL:
                 xb = df_to_excel_bytes(df_show, sheet_name="Audit_Log")
                 if xb:
                     st.download_button("⬇️ Download Log (Excel)", data=xb, file_name="global_audit_log.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("Belum ada riwayat perubahan data.")
+            else:
+                st.info("Belum ada riwayat perubahan data.")
 
         render_section_watermark()
 
