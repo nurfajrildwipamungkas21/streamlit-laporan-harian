@@ -221,28 +221,74 @@ def init_user_db():
         return None
 
 def check_staff_login(username, password):
-    """Cek login untuk staff biasa via GSheet (Versi Robust/Anti-Gagal)."""
+    """Cek login dengan DEBUG MODE (Tampilkan isi database ke layar)."""
     ws = init_user_db()
-    if not ws: return None
+    if not ws: 
+        st.error("❌ Gagal connect ke Sheet Config_Users")
+        return None
     
-    # 1. Ambil semua data dari Sheet
-    records = ws.get_all_records()
+    # 1. Ambil semua data
+    try:
+        records = ws.get_all_records()
+    except Exception as e:
+        st.error(f"❌ Error saat get_all_records: {e}")
+        return None
     
-    # 2. Bersihkan Inputan User (Hapus spasi depan/belakang)
+    # --- MULAI DEBUG TAMPILAN ---
+    st.divider()
+    st.warning("⚠️ MODE DEBUG AKTIF")
+    
+    # Bersihkan input user
     input_user = str(username).strip()
     input_pass = str(password).strip()
-
-    for user in records:
-        # 3. Bersihkan Data dari Database (Hapus spasi & paksa jadi string)
-        #    PENTING: .get() harus sama persis dengan Header di Sheet ("Username", "Password")
-        u_db = str(user.get("Username", "")).strip()
-        p_db = str(user.get("Password", "")).strip()
+    
+    st.write(f"1. Input yang Anda ketik: User='{input_user}', Pass='{input_pass}'")
+    
+    if not records:
+        st.error("2. Database KOSONG! records = []")
+        return None
         
-        # 4. Bandingkan Data Bersih vs Inputan Bersih
+    # Cek Header yang terbaca oleh sistem
+    first_keys = list(records[0].keys())
+    st.write(f"2. Header yang terbaca di GSheet: {first_keys}")
+    
+    # Cek apakah header 'Username' dan 'Password' ada?
+    if "Username" not in first_keys:
+        st.error("⛔ KRITIS: Kolom 'Username' (huruf besar U) tidak ditemukan! Cek ejaan di GSheet.")
+    if "Password" not in first_keys:
+        st.error("⛔ KRITIS: Kolom 'Password' (huruf besar P) tidak ditemukan! Cek ejaan di GSheet.")
+
+    st.write("3. Membandingkan data per baris:")
+    
+    match_found = False
+    found_user_data = None
+
+    for i, user in enumerate(records):
+        # Ambil data pake .get() biar ga error kalau key ga ada
+        raw_u = user.get("Username", "MISSING")
+        raw_p = user.get("Password", "MISSING")
+        
+        # Bersihkan data database
+        u_db = str(raw_u).strip()
+        p_db = str(raw_p).strip()
+        
+        # Tampilkan proses perbandingan di layar
+        st.caption(f"Baris {i+1}: DB('{u_db}' | '{p_db}') vs INPUT('{input_user}' | '{input_pass}')")
+        
         if u_db == input_user and p_db == input_pass:
-            return user # Login Sukses, kembalikan data user
+            st.success(f"✅ COCOK DI BARIS {i+1}!")
+            match_found = True
+            found_user_data = user
+            break # Berhenti looping
             
-    return None
+    st.divider()
+    # --- SELESAI DEBUG ---
+
+    if match_found:
+        return found_user_data
+    else:
+        st.error("❌ Tidak ada yang cocok sampai baris terakhir.")
+        return None
 
 def add_staff_account(username, password, nama):
     """Admin menambah akun staff."""
