@@ -87,13 +87,12 @@ def get_pending_approvals():
     if not ws: return []
     return ws.get_all_records()
 
-import json  # Pastikan library json di-import
+import json
 
 def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval oleh Manager (UPDATED).
-    Menyimpan detail 'Diff' saat REJECT agar Admin tahu draft mana yang ditolak.
-    Menggabungkan logika update data dan pencatatan Audit Log.
+    Fungsi Eksekusi Approval oleh Manager (MERGED VERSION).
+    Menggabungkan logika update data, pencatatan Audit Log, dan Diff Checker yang lebih presisi.
     """
     try:
         # Inisialisasi koneksi ke sheet pending (pastikan fungsi init_pending_db tersedia di scope global)
@@ -110,11 +109,10 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
         row_target_idx = int(req["Row Index (0-based)"])
         
         # --- PERSIAPAN LOGGING (Diff Checker) ---
-        # Ambil detail perubahan untuk Log (Membandingkan Old Data vs New Data)
+        # Menggunakan logika Code Kedua (lebih presisi dengan .strip())
         old_data_str = req.get("Old Data JSON", "{}")
         new_data_str = req.get("New Data JSON", "{}")
         
-        # Buat String Diff Sederhana untuk Audit Log
         diff_str = ""
         try:
             old_d = json.loads(old_data_str)
@@ -122,17 +120,17 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             diff_list = []
             for k, v in new_d.items():
                 old_v = old_d.get(k, "")
-                # Bandingkan nilai lama dan baru
-                if str(old_v) != str(v):
-                    diff_list.append(f"{k}: {old_v} ➡ {v}") # Pakai panah biar jelas perubahannya
+                # Bandingkan nilai dengan strip() untuk menghindari whitespace false positive
+                if str(old_v).strip() != str(v).strip():
+                    diff_list.append(f"{k}: {old_v} ➡ {v}") 
             diff_str = "\n".join(diff_list)
         except Exception as e_json:
             diff_str = f"Data parsing error: {e_json}"
 
         # --- ACTION: REJECT ---
         if action == "REJECT":
-            # 1. Catat ke Audit Log bahwa Manager MENOLAK + Sertakan Diff-nya
-            # (Pastikan fungsi log_admin_action tersedia di scope global/main script)
+            # 1. Catat ke Audit Log bahwa Manager MENOLAK
+            # PENTING: Simpan rejection_note sebagai 'reason' agar muncul di kolom 'Alasan Perubahan'
             log_admin_action(
                 spreadsheet=spreadsheet,
                 actor=admin_name,
@@ -141,15 +139,14 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 target_sheet=target_sheet_name,
                 row_idx=row_target_idx + 2,
                 action="REJECTED", 
-                reason=f"{rejection_note}", # Simpan alasan murni di sini
-                changes_dict={"Info": "Request Ditolak", "Detail Perubahan yg Ditolak": diff_str}
+                reason=rejection_note, # Menggunakan input catatan penolakan dari UI
+                changes_dict={"Info": "Request Ditolak", "Diff Ditolak": diff_str}
             )
             
             # 2. Hapus request dari sheet pending
-            # Row index di GSheet = index list + 2 (header di baris 1)
             ws_pending.delete_rows(request_index_0based + 2)
             
-            return True, "Permintaan ditolak. Pesan akan muncul di dashboard Admin."
+            return True, "Permintaan ditolak. Pesan tercatat di Global Audit Log."
             
         # --- ACTION: APPROVE ---
         elif action == "APPROVE":
@@ -168,7 +165,6 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
                 row_values.append(val)
                 
             # Update Cell di Sheet Target
-            # Baris GSheet = index 0-based + 2
             gsheet_row = row_target_idx + 2
             cell_range = f"A{gsheet_row}"
             
@@ -4193,13 +4189,15 @@ elif menu_nav == "📜 Global Audit Log":
             if filter_sheet:
                 df_show = df_show[df_show["Nama Data / Sheet"].isin(filter_sheet)]
 
-            # --- TAMPILAN DATA KHUSUS (Clean View - Dari Code Kedua) ---
+            # ==========================================
+            # MULAI UPDATE CODE (TAMPILAN DATA BERSIH)
+            # ==========================================
             st.markdown(f"**Total Record:** {len(df_show)}")
             
-            # Pilih kolom yang mau ditampilkan saja
+            # Kita fokuskan kolom yang penting saja
             cols_to_show = ["Waktu & Tanggal", "Aksi Dilakukan", "Rincian (Sebelum ➡ Sesudah)", "Alasan Perubahan", "Pelaku (User)"]
             
-            # Pastikan kolom ada di dataframe sebelum filter (menghindari error key missing)
+            # Pastikan kolom ada (untuk menghindari error jika CSV header berubah)
             cols_final = [c for c in cols_to_show if c in df_show.columns]
             
             st.dataframe(
@@ -4219,7 +4217,7 @@ elif menu_nav == "📜 Global Audit Log":
                     ),
                     "Alasan Perubahan": st.column_config.TextColumn(
                         "💬 Catatan / Alasan", 
-                        width="medium"
+                        width="medium" # Kolom ini akan menampilkan pesan dari Manager/Admin
                     ),
                     "Aksi Dilakukan": st.column_config.TextColumn(
                         "Status",
@@ -4231,8 +4229,11 @@ elif menu_nav == "📜 Global Audit Log":
                     )
                 }
             )
+            # ==========================================
+            # AKHIR UPDATE CODE
+            # ==========================================
 
-            # Download Button
+            # Download Button (Bagian Asli Code Pertama)
             if HAS_OPENPYXL:
                 xb = df_to_excel_bytes(df_show, sheet_name="Audit_Log")
                 if xb:
@@ -4721,19 +4722,20 @@ elif menu_nav == "📊 Dashboard Admin":
                         st.error(f"Gagal load sheet: {e}")
 
                 # 3. Editor Interface & NOTIFIKASI STATUS
-                if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
+if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
                     df_old = st.session_state["super_df_old"]
                     target_s = st.session_state["super_sheet_target"]
                     
-                    # --- CEK STATUS TERAKHIR (UPDATED - Menggabungkan Logic Code Kedua) ---
-                    # Logic: Cek Pending List dulu -> Jika kosong, baru cek History Log terakhir
+                    # ==============================================================================
+                    # BAGIAN 1: CEK STATUS TERAKHIR (LOGIKA DARI CODE KEDUA DIINTEGRASIKAN DI SINI)
+                    # ==============================================================================
                     try:
                         from audit_service import load_audit_log
                         logs = load_audit_log(spreadsheet)
                         
                         status_alert = None
                         
-                        # 1. Cek apakah ada Request Pending untuk sheet ini?
+                        # 1. Cek dulu: Apakah ada Request Pending untuk sheet ini? (Prioritas Tertinggi)
                         ws_pend = init_pending_db() # Pastikan fungsi ini tersedia/diimport
                         pending_recs = ws_pend.get_all_records() if ws_pend else []
                         is_pending = any(p['Target Sheet'] == target_s for p in pending_recs)
@@ -4745,36 +4747,42 @@ elif menu_nav == "📊 Dashboard Admin":
                                 "detail": "Perubahan pada sheet ini sedang direview oleh Manager."
                             }
                         
-                        # 2. Jika tidak ada pending, cek History Log terakhir
+                        # 2. Jika TIDAK pending, cek sejarah Log terakhir untuk sheet ini
                         elif not logs.empty:
                             # Filter log khusus sheet ini
                             logs_sheet = logs[logs["Nama Data / Sheet"] == target_s]
                             
                             if not logs_sheet.empty:
-                                # Ambil log paling baru
+                                # Ambil log paling baru (baris pertama setelah filter)
                                 last_action = logs_sheet.iloc[0] 
+                                
                                 action_type = str(last_action.get("Aksi Dilakukan", "")).upper()
-                                reason_log = last_action.get("Alasan Perubahan", "-")
+                                # Ambil pesan Manager dari kolom 'Alasan Perubahan'
+                                reason_log = last_action.get("Alasan Perubahan", "-") 
                                 actor_log = last_action.get("Pelaku (User)", "Manager")
                                 time_log = last_action.get("Waktu & Tanggal", "-")
                                 
                                 if "REJECTED" in action_type:
-                                     # Tampilkan Alasan Penolakan dengan detail
+                                     # TAMPILKAN KOTAK MERAH BERISI PESAN PENOLAKAN
                                      status_alert = {
                                          "type": "error",
                                          "msg": f"⛔ PERUBAHAN TERAKHIR DITOLAK ({time_log})",
-                                         "detail": f"👮‍♂️ Oleh: {actor_log}\n📝 Alasan: {reason_log}"
+                                         "detail": f"👮‍♂️ Oleh: {actor_log}\n📝 Alasan: {reason_log}" 
                                      }
                                 elif "APPROVED" in action_type:
                                      status_alert = {
                                          "type": "success",
                                          "msg": f"✅ DATA SUDAH DISETUJUI ({time_log})",
-                                         "detail": f"Data sheet ini adalah versi final yang disetujui."
+                                         "detail": "Versi ini adalah data final yang telah disetujui."
                                      }
                     except Exception as e:
                         # Fallback jika terjadi error koneksi log
                         print(f"Status check error: {e}")
                         status_alert = None
+
+                    # ==============================================================================
+                    # BAGIAN 2: UI EDITOR & LOGIKA SIMPAN (ARSITEKTUR ASLI CODE PERTAMA)
+                    # ==============================================================================
 
                     # --- TAMPILKAN ALERT STATUS DI ATAS EDITOR ---
                     if status_alert:
