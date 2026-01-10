@@ -26,9 +26,11 @@ from audit_service import log_admin_action, compare_and_get_changes
 # =========================================================
 # [BARU] SISTEM LOGGING LANGSUNG (ANTI-GAGAL)
 # =========================================================
-def force_audit_log(actor, action, target_sheet, reason, details_dict):
+# Ganti fungsi force_audit_log dengan ini
+def force_audit_log(actor, action, target_sheet, chat_msg, details_input):
     """
-    [FIX] Memastikan Log tercatat sebagai STRING TEXT agar terbaca jelas di GSheet.
+    [FIXED] Memastikan semua input menjadi STRING murni sebelum dikirim ke GSheet.
+    Menggabungkan logika chat agar satu alur.
     """
     try:
         SHEET_NAME = "Global_Audit_Log"
@@ -36,37 +38,41 @@ def force_audit_log(actor, action, target_sheet, reason, details_dict):
             ws = spreadsheet.worksheet(SHEET_NAME)
         except gspread.WorksheetNotFound:
             ws = spreadsheet.add_worksheet(title=SHEET_NAME, rows=1000, cols=6)
-            # Header Standar
+            # Header Pasti
             ws.append_row(
-                ["Waktu & Tanggal", "Pelaku (User)", "Aksi Dilakukan", 
-                 "Nama Data / Sheet", "Alasan Perubahan", "Rincian (Sebelum ➡ Sesudah)"], 
+                ["Waktu", "User", "Status", "Target Data", "Chat & Catatan", "Detail Perubahan"], 
                 value_input_option="USER_ENTERED"
             )
 
         # 1. Waktu Jakarta
         ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
         
-        # 2. KONVERSI PASTI JADI STRING (Flattening)
-        # Agar tampilan di GSheet rapi: "Kolom: Lama -> Baru" (per baris)
+        # 2. KONVERSI PAKSA JADI STRING (Safe String)
+        # Apapun bentuk details_input (Dict, List, None), ubah jadi teks rapi
         final_details = ""
-        if isinstance(details_dict, dict):
-            lines = []
-            for k, v in details_dict.items():
-                lines.append(f"• {k}: {v}")
+        if isinstance(details_input, dict):
+            # Format: "Kolom: Lama -> Baru"
+            lines = [f"• {k}: {v}" for k, v in details_input.items()]
             final_details = "\n".join(lines)
+        elif isinstance(details_input, list):
+            final_details = "\n".join([str(x) for x in details_input])
         else:
-            # Jika sudah string, bersihkan karakter JSON yang mengganggu
-            final_details = str(details_dict).replace("{", "").replace("}", "").replace('"', '')
+            final_details = str(details_input) if details_input else "-"
+
+        # Bersihkan karakter aneh JSON jika masih ada
+        final_details = final_details.replace("{", "").replace("}", "").replace('"', '')
+
+        # Pastikan Chat tidak None
+        final_chat = str(chat_msg) if chat_msg else "-"
 
         # 3. Susun Baris Data (Semua String)
-        # Header GSheet: [Waktu, User, Status, Nama Data, Chat/Catatan, Detail Perubahan]
         row_data = [
-            str(ts), 
-            str(actor), 
-            str(action),       # Jangan di-upper() agar emoji ⏳/✅/❌ terlihat
-            str(target_sheet), 
-            str(reason),       # Masuk ke kolom Chat/Catatan
-            str(final_details) # Masuk ke kolom Detail Perubahan
+            f"'{ts}",           # Pakai tanda kutip satu di awal agar GSheet membacanya sebagai Teks (bukan angka/date error)
+            str(actor),
+            str(action),        # PENDING / ACC / TOLAK
+            str(target_sheet),
+            str(final_chat),    # Kolom Chat Gabungan
+            str(final_details)  # Detail Perubahan
         ]
         
         # 4. Eksekusi Tulis
@@ -159,15 +165,15 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
     # --- 5. Format Chat & Catat Log (Revisi dari Code Kedua) ---
     
     # Format Chat Admin agar lebih interaktif di UI
-    chat_msg = f"🙋‍♂️ [ADMIN]: {reason}" if reason else "🙋‍♂️ [ADMIN]: Mengajukan perubahan data."
+    final_chat = f"🙋‍♂️ [ADMIN]: {reason}" if reason else "🙋‍♂️ [ADMIN]: Request Update Data."
 
-    # Panggil fungsi logging
+    # Panggil fungsi logging yang baru
     force_audit_log(
         actor=requestor,
         action="⏳ PENDING",       # Status Jelas
         target_sheet=target_sheet,
-        reason=chat_msg,          # Masuk ke kolom Chat/Reason
-        details_dict=diff_str     # Masuk ke kolom Detail Perubahan (sebagai string)
+        chat_msg=final_chat,       # Masuk ke kolom "Chat & Catatan"
+        details_input=diff_str     # Masuk ke kolom "Detail Perubahan"
     )
 
     return True, "Permintaan terkirim & Log tercatat!"
@@ -219,46 +225,49 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
         # --- ACTION: REJECT (DITOLAK) ---
         if action == "REJECT":
             final_reason = str(rejection_note).strip()
+            # Jika admin tidak menulis alasan, beri default
             if not final_reason or final_reason in ["-", ""]:
-                final_reason = "Ditolak."
+                final_reason = "Data perlu direvisi."
 
-            # LOGGING: Chat Manager masuk ke kolom Reason/Chat
+            # LOG BARU: Menggunakan parameter 'chat_msg' dan 'details_input'
             force_audit_log(
                 actor=admin_name,
                 action="❌ DITOLAK",
                 target_sheet=target_sheet_name,
-                reason=f"⛔ [MANAGER]: {final_reason}", 
-                details_dict=f"Pengaju: {requestor_name}\n---\nData yang Ditolak:\n{diff_str_log}"
+                chat_msg=f"⛔ [MANAGER]: {final_reason}", 
+                details_input=f"Pengaju: {requestor_name}\n(Data dikembalikan ke Admin)"
             )
 
+            # Hapus dari daftar pending karena sudah diproses
             ws_pending.delete_rows(request_index_0based + 2)
             return True, f"DITOLAK. Alasan: {final_reason}"
 
         # --- ACTION: APPROVE (DI ACC) ---
         elif action == "APPROVE":
+            # 1. EKSEKUSI UPDATE DATA KE SHEET TARGET (Logika Asli)
             new_data_dict = json.loads(req["New Data JSON"])
             ws_target = spreadsheet.worksheet(target_sheet_name)
             headers = ws_target.row_values(1)
+            
+            # Mapping data baru sesuai urutan header di sheet target
             row_values = [new_data_dict.get(h, "") for h in headers]
 
-            # Update Data Real
+            # Update baris di Google Sheet (Write)
             gsheet_row = row_target_idx + 2
             ws_target.update(range_name=f"A{gsheet_row}", values=[row_values], value_input_option="USER_ENTERED")
 
-            # LOGGING: Status sukses
+            # 2. LOG BARU: Mencatat Sukses dengan detail perubahan
             force_audit_log(
                 actor=admin_name,
-                action="✅ DI ACC",
+                action="✅ SUKSES/ACC",
                 target_sheet=target_sheet_name,
-                reason="✅ [MANAGER]: Disetujui & Diterapkan.", 
-                details_dict=f"Pengaju: {requestor_name}\n---\nData Berhasil Diubah:\n{diff_str_log}"
+                chat_msg="✅ [MANAGER]: Disetujui & Data Terupdate.", 
+                details_input=f"Pengaju: {requestor_name}\n---\n{diff_str_log}"
             )
 
+            # Hapus dari daftar pending karena sudah diproses
             ws_pending.delete_rows(request_index_0based + 2)
             return True, "DISETUJUI & Database Terupdate."
-
-    except Exception as e:
-        return False, f"System Error: {e}"
 
 
 # --- BAGIAN IMPORT OPTIONAL LIBS JANGAN DIHAPUS (Excel/AgGrid/Plotly) ---
@@ -4470,59 +4479,7 @@ elif menu_nav == "💳 Pembayaran":
 # =========================================================
 # MENU: GLOBAL AUDIT LOG
 # =========================================================
-elif menu_nav == "📜 Global Audit Log":
-    if IS_MOBILE:
-        render_audit_mobile()
-    else:
-        # --- LOGIC DESKTOP ---
-        st.markdown("## 📜 Global Audit Log")
-        st.caption(
-            "Rekaman jejak perubahan data yang dilakukan oleh Admin (Super Editor). Transparansi data.")
-
-        # Load Data dari Service
-        from audit_service import load_audit_log
-
-        # Tombol Refresh
-        if st.button("🔄 Refresh Log", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-
-        with st.spinner("Memuat data log..."):
-            df_log = load_audit_log(spreadsheet)
-
-        if not df_log.empty:
-            # Konversi kolom Waktu agar bisa di-sort
-            try:
-                col_waktu = "Waktu & Tanggal"
-                df_log[col_waktu] = pd.to_datetime(
-                    df_log[col_waktu], format="%d-%m-%Y %H:%M:%S", errors="coerce")
-                df_log = df_log.sort_values(by=col_waktu, ascending=False)
-            except Exception:
-                pass
-
-            # --- FITUR FILTERING ---
-            with st.expander("🔍 Filter Pencarian"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    filter_user = st.multiselect(
-                        "Pilih Pelaku (User)", df_log["Pelaku (User)"].unique())
-                with c2:
-                    filter_sheet = st.multiselect(
-                        "Pilih Sheet/Data", df_log["Nama Data / Sheet"].unique())
-
-            # Terapkan Filter
-            df_show = df_log.copy()
-            if filter_user:
-                df_show = df_show[df_show["Pelaku (User)"].isin(filter_user)]
-            if filter_sheet:
-                df_show = df_show[df_show["Nama Data / Sheet"]
-                    .isin(filter_sheet)]
-
-            # --- TAMPILAN DATA BERSIH (CLEAN VIEW) ---
-            st.markdown(f"**Total Record:** {len(df_show)}")
-
-            # Kita fokuskan kolom yang penting saja
-            # 1. MAPPING: Rename Header Asli (Database) ke Header Cantik (UI)
+# 1. MAPPING: Rename Header Asli (Database) ke Header Cantik (UI)
             # Tujuannya agar config kolom tidak bingung membaca datanya.
             rename_mapping = {
                 "Waktu & Tanggal": "Waktu",
