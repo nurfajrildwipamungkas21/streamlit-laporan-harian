@@ -30,19 +30,49 @@ import json
 SHEET_PENDING = "System_Pending_Approval"
 
 def init_pending_db():
-    """Memastikan sheet pending approval ada di Google Sheet."""
+    """Memastikan sheet pending approval ada dengan kolom untuk DATA LAMA."""
     try:
         try:
             ws = spreadsheet.worksheet(SHEET_PENDING)
+            # Cek apakah header sudah update (punya Old Data JSON)
+            headers = ws.row_values(1)
+            if "Old Data JSON" not in headers:
+                # Jika sheet lama, kita tambah kolom manual atau minta user hapus sheet dulu
+                # Untuk aman, kita append cell di baris 1 (ini simplifikasi)
+                ws.update_cell(1, len(headers)+1, "Old Data JSON")
         except gspread.WorksheetNotFound:
-            # Jika belum ada, buat sheet baru dengan header yang sesuai
-            ws = spreadsheet.add_worksheet(title=SHEET_PENDING, rows=1000, cols=6)
-            headers = ["Timestamp", "Requestor", "Target Sheet", "Row Index (0-based)", "New Data JSON", "Reason"]
+            # Header Baru: Tambah "Old Data JSON"
+            ws = spreadsheet.add_worksheet(title=SHEET_PENDING, rows=1000, cols=7)
+            headers = ["Timestamp", "Requestor", "Target Sheet", "Row Index (0-based)", "New Data JSON", "Reason", "Old Data JSON"]
             ws.append_row(headers, value_input_option="USER_ENTERED")
             maybe_auto_format_sheet(ws, force=True)
         return ws
     except Exception:
         return None
+
+def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, reason, requestor):
+    """
+    UPDATE: Sekarang menerima old_df_row untuk perbandingan.
+    """
+    ws = init_pending_db()
+    if not ws: return False, "DB Error"
+    
+    # Konversi row dataframe ke dictionary -> JSON string
+    row_dict_new = new_df_row.astype(str).to_dict()
+    json_new = json.dumps(row_dict_new)
+
+    # Proses Data Lama
+    row_dict_old = old_df_row.astype(str).to_dict() if old_df_row is not None else {}
+    json_old = json.dumps(row_dict_old)
+    
+    ts = now_ts_str()
+    
+    # Simpan request lengkap
+    ws.append_row(
+        [ts, requestor, target_sheet, row_idx_0based, json_new, reason, json_old],
+        value_input_option="USER_ENTERED"
+    )
+    return True, "Permintaan perubahan terkirim ke Manager!"
 
 def submit_change_request(target_sheet, row_idx_0based, new_df_row, reason, requestor):
     """
@@ -72,13 +102,19 @@ def get_pending_approvals():
     if not ws: return []
     return ws.get_all_records()
 
-def execute_approval(request_index_0based, action, admin_name="Manager"):
+def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
     """
-    Fungsi Eksekusi Approval oleh Manager.
-    Bisa 'APPROVE' (terapkan ke sheet target) atau 'REJECT' (hapus request).
+    Fungsi Eksekusi Approval oleh Manager (TERBARU).
+    Fitur:
+    - Bisa 'APPROVE' (terapkan ke sheet target) atau 'REJECT'.
+    - Mencatat Log Audit lengkap (termasuk Diff data lama vs baru).
+    - Menangani catatan penolakan (rejection note).
     """
     try:
         ws_pending = init_pending_db()
+        if not ws_pending:
+            return False, "Database Pending tidak ditemukan."
+
         # Ambil data terbaru dari sheet pending
         all_requests = ws_pending.get_all_records()
         
@@ -86,48 +122,102 @@ def execute_approval(request_index_0based, action, admin_name="Manager"):
             return False, "Data tidak ditemukan (mungkin sudah diproses)."
             
         req = all_requests[request_index_0based]
+        target_sheet_name = req["Target Sheet"]
+        
+        # Pastikan index target valid integer
+        try:
+            row_target_idx = int(req["Row Index (0-based)"])
+        except:
+            row_target_idx = 0
+
+        # --- 1. SIAPKAN DIFF (PERBANDINGAN DATA) UNTUK AUDIT LOG ---
+        # Ambil string JSON
+        old_data_str = req.get("Old Data JSON", "{}")
+        new_data_str = req.get("New Data JSON", "{}")
+        
+        diff_str = "-"
+        try:
+            old_d = json.loads(old_data_str) if old_data_str else {}
+            new_d = json.loads(new_data_str) if new_data_str else {}
+            
+            diff_list = []
+            # Bandingkan key yang ada di data baru
+            for k, v_new in new_d.items():
+                v_old = old_d.get(k, "")
+                # Normalisasi string untuk perbandingan agar tidak false alarm beda spasi
+                if str(v_new).strip() != str(v_old).strip():
+                    diff_list.append(f"{k}: {v_old} -> {v_new}")
+            
+            if diff_list:
+                diff_str = "\n".join(diff_list)
+            else:
+                diff_str = "Tidak ada perubahan nilai (Re-save)."
+        except Exception as e:
+            diff_str = f"Gagal parsing diff: {e}"
+
+        # --- 2. LOGIKA ACTION ---
         
         if action == "REJECT":
-            # Jika ditolak, hapus baris dari sheet pending
-            # Row index di GSheet = index list + 2 (karena ada header di baris 1)
+            # A. Catat ke Global Audit Log bahwa Manager MENOLAK
+            # Ini penting agar Admin tahu kenapa datanya ditolak saat buka Super Editor
+            log_admin_action(
+                spreadsheet=spreadsheet,
+                actor=admin_name,
+                role="Manager",
+                feature="Approval System",
+                target_sheet=target_sheet_name,
+                row_idx=row_target_idx + 2, # +2 karena header gsheet
+                action="REJECTED",          # Status khusus
+                reason=f"Ditolak Manager. Catatan: {rejection_note}",
+                changes_dict={"Diff Detail": diff_str}
+            )
+            
+            # B. Hapus baris dari sheet pending
+            # Row index di GSheet = index list + 2 (header row)
             ws_pending.delete_rows(request_index_0based + 2)
-            return True, "Request ditolak dan dihapus."
+            
+            return True, "Request DITOLAK. Alasan telah dicatat di Audit Log."
             
         elif action == "APPROVE":
-            # 1. Parsing Data dari JSON
-            target_sheet_name = req["Target Sheet"]
-            row_target_idx = int(req["Row Index (0-based)"])
-            new_data_dict = json.loads(req["New Data JSON"])
-            
-            # 2. Update Sheet Target Asli
+            # A. Update Sheet Target Asli
             ws_target = spreadsheet.worksheet(target_sheet_name)
             
             # Susun data sesuai urutan header di sheet target
             headers = ws_target.row_values(1)
             row_values = []
+            new_data_dict = json.loads(new_data_str)
+            
             for h in headers:
-                # Ambil nilai dari JSON berdasarkan nama kolom header
                 val = new_data_dict.get(h, "") 
                 row_values.append(val)
                 
             # Update Cell di Sheet Target
-            # Baris GSheet = index 0-based + 2
             gsheet_row = row_target_idx + 2
             cell_range = f"A{gsheet_row}"
             
-            # Lakukan update
+            # Lakukan update fisik ke database utama
             ws_target.update(range_name=cell_range, values=[row_values], value_input_option="USER_ENTERED")
             
-            # 3. Log Audit (Opsional: Anda bisa memanggil log_admin_action di sini untuk mencatat siapa yang meng-approve)
-            # log_admin_action(spreadsheet, admin_name, "Manager", "Approval", target_sheet_name, gsheet_row, "UPDATE", "Approved by Manager", {})
+            # B. Catat ke Global Audit Log (APPROVED)
+            log_admin_action(
+                spreadsheet=spreadsheet,
+                actor=admin_name,
+                role="Manager",
+                feature="Approval System",
+                target_sheet=target_sheet_name,
+                row_idx=gsheet_row,
+                action="APPROVED",
+                reason=req.get("Reason", "-"), # Alasan asli dari Admin
+                changes_dict={"Diff Detail": diff_str}
+            )
 
-            # 4. Hapus Request dari Sheet Pending setelah berhasil
+            # C. Hapus Request dari Sheet Pending setelah berhasil
             ws_pending.delete_rows(request_index_0based + 2)
             
-            return True, "Perubahan disetujui dan diterapkan ke Database Utama."
+            return True, "Perubahan DISETUJUI dan telah diterapkan ke Database Utama."
             
     except Exception as e:
-        return False, f"Error: {e}"
+        return False, f"Error System: {e}"
 
 # --- BAGIAN IMPORT OPTIONAL LIBS JANGAN DIHAPUS (Excel/AgGrid/Plotly) ---
 try:
@@ -4244,46 +4334,71 @@ elif menu_nav == "📊 Dashboard Admin":
             # -----------------------------------------------------------
             # TAB KHUSUS: APPROVAL SYSTEM (Hanya Manager)
             # -----------------------------------------------------------
-            if is_manager:
+if is_manager:
                 with tab_acc:
                     st.markdown("### 🔔 Pusat Persetujuan (Manager)")
-                    st.caption("Daftar perubahan data yang diajukan oleh Admin. Harap diperiksa sebelum di-ACC.")
+                    st.caption("Review detail perubahan (Sebelum vs Sesudah). Gunakan fitur Tolak dengan catatan jika perlu.")
                     
                     pending_data = get_pending_approvals()
                     
                     if not pending_data:
                         st.info("✅ Tidak ada permintaan pending. Semua aman.")
                     else:
-                        st.error(f"Terdapat {len(pending_data)} permintaan perubahan menunggu persetujuan Anda!")
-                        
+                        # REJECTION DIALOG LOGIC
+                        # Loop melalui setiap request
                         for i, req in enumerate(pending_data):
                             with st.container(border=True):
-                                c1, c2 = st.columns([3, 1])
-                                with c1:
-                                    st.markdown(f"**{req['Requestor']}** ingin mengubah **{req['Target Sheet']}**")
-                                    st.caption(f"📅 {req['Timestamp']} | Alasan: {req['Reason']}")
-                                    
-                                    # Tampilkan Diff (Data Baru)
-                                    try:
-                                        data_dict = json.loads(req["New Data JSON"])
-                                        st.json(data_dict, expanded=False)
-                                    except:
-                                        st.text("Data Error (Invalid JSON)")
+                                # Header Card
+                                c_h1, c_h2 = st.columns([3, 1])
+                                with c_h1:
+                                    st.markdown(f"👤 **{req['Requestor']}** | 📂 Sheet: `{req['Target Sheet']}`")
+                                    st.text(f"📝 Alasan Admin: {req['Reason']}")
+                                with c_h2:
+                                    st.caption(f"🕒 {req['Timestamp']}")
+
+                                st.divider()
                                 
-                                with c2:
-                                    st.markdown("<br>", unsafe_allow_html=True)
-                                    col_approve, col_reject = st.columns(2)
+                                # --- LOGIC DIFF (DATA LAMA VS BARU) ---
+                                try:
+                                    old_d = json.loads(req.get("Old Data JSON", "{}"))
+                                    new_d = json.loads(req.get("New Data JSON", "{}"))
                                     
-                                    # Tombol Reject
-                                    if col_reject.button("❌ Tolak", key=f"rej_{i}", use_container_width=True):
-                                        ok, msg = execute_approval(i, "REJECT")
-                                        if ok:
-                                            st.success(msg)
-                                            time.sleep(1)
-                                            st.rerun()
+                                    # Cari kolom yang berubah saja
+                                    changes_table = []
+                                    for k, v_new in new_d.items():
+                                        v_old = old_d.get(k, "")
+                                        # Normalisasi string biar gak false alarm (hapus spasi, ubah ke string)
+                                        if str(v_new).strip() != str(v_old).strip():
+                                            changes_table.append({
+                                                "Kolom": k,
+                                                "🔴 Data Lama": str(v_old),
+                                                "🟢 Data Baru": str(v_new)
+                                            })
                                     
-                                    # Tombol Approve
-                                    if col_approve.button("✅ ACC", key=f"acc_{i}", type="primary", use_container_width=True):
+                                    if changes_table:
+                                        st.markdown("**Detail Perubahan:**")
+                                        st.table(pd.DataFrame(changes_table))
+                                    else:
+                                        st.warning("⚠️ Tidak terdeteksi perubahan data signifikan (mungkin hanya re-save).")
+                                        # Tampilkan raw jika diff kosong (fallback)
+                                        with st.expander("Lihat Data Mentah (JSON)"):
+                                            st.json(new_d)
+                                except Exception as e:
+                                    st.error(f"Gagal memproses data JSON: {e}")
+
+                                # --- ACTION BUTTONS ---
+                                col_act_space, col_act_btn = st.columns([3, 2])
+                                
+                                with col_act_btn:
+                                    b_col1, b_col2 = st.columns(2)
+                                    
+                                    # TOMBOL TOLAK (Memicu Expander/Input di bawah)
+                                    key_reject = f"btn_reject_show_{i}"
+                                    if b_col1.button("❌ Tolak", key=key_reject, use_container_width=True):
+                                         st.session_state[f"show_reject_input_{i}"] = True
+
+                                    # TOMBOL ACC
+                                    if b_col2.button("✅ ACC", key=f"btn_acc_{i}", type="primary", use_container_width=True):
                                         ok, msg = execute_approval(i, "APPROVE", admin_name=st.session_state["user_name"])
                                         if ok:
                                             st.success(msg)
@@ -4291,6 +4406,29 @@ elif menu_nav == "📊 Dashboard Admin":
                                             st.rerun()
                                         else:
                                             st.error(msg)
+                                
+                                # --- AREA INPUT ALASAN PENOLAKAN (Muncul jika tombol Tolak ditekan) ---
+                                if st.session_state.get(f"show_reject_input_{i}", False):
+                                    st.markdown("---")
+                                    st.warning("Anda akan menolak permintaan ini.")
+                                    with st.form(key=f"form_reject_{i}"):
+                                        note = st.text_area("Catatan Penolakan (Opsional, tapi disarankan):", placeholder="Misal: Nominal salah, tolong cek lagi.")
+                                        
+                                        c_batal, c_confirm = st.columns(2)
+                                        # Tombol Batal
+                                        if c_batal.form_submit_button("Batal"):
+                                            st.session_state[f"show_reject_input_{i}"] = False
+                                            st.rerun()
+                                            
+                                        # Tombol Konfirmasi Tolak
+                                        if c_confirm.form_submit_button("🚫 Konfirmasi Tolak", type="primary"):
+                                            note_final = note if note.strip() else "Tidak ada catatan."
+                                            ok, msg = execute_approval(i, "REJECT", admin_name=st.session_state["user_name"], rejection_note=note_final)
+                                            if ok:
+                                                st.success(f"Ditolak: {note_final}")
+                                                st.session_state[f"show_reject_input_{i}"] = False
+                                                time.sleep(1)
+                                                st.rerun()
 
             # --- TAB 1: PRODUKTIVITAS ---
             with tab_prod:
@@ -4579,10 +4717,52 @@ elif menu_nav == "📊 Dashboard Admin":
                     except Exception as e:
                         st.error(f"Gagal load sheet: {e}")
 
-                # 3. Editor Interface
+                # 3. Editor Interface & NOTIFIKASI STATUS
                 if "super_df_old" in st.session_state and st.session_state["super_df_old"] is not None:
                     df_old = st.session_state["super_df_old"]
-                    st.info(f"Mengedit Sheet: **{st.session_state['super_sheet_target']}** ({len(df_old)} baris)")
+                    target_s = st.session_state["super_sheet_target"]
+                    
+                    # --- [FITUR BARU] CEK STATUS TERAKHIR DARI AUDIT LOG ---
+                    # Logika: Ambil log terakhir untuk sheet ini, cek statusnya.
+                    from audit_service import load_audit_log
+                    logs = load_audit_log(spreadsheet)
+                    
+                    status_alert = None
+                    if not logs.empty:
+                        # Filter log khusus sheet ini
+                        logs_sheet = logs[logs["Nama Data / Sheet"] == target_s]
+                        if not logs_sheet.empty:
+                            # Ambil log paling baru (baris pertama jika sudah disort, atau sort dulu)
+                            # Asumsi load_audit_log sudah return dataframe.
+                            # Kita cari log REJECTED atau APPROVED terakhir
+                            last_action = logs_sheet.iloc[0] # Mengambil row paling atas (terbaru)
+                            action_type = str(last_action.get("Aksi Dilakukan", "")).upper()
+                            reason_log = last_action.get("Alasan Perubahan", "-")
+                            actor_log = last_action.get("Pelaku (User)", "Manager")
+                            
+                            if "REJECTED" in action_type:
+                                 status_alert = {
+                                     "type": "error",
+                                     "msg": f"⛔ Perubahan terakhir DITOLAK oleh {actor_log}.",
+                                     "detail": f"Catatan: {reason_log}"
+                                 }
+                            elif "APPROVED" in action_type:
+                                 status_alert = {
+                                     "type": "success",
+                                     "msg": "✅ Perubahan terakhir SUDAH DISETUJUI.",
+                                     "detail": f"Oleh: {actor_log}"
+                                 }
+                            elif "System_Pending" in str(target_s): # Kalau user buka sheet pending
+                                 status_alert = {"type": "info", "msg": "Sedang Menunggu Persetujuan...", "detail": ""}
+
+                    # TAMPILKAN ALERT STATUS DI ATAS EDITOR
+                    if status_alert:
+                        if status_alert["type"] == "error":
+                            st.error(f"{status_alert['msg']}\n\n{status_alert['detail']}")
+                        elif status_alert["type"] == "success":
+                            st.success(f"{status_alert['msg']}")
+                    else:
+                        st.info(f"Mengedit Sheet: **{target_s}** ({len(df_old)} baris)")
 
                     edit_reason = st.text_input("📝 Alasan Perubahan (Wajib diisi):", placeholder="Contoh: Koreksi typo nominal")
 
@@ -4650,14 +4830,19 @@ elif menu_nav == "📊 Dashboard Admin":
                                         success_count = 0
                                         for chg in changes:
                                             r_idx = chg['row_idx']
-                                            # Ambil baris data baru dari editor sebagai Series
+                                            
+                                            # Data Baru (Series)
                                             new_row_data = edited_df.iloc[r_idx]
+                                            
+                                            # Data Lama (Series) - untuk diff checker di approval
+                                            old_row_data = df_old.iloc[r_idx] 
                                             
                                             # Kirim ke helper submit_change_request
                                             ok, msg = submit_change_request(
                                                 target_sheet=st.session_state["super_sheet_target"],
                                                 row_idx_0based=r_idx,
                                                 new_df_row=new_row_data,
+                                                old_df_row=old_row_data, # <--- DIKIRIM KE SINI
                                                 reason=edit_reason,
                                                 requestor=st.session_state["user_name"]
                                             )
