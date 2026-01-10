@@ -272,6 +272,9 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             ws_pending.delete_rows(request_index_0based + 2)
             return True, "DISETUJUI & Database Terupdate."
 
+    except Exception as e:
+        return False, f"System Error: {e}"
+
 
 # --- BAGIAN IMPORT OPTIONAL LIBS JANGAN DIHAPUS (Excel/AgGrid/Plotly) ---
 # Bagian ini dipertahankan dari Code Pertama untuk menjaga kompatibilitas arsitektur
