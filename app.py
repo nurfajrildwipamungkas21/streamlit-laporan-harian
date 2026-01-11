@@ -1545,38 +1545,59 @@ def dynamic_column_mapper(df):
 # =========================================================
 
 def clean_df_types_dynamically(df: pd.DataFrame) -> pd.DataFrame:
-    """Memastikan tipe data DataFrame sesuai (Numeric/Date/String) secara dinamis."""
+    """
+    Versi Perbaikan: Menggunakan datetime64[ns] dan sinkronisasi keyword 
+    untuk menghindari StreamlitAPIException akibat ketidakcocokan tipe data.
+    """
     df_clean = df.copy()
     for col in df_clean.columns:
         col_lower = col.lower()
-        # Jika kolom Uang/Angka -> Paksa jadi numerik
+        
+        # 1. Kolom Numerik: Pastikan murni angka dan isi NaN dengan 0
+        # Menambahkan 'tenor' agar konsisten dengan NumberColumn
         if any(key in col_lower for key in ["nilai", "nominal", "sisa", "kontrak", "sepakat", "tenor"]):
-            df_clean[col] = df_clean[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x)
-            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0)
-        # Jika kolom Tanggal -> Paksa jadi objek datetime.date
+            # Konversi rupiah string ke int, lalu paksa ke numeric murni
+            df_clean[col] = pd.to_numeric(
+                df_clean[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x), 
+                errors='coerce'
+            ).fillna(0)
+            
+        # 2. Kolom Tanggal: Gunakan tipe datetime pandas asli
         elif any(key in col_lower for key in ["tanggal", "tempo", "waktu"]):
-            if "log" not in col_lower and "update" not in col_lower and "timestamp" not in col_lower:
-                df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce').dt.date
+            if not any(k in col_lower for k in ["log", "update", "timestamp"]):
+                # PERBAIKAN: Hapus .dt.date. 
+                # Pandas menyimpan .dt.date sebagai tipe 'object', yang memicu error di st.data_editor.
+                # Biarkan tetap bertipe datetime64[ns].
+                df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce')
+                
     return df_clean
 
 def generate_dynamic_column_config(df):
-    """Menghasilkan konfigurasi kolom otomatis untuk st.data_editor."""
+    """
+    Versi Perbaikan: Sinkron dengan fungsi clean agar tipe data kompatibel.
+    """
     config = {}
     for col in df.columns:
         col_lower = col.lower()
-        if any(key in col_lower for key in ["nilai", "nominal", "sisa", "kontrak", "sepakat"]):
+        
+        # Numerik: Gunakan NumberColumn untuk kolom yang sudah di-clean jadi angka
+        if any(key in col_lower for key in ["nilai", "nominal", "sisa", "kontrak", "sepakat", "tenor"]):
             config[col] = st.column_config.NumberColumn(col, format="Rp %d", min_value=0)
+            
+        # Tanggal: Gunakan DateColumn untuk kolom datetime64[ns]
         elif any(key in col_lower for key in ["tanggal", "tempo", "waktu"]):
             if "timestamp" not in col_lower:
                 config[col] = st.column_config.DateColumn(col, format="DD/MM/YYYY")
             else:
                 config[col] = st.column_config.TextColumn(col, disabled=True)
-        elif "bukti" in col_lower:
-            config[col] = st.column_config.LinkColumn(col, help="Klik untuk membuka bukti transfer")
+                
+        # Status: Gunakan CheckboxColumn jika data berisi Boolean (True/False)
         elif "status" in col_lower:
-            config[col] = st.column_config.TextColumn(col, width="medium")
+            config[col] = st.column_config.CheckboxColumn(col)
+            
         else:
             config[col] = st.column_config.TextColumn(col)
+            
     return config
 
 
@@ -4687,6 +4708,16 @@ elif menu_nav == "💳 Pembayaran":
             # --- 3. LOGIKA PENGUNCIAN KOLOM OTOMATIS ---
             locked_keywords = ["timestamp", "updated by", "log", "pelaku", "waktu", "input"]
             disabled_list = [c for c in df_ready.columns if any(k in c.lower() for k in locked_keywords)]
+            
+            # Debugging: Cek tipe data sebelum masuk ke editor
+            st.write("Dtypes df_ready:", df_ready.dtypes)
+            st.write("Auto Config Mapping:", auto_config)
+
+            edited_pay = st.data_editor(
+                df_ready,
+                column_config=auto_config,
+                # ... sisanya tetap
+            )
 
             # --- 4. RENDER DATA EDITOR ---
             edited_pay = st.data_editor(
