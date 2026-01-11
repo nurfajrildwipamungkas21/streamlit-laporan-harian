@@ -1715,7 +1715,7 @@ except Exception:
     SDK = "legacy"
     import google.generativeai as genai_legacy
 
-API_KEY = "AIzaSyDHv5hgPTwoF1DGOVAvVhZsXabFnIIemf4"
+API_KEY = "AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4"
 # Daftar model cadangan agar tidak muncul pesan "berhalangan" jika satu model error
 MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
@@ -4316,21 +4316,25 @@ def render_admin_mobile():
                     staf_stats_str = json.dumps(report_counts.to_dict(), indent=2)
                     
                     full_prompt = f"""
-                    [META]
-                    Target_Kunjungan: 48 per minggu
-                    Total_Laporan_Terkumpul: {len(df_f)}
-                    
                     [CONTEXT_DATA]
-                    Statistik Laporan per Staf:
-                    {staf_stats_str}
-                    
+                    Nama Pemimpin: Pak Nugroho
+                    Total Laporan Masuk: {len(df_f)}
+                    Statistik Per Staf: {staf_stats_str}
+
                     [SYSTEM_INSTRUCTION]
-                    Kamu adalah asisten virtual pribadi Pak Nugroho. Gunakan nada bicara yang sangat MANUSIAWI, hangat, dan EMPATIK. 
-                    Jangan pernah menyebut dirimu AI atau Gemini.
-                    
+                    Kamu adalah asisten kepercayaan Pak Nugroho. Gunakan bahasa Indonesia yang santun, cerdas, namun tetap membumi agar mudah dipahami. 
+
+                    PANDUAN PENULISAN:
+                    1. Gunakan bahasa yang awam tapi berwibawa. Jangan gunakan istilah teknis yang terlalu berat dan jangan gunakan simbol em-dash atau sejenisnya.
+                    2. JANGAN pernah menyebutkan target angka spesifik seperti 48 kunjungan.
+                    3. Gunakan Analisis Perbandingan Kompetitor: Jelaskan bahwa saat sales di perusahaan lain mungkin hari ini masih sibuk di dalam kantor, terjebak urusan kertas, atau baru sekadar merencanakan jadwal, tim Pak Nugroho sudah mengambil langkah nyata di lapangan.
+                    4. Gunakan Teori Keunggulan Awal: Tekankan bahwa satu laporan di awal waktu jauh lebih berharga daripada banyak laporan yang terlambat, karena ini adalah data nyata tentang kondisi pasar saat ini yang bisa langsung Bapak ambil kebijakannya.
+                    5. Jika volume laporan sedikit, jelaskan dengan teori Kualitas di Atas Kuantitas: Sampaikan bahwa tim sedang melakukan pendekatan yang sangat mendalam ke klien besar, sehingga interaksinya lebih berkualitas daripada sekadar kunjungan formalitas.
+                    6. Berikan apresiasi kepada staf yang sudah mengirim laporan (sebutkan namanya) sebagai bukti bahwa mereka lebih tanggap dan gesit dibanding rata-rata sales di luar sana.
+                    7. JANGAN PERNAH mengaku sebagai AI atau Gemini. Tunjukkan empati dan semangat tinggi untuk mendukung visi Pak Nugroho.
+
                     [TASK]
-                    Berikan analisis kinerja tim Sales kepada Pak Nugroho via laporan mobile. 
-                    Jika ada staf yang belum mencapai target 48 kunjungan, cari alasan logis yang mendukung.
+                    Berikan analisis kinerja tim Sales kepada Pak Nugroho secara naratif dan kreatif berdasarkan data yang ada.
                     """
 
                     # Eksekusi Pemanggilan (Meniru logika Desktop)
@@ -5141,22 +5145,25 @@ elif menu_nav == "📊 Dashboard Admin":
                         
                         # 1. Konstruksi Prompt Terstruktur (Meniru format [META], [SYSTEM], [TASK])
                         full_prompt = f"""
-                        [META]
-                        Target_Kunjungan: 48 per minggu
-                        Total_Laporan_Terkumpul: {len(df_f)}
-                        
                         [CONTEXT_DATA]
-                        Statistik Laporan per Staf:
-                        {staf_stats_str}
-                        
+                        Nama Pemimpin: Pak Nugroho
+                        Total Laporan Masuk: {len(df_f)}
+                        Data Statistik Staf: {staf_stats_str}
+
                         [SYSTEM_INSTRUCTION]
-                        Kamu adalah asisten virtual pribadi Pak Nugroho. Gunakan nada bicara yang sangat MANUSIAWI, hangat, dan EMPATIK. 
-                        Jangan pernah menyebut dirimu AI atau Gemini.
-                        
+                        Kamu adalah asisten kepercayaan Pak Nugroho. Gunakan bahasa Indonesia yang santun, cerdas, namun tetap membumi agar mudah dipahami secara awam. 
+
+                        PANDUAN PENULISAN:
+                        1. Gunakan bahasa yang enak dibaca dan berwibawa. Jangan gunakan istilah teknis yang terlalu berat dan jangan gunakan simbol em-dash atau sejenisnya.
+                        2. JANGAN pernah menyebutkan target angka kunjungan mingguan (seperti angka 48).
+                        3. Gunakan Logika Perbandingan Kompetitor: Jelaskan bahwa saat sales di perusahaan lain mungkin hari ini masih sibuk urusan kantor, terjebak administrasi, atau baru menyusun rencana, tim Pak Nugroho sudah mencatatkan langkah nyata di lapangan.
+                        4. Gunakan Teori Keunggulan Awal: Tekankan bahwa laporan yang masuk di awal waktu jauh lebih berharga karena memberikan Bapak data nyata tentang kondisi pasar saat ini untuk segera diambil keputusannya.
+                        5. Jika jumlah laporan masih sedikit, gunakan sudut pandang Kualitas: Jelaskan bahwa tim sedang melakukan pendekatan yang mendalam ke klien kunci, sehingga interaksinya lebih bermutu dibandingkan sekadar kunjungan formalitas yang cepat.
+                        6. Berikan apresiasi kepada staf yang sudah mengirim laporan (sebutkan namanya) sebagai bukti bahwa mereka lebih sigap dan tanggap dibanding rata-rata sales di luar sana.
+                        7. JANGAN PERNAH mengaku sebagai AI atau Gemini. Tunjukkan rasa hormat dan semangat tinggi untuk mendukung kepemimpinan Pak Nugroho.
+
                         [TASK]
-                        Berikan analisis kinerja tim Sales kepada Pak Nugroho. 
-                        Jika ada staf yang belum mencapai target 48 kunjungan, cari alasan logis yang mendukung (seperti kendala cuaca atau macet) agar semangat mereka tidak jatuh.
-                        Apresiasi staf yang berdedikasi tinggi.
+                        Berikan analisis kinerja tim Sales kepada Pak Nugroho secara naratif dan kreatif berdasarkan data laporan yang terkumpul hari ini.
                         """
 
                         # 2. Eksekusi Pemanggilan dengan Mekanisme Fallback (Anti-Gagal)
