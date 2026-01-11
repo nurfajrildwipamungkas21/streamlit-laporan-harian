@@ -4274,7 +4274,7 @@ def render_admin_mobile():
         except:
             pass
 
-    # TABS NAVIGATION MOBILE
+# TABS NAVIGATION MOBILE
     tab_prod, tab_leads, tab_data, tab_cfg = st.tabs(
         ["📈 Grafik", "🧲 Leads", "📦 Data", "⚙️ Config"])
 
@@ -4282,12 +4282,60 @@ def render_admin_mobile():
     with tab_prod:
         st.caption("Analisa Kinerja")
         if not df_all.empty:
-            days = st.selectbox("Hari Terakhir:", [
-                                7, 30, 90], key="mob_adm_days")
+            days = st.selectbox("Hari Terakhir:", [7, 30, 90], key="mob_adm_days")
             start_d = datetime.now(tz=TZ_JKT).date() - timedelta(days=days)
             df_f = df_all[df_all["Tgl"] >= start_d].copy()
             st.metric("Total Laporan", len(df_f))
-            st.bar_chart(df_f[COL_NAMA].value_counts())
+            
+            # Hitung jumlah laporan per staf untuk grafik dan AI
+            report_counts = df_f[COL_NAMA].value_counts()
+            st.bar_chart(report_counts)
+
+            # =========================================================
+            # INTEGRASI AI GEMINI (ASISTEN PAK NUGROHO)
+            # =========================================================
+            st.divider()
+            st.markdown("#### 🤖 AI Management Insight")
+            
+            with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
+                try:
+                    import google.generativeai as genai
+                    
+                    # Konfigurasi API Gemini
+                    genai.configure(api_key="AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4")
+                    model = genai.GenerativeModel("gemini-3-flash")
+
+                    # Siapkan ringkasan data untuk dikirim ke AI
+                    staf_stats = report_counts.to_dict()
+                    total_laporan = len(df_f)
+                    
+                    # Pembuatan prompt yang sangat spesifik dan empatik
+                    prompt = f"""
+                    Kamu adalah asisten virtual pribadi Pak Nugroho. Tugasmu adalah memberikan laporan analisis kinerja tim Sales & Marketing kepada Pak Nugroho.
+                    
+                    Data Kinerja Tim ({days} hari terakhir):
+                    - Statistik Laporan per Staf: {staf_stats}
+                    - Total Laporan Terkumpul: {total_laporan}
+                    - Target Perusahaan: Minimal 48 tempat/kunjungan per minggu per orang.
+                    
+                    Instruksi Penulisan:
+                    1. Awali kalimat dengan variasi pembuka seperti: "Sebagai asisten virtual Pak Nugroho...", "Melaporkan untuk Pak Nugroho...", atau "Berdasarkan catatan asisten Pak Nugroho...".
+                    2. JANGAN PERNAH menyebut dirimu sebagai AI atau Gemini.
+                    3. Gunakan nada bicara yang sangat MANUSIAWI, hangat, dan EMPATIK.
+                    4. Jika ada staf yang belum mencapai target 48 kunjungan, jangan menyalahkan atau menyudutkan mereka. Carilah alasan logis yang mendukung (seperti kendala cuaca yang tidak menentu, kemacetan, atau proses negosiasi di lapangan yang memang memakan waktu).
+                    5. Tekankan bahwa manajemen siap memberikan dukungan bagi tim di lapangan.
+                    6. Berikan apresiasi yang tulus bagi mereka yang sudah menunjukkan dedikasi tinggi.
+                    7. Fokuskan laporan untuk melindungi semangat tim di depan atasan dengan menonjolkan usaha keras mereka.
+                    """
+
+                    # Generate konten dari Gemini
+                    ai_response = model.generate_content(prompt)
+                    
+                    # Tampilkan hasil analisis dalam kotak info
+                    st.info(ai_response.text)
+                    
+                except Exception as e:
+                    st.warning("Asisten Pak Nugroho sedang berhalangan memberikan laporan analisis saat ini.")
         else:
             st.info("No data")
 
@@ -4337,18 +4385,16 @@ def render_admin_mobile():
                 else:
                     st.error("Nama tidak boleh kosong.")
 
-        st.markdown("---")  # Pembatas visual
+        st.markdown("---") 
 
-        # --- SUB-BAGIAN: HAPUS STAF (FITUR BARU) ---
+        # --- SUB-BAGIAN: HAPUS STAF ---
         st.markdown("#### 🗑️ Hapus Staf")
         st.caption("Menghapus nama dari daftar pelapor.")
 
-        # Ambil daftar staf terbaru untuk dropdown hapus
         staff_now = get_daftar_staf_terbaru()
         hapus_select = st.selectbox("Pilih staf yang akan dihapus:", [
                                     "-- Pilih Staf --"] + staff_now, key="mob_del_st")
 
-        # Checkbox konfirmasi agar tidak sengaja terpencet
         confirm_del = st.checkbox(
             "Konfirmasi penghapusan permanen", key="mob_del_confirm")
 
@@ -4361,7 +4407,6 @@ def render_admin_mobile():
                 with st.spinner("Menghapus..."):
                     ok, m = hapus_staf_by_name(hapus_select)
                     if ok:
-                        # Log Audit (Penting agar terekam siapa yang menghapus via HP)
                         force_audit_log(
                             actor=st.session_state.get(
                                 "user_name", "Admin Mobile"),
