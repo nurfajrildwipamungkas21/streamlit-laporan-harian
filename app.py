@@ -740,26 +740,6 @@ spreadsheet, dbx = init_connections()
 KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
 KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
 
-# =========================================================
-# 3. LOGIKA LOGIN & ALUR UTAMA (MAIN FLOW)
-# =========================================================
-
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-
-# Halaman Login
-if not st.session_state["logged_in"]:
-    login_page()
-    st.stop() 
-
-# --- JIKA SUDAH LOGIN, KODE DI BAWAH INI AKAN BERJALAN ---
-
-# 1. Kunci data ke RAM (Instan)
-prefetch_all_data_to_state()
-
-# 2. Suntik CSS dan Tampilkan Header (Pastikan fungsi ini sudah didefinisikan di atas)
-inject_global_css_fast() 
-render_header()
 
 # 3. Inisialisasi Variabel User Global
 user_email = st.session_state["user_email"]
@@ -5609,3 +5589,20 @@ elif menu_nav == "📊 Dashboard Admin":
                                 st.error("Alasan harus diisi.")
 
         render_section_watermark()
+
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+# Halaman Login
+if not st.session_state["logged_in"]:
+    login_page()
+    st.stop() 
+
+# --- JIKA SUDAH LOGIN, KODE DI BAWAH INI AKAN BERJALAN ---
+
+# 1. Kunci data ke RAM (Instan)
+prefetch_all_data_to_state()
+
+# 2. Suntik CSS dan Tampilkan Header (Pastikan fungsi ini sudah didefinisikan di atas)
+inject_global_css_fast() 
+render_header()
