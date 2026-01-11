@@ -4296,7 +4296,7 @@ def render_admin_mobile():
                     import google.generativeai as genai
                     
                     genai.configure(api_key="AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4")
-                    model = genai.GenerativeModel("gemini-2.5-flash")
+                    model = genai.GenerativeModel("gemini-2.0-flash")
 
                     staf_stats = report_counts.to_dict()
                     total_laporan = int(len(df_f))
@@ -5109,7 +5109,7 @@ elif menu_nav == "📊 Dashboard Admin":
                         try:
                             import google.generativeai as genai
                             genai.configure(api_key="AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4")
-                            model = genai.GenerativeModel("gemini-2.5-flash") # Gunakan 2.5-flash
+                            model = genai.GenerativeModel("gemini-2.0-flash") # Gunakan 2.0-flash
 
                             staf_stats = report_counts.to_dict()
                             total_lap = len(df_f)
