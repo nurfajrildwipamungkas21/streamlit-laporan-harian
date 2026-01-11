@@ -25,6 +25,81 @@ import textwrap
 from audit_service import log_admin_action, compare_and_get_changes
 
 # =========================================================
+# CONSTANTS
+# =========================================================
+NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
+FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
+
+# Sheet Names
+SHEET_CONFIG_NAMA = "Config_Staf"
+SHEET_TARGET_TEAM = "Target_Team_Checklist"
+SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
+SHEET_CONFIG_TEAM = "Config_Team"
+SHEET_CLOSING_DEAL = "Closing_Deal"
+SHEET_PEMBAYARAN = "Pembayaran_DP"
+SHEET_PRESENSI = "Presensi_Kehadiran"
+PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari",
+                    "Tanggal", "Bulan", "Tahun", "Waktu"]
+
+@st.cache_data(ttl=3600)
+def get_daftar_staf_terbaru():
+    default_staf = ["Saya"]
+    if not KONEKSI_GSHEET_BERHASIL:
+        return default_staf
+
+    try:
+        try:
+            ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
+        except Exception:
+            ws = spreadsheet.add_worksheet(
+                title=SHEET_CONFIG_NAMA, rows=100, cols=1)
+            ws.append_row(["Daftar Nama Staf"],
+                          value_input_option="USER_ENTERED")
+            ws.append_row(["Saya"], value_input_option="USER_ENTERED")
+            maybe_auto_format_sheet(ws, force=True)
+            return default_staf
+
+        nama_list = ws.col_values(1)
+        if nama_list and nama_list[0] == "Daftar Nama Staf":
+            nama_list.pop(0)
+
+        return nama_list if nama_list else default_staf
+    except Exception:
+        return default_staf
+    
+@st.cache_data(ttl=3600)
+def load_checklist(sheet_name, columns):
+    try:
+        try:
+            ws = spreadsheet.worksheet(sheet_name)
+        except Exception:
+            ws = spreadsheet.add_worksheet(
+                title=sheet_name, rows=200, cols=len(columns))
+            ws.append_row(columns, value_input_option="USER_ENTERED")
+            maybe_auto_format_sheet(ws, force=True)
+            return pd.DataFrame(columns=columns)
+
+        ensure_headers(ws, columns)
+
+        data = ws.get_all_records()
+        df = pd.DataFrame(data).fillna("")
+
+        for col in columns:
+            if col not in df.columns:
+                if col == "Status":
+                    df[col] = False
+                else:
+                    df[col] = ""
+
+        if "Status" in df.columns:
+            df["Status"] = df["Status"].apply(
+                lambda x: True if str(x).upper() == "TRUE" else False)
+
+        return df[columns].copy()
+    except Exception:
+        return pd.DataFrame(columns=columns)
+
+# =========================================================
 # [CORE] SYSTEM REACTOR V3 - SMART AUTO-SYNC RAM
 # =========================================================
 
@@ -1294,24 +1369,6 @@ def ui_toast(message: str, icon=None):
     st.success(message)
 
 
-# =========================================================
-# CONSTANTS
-# =========================================================
-NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
-FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
-
-# Sheet Names
-SHEET_CONFIG_NAMA = "Config_Staf"
-SHEET_TARGET_TEAM = "Target_Team_Checklist"
-SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
-SHEET_CONFIG_TEAM = "Config_Team"
-SHEET_CLOSING_DEAL = "Closing_Deal"
-SHEET_PEMBAYARAN = "Pembayaran_DP"
-SHEET_PRESENSI = "Presensi_Kehadiran"
-PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari",
-                    "Tanggal", "Bulan", "Tahun", "Waktu"]
-
-
 def init_presensi_db():
     """Memastikan sheet presensi tersedia."""
     try:
@@ -2334,33 +2391,6 @@ def get_or_create_worksheet(nama_worksheet):
     return ws
 
 
-@st.cache_data(ttl=3600)
-def get_daftar_staf_terbaru():
-    default_staf = ["Saya"]
-    if not KONEKSI_GSHEET_BERHASIL:
-        return default_staf
-
-    try:
-        try:
-            ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
-        except Exception:
-            ws = spreadsheet.add_worksheet(
-                title=SHEET_CONFIG_NAMA, rows=100, cols=1)
-            ws.append_row(["Daftar Nama Staf"],
-                          value_input_option="USER_ENTERED")
-            ws.append_row(["Saya"], value_input_option="USER_ENTERED")
-            maybe_auto_format_sheet(ws, force=True)
-            return default_staf
-
-        nama_list = ws.col_values(1)
-        if nama_list and nama_list[0] == "Daftar Nama Staf":
-            nama_list.pop(0)
-
-        return nama_list if nama_list else default_staf
-    except Exception:
-        return default_staf
-
-
 def hapus_staf_by_name(nama_staf):
     """Menghapus nama staf dari worksheet Config_Staf."""
     try:
@@ -2520,39 +2550,6 @@ def clean_bulk_input(text_input):
         if cleaned:
             cleaned_targets.append(cleaned)
     return cleaned_targets
-
-
-@st.cache_data(ttl=3600)
-def load_checklist(sheet_name, columns):
-    try:
-        try:
-            ws = spreadsheet.worksheet(sheet_name)
-        except Exception:
-            ws = spreadsheet.add_worksheet(
-                title=sheet_name, rows=200, cols=len(columns))
-            ws.append_row(columns, value_input_option="USER_ENTERED")
-            maybe_auto_format_sheet(ws, force=True)
-            return pd.DataFrame(columns=columns)
-
-        ensure_headers(ws, columns)
-
-        data = ws.get_all_records()
-        df = pd.DataFrame(data).fillna("")
-
-        for col in columns:
-            if col not in df.columns:
-                if col == "Status":
-                    df[col] = False
-                else:
-                    df[col] = ""
-
-        if "Status" in df.columns:
-            df["Status"] = df["Status"].apply(
-                lambda x: True if str(x).upper() == "TRUE" else False)
-
-        return df[columns].copy()
-    except Exception:
-        return pd.DataFrame(columns=columns)
 
 
 def save_checklist(sheet_name, df, columns):
