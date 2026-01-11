@@ -4287,19 +4287,23 @@ elif menu_nav == "📊 Dashboard Admin":
             if is_manager:
                 with tab_acc:
                     st.markdown("### 🔔 Pusat Persetujuan (Manager)")
+                    st.caption("Review detail perubahan. Anda bisa menyetujui atau menolak dengan alasan.")
+                    
                     pending_data = get_pending_approvals()
                     if not pending_data:
                         st.info("✅ Tidak ada permintaan pending.")
                     else:
                         for i, req in enumerate(pending_data):
                             with st.container(border=True):
+                                # Header Info
                                 c_h1, c_h2 = st.columns([3, 1])
                                 with c_h1:
                                     st.markdown(f"👤 **{req['Requestor']}** | 📂 Sheet: `{req['Target Sheet']}`")
-                                    st.text(f"📝 Alasan: {req['Reason']}")
-                                with c_h2: st.caption(f"🕒 {req['Timestamp']}")
+                                    st.text(f"📝 Pesan Admin: {req['Reason']}")
+                                with c_h2: 
+                                    st.caption(f"🕒 {req['Timestamp']}")
                                 
-                                # Show Diff
+                                # Perbandingan Data (Diff)
                                 try:
                                     old_d = json.loads(req.get("Old Data JSON", "{}") or "{}")
                                     new_d = json.loads(req.get("New Data JSON", "{}") or "{}")
@@ -4307,18 +4311,46 @@ elif menu_nav == "📊 Dashboard Admin":
                                     for k, v_new in new_d.items():
                                         v_old = old_d.get(k, "")
                                         if str(v_new).strip() != str(v_old).strip():
-                                            changes_table.append({"Kolom": k, "🔴 Lama": str(v_old), "🟢 Baru": str(v_new)})
-                                    if changes_table: st.table(pd.DataFrame(changes_table))
-                                except: st.error("Gagal load detail JSON")
+                                            changes_table.append({
+                                                "Kolom": k, 
+                                                "🔴 Data Lama": str(v_old), 
+                                                "🟢 Data Baru": str(v_new)
+                                            })
+                                    if changes_table: 
+                                        st.table(pd.DataFrame(changes_table))
+                                except: 
+                                    st.error("Gagal memproses detail perubahan.")
 
-                                # Buttons
-                                b_c1, b_c2 = st.columns(2)
-                                if b_c1.button("✅ SETUJUI (ACC)", key=f"acc_{i}", type="primary"):
+                                # Tombol Aksi
+                                col_btn1, col_btn2 = st.columns([1, 1])
+                                
+                                # 1. Tombol SETUJU
+                                if col_btn1.button("✅ SETUJUI (ACC)", key=f"acc_btn_{i}", type="primary", use_container_width=True):
                                     ok, m = execute_approval(i, "APPROVE", admin_name=st.session_state["user_name"])
-                                    if ok: st.success(m); time.sleep(1); st.rerun()
-                                if b_c2.button("❌ TOLAK", key=f"rej_{i}"):
-                                    ok, m = execute_approval(i, "REJECT", admin_name=st.session_state["user_name"], rejection_note="Data ditolak oleh Manager")
-                                    if ok: st.warning(m); time.sleep(1); st.rerun()
+                                    if ok: 
+                                        st.success("Data berhasil diupdate ke GSheet!"); time.sleep(1); st.rerun()
+                                
+                                # 2. Tombol TOLAK (Dengan Input Alasan)
+                                with col_btn2:
+                                    with st.popover("❌ TOLAK REQUEST", use_container_width=True):
+                                        st.markdown("#### Alasan Penolakan")
+                                        alasan_tolak = st.text_area("Berikan catatan revisi untuk admin:", 
+                                                                    placeholder="Contoh: Nominal tidak sesuai dengan bukti transfer...",
+                                                                    key=f"reason_text_{i}")
+                                        
+                                        if st.button("Konfirmasi Tolak", key=f"confirm_rej_{i}", type="primary", use_container_width=True):
+                                            if not alasan_tolak.strip():
+                                                st.error("Alasan wajib diisi jika menolak.")
+                                            else:
+                                                ok, m = execute_approval(
+                                                    request_index_0based=i, 
+                                                    action="REJECT", 
+                                                    admin_name=st.session_state["user_name"],
+                                                    rejection_note=alasan_tolak
+                                                )
+                                                if ok: 
+                                                    st.warning(f"Request Ditolak: {alasan_tolak}")
+                                                    time.sleep(1); st.rerun()
 
             # --- TAB: PRODUKTIVITAS ---
             with tab_prod:
