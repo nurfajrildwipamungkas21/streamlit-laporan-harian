@@ -3831,14 +3831,14 @@ HOME_NAV = "ðŸ  Beranda"
 
 # Update: Menambahkan entry 'presensi' ke dalam Mapping
 NAV_MAP = {
-    "home": HOME_NAV,
-    "presensi": "ðŸ“… Presensi",
-    "report": "ðŸ“ Laporan Harian",
-    "kpi": "ðŸŽ¯ Target & KPI",
-    "closing": "ðŸ¤ Closing Deal",
-    "payment": "ðŸ’³ Pembayaran",
-    "log": "ðŸ“œ Global Audit Log",
-    "admin": "ðŸ“Š Dashboard Admin",
+    "home": "🏠 Beranda",
+    "presensi": "🗓️ Presensi",
+    "report": "📝 Laporan Harian",
+    "kpi": "🎯 Target & KPI",
+    "closing": "🤝 Closing Deal",
+    "payment": "💳 Pembayaran",
+    "log": "📜 Global Audit Log",
+    "admin": "📊 Dashboard Admin",
 }
 
 
@@ -4018,10 +4018,7 @@ with st.sidebar:
         pass
 
     st.divider()
-    st.caption("Tip: navigasi ala SpaceX â†’ ringkas, jelas, fokus.")
 
-
-menu_nav = st.session_state.get("menu_nav", "ðŸ“ Laporan Harian")
 
 menu_nav = st.session_state.get("menu_nav", "ðŸ“ Laporan Harian")
 
