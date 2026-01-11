@@ -1325,28 +1325,44 @@ TEAM_COL_POSISI = "Posisi"
 TEAM_COL_ANGGOTA = "Nama Anggota"
 TEAM_COLUMNS = [TEAM_COL_NAMA_TEAM, TEAM_COL_POSISI, TEAM_COL_ANGGOTA]
 
-# Closing deal columns
+# =========================================================
+# DEFINISI KOLOM DATA (DATABASE STRUCTURE)
+# =========================================================
+
+# --- 1. Closing Deal Columns ---
 COL_GROUP = "Nama Group"
 COL_MARKETING = "Nama Marketing"
 COL_TGL_EVENT = "Tanggal Event"
 COL_BIDANG = "Bidang"
 COL_NILAI_KONTRAK = "Nilai Kontrak"  # disimpan sebagai angka (int)
 
-CLOSING_COLUMNS = [COL_GROUP, COL_MARKETING,
-                   COL_TGL_EVENT, COL_BIDANG, COL_NILAI_KONTRAK]
+CLOSING_COLUMNS = [
+    COL_GROUP, 
+    COL_MARKETING, 
+    COL_TGL_EVENT, 
+    COL_BIDANG, 
+    COL_NILAI_KONTRAK
+]
 
-# Target/checklist columns
-TEAM_CHECKLIST_COLUMNS = ["Misi", "Tgl_Mulai", "Tgl_Selesai",
-                          "Status", "Bukti/Catatan", COL_TS_UPDATE, COL_UPDATED_BY]
-INDIV_CHECKLIST_COLUMNS = ["Nama", "Target", "Tgl_Mulai", "Tgl_Selesai",
-                           "Status", "Bukti/Catatan", COL_TS_UPDATE, COL_UPDATED_BY]
+# --- 2. Target / Checklist Columns ---
+TEAM_CHECKLIST_COLUMNS = [
+    "Misi", "Tgl_Mulai", "Tgl_Selesai", "Status", 
+    "Bukti/Catatan", COL_TS_UPDATE, COL_UPDATED_BY
+]
+INDIV_CHECKLIST_COLUMNS = [
+    "Nama", "Target", "Tgl_Mulai", "Tgl_Selesai", "Status", 
+    "Bukti/Catatan", COL_TS_UPDATE, COL_UPDATED_BY
+]
 
-# Pembayaran Columns
+# --- 3. Smart Pembayaran Columns (Update Khusus) ---
 COL_TS_BAYAR = "Timestamp Input"
-COL_JENIS_BAYAR = "Jenis Pembayaran"
-COL_NOMINAL_BAYAR = "Nominal Pembayaran"
+COL_NILAI_KESEPAKATAN = "Total Nilai Kesepakatan" # [NEW]
+COL_JENIS_BAYAR = "Jenis Pembayaran"             # DP, Cicilan, atau Cash
+COL_NOMINAL_BAYAR = "Nominal Pembayaran"         # Nominal yang masuk saat ini
+COL_TENOR_CICILAN = "Tenor (Bulan)"              # [NEW]
+COL_SISA_BAYAR = "Sisa Pembayaran"               # [NEW] Kalkulator Otomatis
 COL_JATUH_TEMPO = "Batas Waktu Bayar"
-COL_STATUS_BAYAR = "Status Pembayaran"
+COL_STATUS_BAYAR = "Status Pembayaran"           # Deskripsi status (Lunas/Belum)
 COL_BUKTI_BAYAR = "Bukti Pembayaran"
 COL_CATATAN_BAYAR = "Catatan"
 
@@ -1355,8 +1371,11 @@ PAYMENT_COLUMNS = [
     COL_GROUP,
     COL_MARKETING,
     COL_TGL_EVENT,
+    COL_NILAI_KESEPAKATAN, # Letakkan total di awal agar alur logika jelas
     COL_JENIS_BAYAR,
     COL_NOMINAL_BAYAR,
+    COL_TENOR_CICILAN,
+    COL_SISA_BAYAR,
     COL_JATUH_TEMPO,
     COL_STATUS_BAYAR,
     COL_BUKTI_BAYAR,
@@ -1365,9 +1384,10 @@ PAYMENT_COLUMNS = [
     COL_UPDATED_BY
 ]
 
+# --- 4. System Config ---
 TZ_JKT = ZoneInfo("Asia/Jakarta")
 
-# Formatting throttling (avoid heavy batch formatting too frequently)
+# Formatting throttling (menghindari API overload saat batch update)
 FORMAT_THROTTLE_SECONDS = 300  # 5 minutes
 
 # =========================================================
@@ -3232,102 +3252,145 @@ def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame
     return after_idx.reset_index(drop=True)
 
 
-def tambah_pembayaran_dp(
-    nama_group,
-    nama_marketing,
-    tanggal_event,
-    jenis_bayar,
-    nominal_input,
-    jatuh_tempo,
-    status_bayar,
-    bukti_file,
-    catatan
-):
-    """Tambah 1 record pembayaran."""
-    if not KONEKSI_GSHEET_BERHASIL:
-        return False, "Koneksi GSheet belum aktif."
+def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nominal_input, total_sepakat_input, tenor, jatuh_tempo, bukti_file, catatan):
+    """
+    Menambah record pembayaran dengan sistem Smart Balance Tracking.
+    Menghitung sisa bayar secara otomatis dan menentukan status lunas/belum.
+    """
+    if not KONEKSI_GSHEET_BERHASIL: 
+        return False, "Sistem Error: Koneksi Google Sheets tidak aktif."
 
     try:
-        nama_group = str(nama_group).strip() if nama_group else "-"
-        nama_marketing = str(nama_marketing).strip() if nama_marketing else ""
-        jenis_bayar = str(jenis_bayar).strip(
-        ) if jenis_bayar else "Down Payment (DP)"
-        catatan = str(catatan).strip() if catatan else "-"
+        # --- 1. NORMALISASI & VALIDASI INPUT ---
+        group = str(nama_group).strip() if nama_group else "-"
+        marketing = str(nama_marketing).strip() if nama_marketing else "Unknown"
+        catatan_clean = str(catatan).strip() if catatan else "-"
+        
+        # Parsing angka menggunakan Rupiah Parser
+        nom_bayar = parse_rupiah_to_int(nominal_input) or 0
+        total_sepakat = parse_rupiah_to_int(total_sepakat_input) or 0
+        tenor_val = int(tenor) if tenor else 0
+        
+        if total_sepakat <= 0:
+            return False, "Input Gagal: Total nilai kesepakatan harus diisi dengan benar."
 
-        if not nama_marketing or not str(nominal_input).strip() or not jatuh_tempo:
-            return False, "Field wajib: Nama Marketing, Nominal, dan Batas Waktu Bayar."
+        # --- 2. KALKULATOR OTOMATIS (BALANCE TRACKING) ---
+        sisa_bayar = total_sepakat - nom_bayar
+        
+        # --- 3. LOGIKA STATUS PEMBAYARAN PINTAR ---
+        # Menentukan label status berdasarkan mekanisme dan sisa saldo
+        if sisa_bayar <= 0:
+            status_fix = "✅ Lunas"
+            if jenis_bayar == "Cash": status_fix += " (Cash)"
+        else:
+            if jenis_bayar == "Down Payment (DP)":
+                status_fix = f"⏳ DP (Sisa: {format_rupiah_display(sisa_bayar)})"
+            elif jenis_bayar == "Cicilan":
+                status_fix = f"💳 Cicilan (Sisa: {format_rupiah_display(sisa_bayar)})"
+            else:
+                status_fix = f"⚠️ Belum Lunas (Sisa: {format_rupiah_display(sisa_bayar)})"
 
-        nominal_int = parse_rupiah_to_int(nominal_input)
-        if nominal_int is None:
-            return False, "Nominal tidak valid. Contoh: 5000000 / 5jt / Rp 5.000.000 / 5,5jt"
-
+        # --- 4. PENANGANAN FILE (DROPBOX) ---
         link_bukti = "-"
         if bukti_file and KONEKSI_DROPBOX_BERHASIL:
-            link_bukti = upload_ke_dropbox(
-                bukti_file, nama_marketing, kategori="Bukti_Pembayaran")
+            # Gunakan kategori spesifik untuk kemudahan arsip di Dropbox
+            link_bukti = upload_ke_dropbox(bukti_file, marketing, kategori="Bukti_Pembayaran")
 
-        try:
-            ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
-        except Exception:
-            ws = spreadsheet.add_worksheet(
-                title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
-            ws.append_row(PAYMENT_COLUMNS, value_input_option="USER_ENTERED")
+        # --- 5. PERSIAPAN DATA BARIS (SESUAI PAYMENT_COLUMNS) ---
+        ts_in = now_ts_str()
+        
+        # Format Tanggal agar seragam YYYY-MM-DD di GSheet
+        fmt_tgl_event = tgl_event.strftime("%Y-%m-%d") if hasattr(tgl_event, "strftime") else str(tgl_event)
+        fmt_jatuh_tempo = jatuh_tempo.strftime("%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
 
+        # Konstruksi baris harus SAMA PERSIS dengan urutan di PAYMENT_COLUMNS
+        row = [
+            ts_in,              # COL_TS_BAYAR
+            group,              # COL_GROUP
+            marketing,          # COL_MARKETING
+            fmt_tgl_event,      # COL_TGL_EVENT
+            total_sepakat,      # COL_NILAI_KESEPAKATAN
+            jenis_bayar,        # COL_JENIS_BAYAR
+            nom_bayar,          # COL_NOMINAL_BAYAR
+            tenor_val,          # COL_TENOR_CICILAN
+            sisa_bayar,         # COL_SISA_BAYAR
+            fmt_jatuh_tempo,    # COL_JATUH_TEMPO
+            status_fix,         # COL_STATUS_BAYAR
+            link_bukti,         # COL_BUKTI_BAYAR
+            catatan_clean,      # COL_CATATAN_BAYAR
+            build_numbered_log([ts_in]), # COL_TS_UPDATE (Initial Log)
+            marketing           # COL_UPDATED_BY
+        ]
+
+        # --- 6. EKSEKUSI KE GOOGLE SHEETS ---
+        ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
+        # Pastikan header terbaru ada jika sheet baru dibuat otomatis
         ensure_headers(ws, PAYMENT_COLUMNS)
+        
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        
+        # Berikan feedback yang informatif ke UI
+        msg_feedback = f"Pembayaran berhasil disimpan! "
+        if sisa_bayar > 0:
+            msg_feedback += f"Sisa tagihan: {format_rupiah_display(sisa_bayar)}."
+        else:
+            msg_feedback += "Status: LUNAS."
 
-        tgl_event_str = tanggal_event.strftime("%Y-%m-%d") if hasattr(
-            tanggal_event, "strftime") else (str(tanggal_event) if tanggal_event else "-")
-        jatuh_tempo_str = jatuh_tempo.strftime(
-            "%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
+        return True, msg_feedback
 
-        ts_input = now_ts_str()
-        actor0 = nama_marketing or "-"
-
-        ts_update_log = build_numbered_log([ts_input])
-
-        ws.append_row(
-            [
-                ts_input,
-                nama_group,
-                nama_marketing,
-                tgl_event_str,
-                jenis_bayar,
-                int(nominal_int),
-                jatuh_tempo_str,
-                "TRUE" if bool(status_bayar) else "FALSE",
-                link_bukti,
-                catatan if catatan else "-",
-                ts_update_log,
-                actor0
-            ],
-            value_input_option="USER_ENTERED"
-        )
-
-        # maybe_auto_format_sheet(ws)
-        return True, "Pembayaran berhasil disimpan!"
     except Exception as e:
-        return False, str(e)
+        return False, f"System Error: {str(e)}"
 
 
 def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
+    """
+    Sistem Alert Pintar (Hybrid): 
+    Mendeteksi tagihan berdasarkan Sisa Pembayaran > 0 dan Tanggal Jatuh Tempo.
+    Mempertahankan fleksibilitas parameter 'days_due_soon' dari kode lama.
+    """
+    # 1. Validasi awal: Jika data kosong, kembalikan dataframe kosong dengan kolom yang benar
     if df is None or df.empty:
-        return (pd.DataFrame(columns=df.columns if df is not None else PAYMENT_COLUMNS),
-                pd.DataFrame(columns=df.columns if df is not None else PAYMENT_COLUMNS))
+        cols = df.columns if df is not None else PAYMENT_COLUMNS
+        return pd.DataFrame(columns=cols), pd.DataFrame(columns=cols)
 
     today = datetime.now(tz=TZ_JKT).date()
+    
+    # 2. Copy data agar manipulasi tipe data tidak merusak data utama di memori
+    df_alert = df.copy()
 
-    df2 = df.copy()
-    if COL_STATUS_BAYAR in df2.columns:
-        df2 = df2[df2[COL_STATUS_BAYAR] == False].copy()
-
-    if COL_JATUH_TEMPO in df2.columns:
-        df2 = df2[pd.notna(df2[COL_JATUH_TEMPO])].copy()
+    # 3. Normalisasi Tipe Data (Penting untuk kalkulator sisa)
+    # Pastikan Jatuh Tempo adalah objek date dan Sisa Pembayaran adalah angka
+    if COL_JATUH_TEMPO in df_alert.columns:
+        df_alert[COL_JATUH_TEMPO] = pd.to_datetime(df_alert[COL_JATUH_TEMPO], errors="coerce").dt.date
+    
+    if COL_SISA_BAYAR in df_alert.columns:
+        df_alert[COL_SISA_BAYAR] = pd.to_numeric(df_alert[COL_SISA_BAYAR], errors='coerce').fillna(0)
     else:
-        return (pd.DataFrame(columns=df.columns), pd.DataFrame(columns=df.columns))
+        # Fallback jika kolom sisa belum ada (masa transisi), buat sisa 0 agar tidak alert
+        df_alert[COL_SISA_BAYAR] = 0
 
-    overdue = df2[df2[COL_JATUH_TEMPO] < today].copy()
-    due_soon = df2[(df2[COL_JATUH_TEMPO] >= today) & (
-        df2[COL_JATUH_TEMPO] <= (today + timedelta(days=days_due_soon)))].copy()
+    # 4. KRITERIA PINTAR: Filter hanya data yang benar-benar belum lunas (Sisa > 0)
+    # Fitur lama 'COL_STATUS_BAYAR == False' otomatis terwakili oleh 'Sisa > 0'
+    df_tagihan_aktif = df_alert[
+        (df_alert[COL_SISA_BAYAR] > 0) & 
+        (pd.notna(df_alert[COL_JATUH_TEMPO]))
+    ].copy()
+
+    # Jika tidak ada tagihan aktif (semua sudah lunas), kembalikan DF kosong
+    if df_tagihan_aktif.empty:
+        return pd.DataFrame(columns=df.columns), pd.DataFrame(columns=df.columns)
+
+    # 5. PEMBAGIAN KATEGORI (Overdue vs Due Soon)
+    
+    # Kategori A: Overdue (Sisa > 0 DAN Tanggal sudah terlewat)
+    overdue = df_tagihan_aktif[df_tagihan_aktif[COL_JATUH_TEMPO] < today].copy()
+    
+    # Kategori B: Due Soon (Sisa > 0 DAN Tanggal mendekati/hari ini)
+    # Menggunakan parameter 'days_due_soon' agar fitur lama tetap berfungsi
+    due_soon = df_tagihan_aktif[
+        (df_tagihan_aktif[COL_JATUH_TEMPO] >= today) & 
+        (df_tagihan_aktif[COL_JATUH_TEMPO] <= (today + timedelta(days=days_due_soon)))
+    ].copy()
 
     return overdue, due_soon
 
@@ -4507,10 +4570,142 @@ elif menu_nav == "💳 Pembayaran":
     if IS_MOBILE:
         render_payment_mobile()
     else:
-        st.markdown("## 💳 Manajemen Pembayaran")
-        # Logic Pembayaran Anda yang sudah ada...
+        st.markdown("## 💳 Smart Payment Action Center")
+        st.caption("Manajemen pembayaran terpadu dengan kalkulator sisa tagihan dan pelacakan cicilan.")
+
+        # =========================================================
+        # 1. SEKSI INPUT: KALKULATOR PEMBAYARAN PINTAR
+        # =========================================================
+        with st.container(border=True):
+            st.markdown("### ➕ Input Pembayaran & Kalkulator Sisa")
+            with st.form("form_smart_pay", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    p_marketing = st.selectbox("Nama Marketing", get_daftar_staf_terbaru())
+                    p_group = st.text_input("Nama Group / Klien", placeholder="Masukkan nama entitas...")
+                    p_total_sepakat = st.text_input("Total Nilai Kesepakatan (Rp)", placeholder="Contoh: 100.000.000")
+                
+                with c2:
+                    p_jenis = st.selectbox("Mekanisme Pembayaran", ["Down Payment (DP)", "Cicilan", "Cash"])
+                    p_nom_bayar = st.text_input("Nominal yang Dibayar Sekarang (Rp)")
+                    p_tenor = st.number_input("Tenor Cicilan (Bulan)", min_value=0, step=1, help="Isi 0 jika pembayaran Cash/DP sekali bayar")
+                
+                with c3:
+                    p_tgl_event = st.date_input("Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
+                    p_due = st.date_input("Batas Waktu Bayar (Jatuh Tempo)", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7))
+                    p_bukti = st.file_uploader("Upload Bukti Transfer (Foto/PDF)")
+
+                p_note = st.text_area("Catatan Tambahan (Opsional)", placeholder="Keterangan bank, nomor referensi, dll.")
+                
+                if st.form_submit_button("✅ Simpan & Hitung Sisa", type="primary", use_container_width=True):
+                    if not p_total_sepakat or not p_nom_bayar:
+                        st.error("Gagal: Nilai Kesepakatan dan Nominal Bayar wajib diisi!")
+                    else:
+                        with st.spinner("Memproses transaksi..."):
+                            # Memanggil fungsi pintar yang baru
+                            ok, msg = tambah_pembayaran_dp(
+                                p_group, p_marketing, p_tgl_event, p_jenis, 
+                                p_nom_bayar, p_total_sepakat, p_tenor, p_due, p_bukti, p_note
+                            )
+                            if ok:
+                                st.success(msg)
+                                st.cache_data.clear()
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error(msg)
+
+        st.divider()
+
+        # =========================================================
+        # 2. SEKSI MONITORING: ALERT & DATA EDITOR
+        # =========================================================
+        st.markdown("### 📋 Monitoring & Riwayat Pembayaran")
         df_pay = load_pembayaran_dp()
-        st.dataframe(df_pay, use_container_width=True, hide_index=True)
+
+        if df_pay.empty:
+            st.info("Belum ada data pembayaran yang tersimpan.")
+        else:
+            # --- Sistem Alert Pintar ---
+            overdue, due_soon = build_alert_pembayaran(df_pay)
+            col_stat1, col_stat2 = st.columns(2)
+            with col_stat1:
+                st.metric("⛔ Overdue (Belum Lunas)", len(overdue))
+                if not overdue.empty:
+                    st.error("Ada tagihan yang melewati jatuh tempo!")
+            with col_stat2:
+                st.metric("⚠️ Jatuh Tempo Dekat (≤ 3 Hari)", len(due_soon))
+                if not due_soon.empty:
+                    st.warning("Segera lakukan penagihan ulang.")
+
+            # --- Data Editor dengan Audit Log Otomatis ---
+            st.caption("Gunakan tabel di bawah untuk mengubah Status, Jatuh Tempo, atau Catatan. Kolom Nominal dikunci demi keamanan.")
+            
+            # Format visual untuk UI
+            df_view = payment_df_for_display(df_pay)
+            
+            # Kolom yang diizinkan untuk diupdate staf/admin di desktop
+            editable_cols = [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_TENOR_CICILAN]
+            disabled_cols = [c for c in df_view.columns if c not in editable_cols]
+
+            edited_pay = st.data_editor(
+                df_view,
+                disabled=disabled_cols,
+                column_config={
+                    COL_SISA_BAYAR: st.column_config.NumberColumn("Sisa Tagihan", format="Rp %d"),
+                    COL_NOMINAL_BAYAR: st.column_config.TextColumn("Terbayar", disabled=True),
+                    COL_STATUS_BAYAR: st.column_config.TextColumn("Label Status", width="medium"),
+                    COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo"),
+                    COL_BUKTI_BAYAR: st.column_config.LinkColumn("Bukti Foto"),
+                    COL_TS_UPDATE: st.column_config.TextColumn("Audit Log", width="large", disabled=True)
+                },
+                use_container_width=True,
+                hide_index=True,
+                key="editor_pay_desktop_smart"
+            )
+
+            if st.button("💾 Simpan Perubahan Riwayat", use_container_width=True):
+                with st.spinner("Memperbarui database..."):
+                    current_user = st.session_state.get("user_name", "Admin Desktop")
+                    # Fungsi apply_audit akan mendeteksi perbedaan data lama vs baru
+                    final_df = apply_audit_payments_changes(df_pay, edited_pay, actor=current_user)
+                    
+                    if save_pembayaran_dp(final_df):
+                        st.success("Database Pembayaran Berhasil Diperbarui!")
+                        st.cache_data.clear()
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error("Terjadi kendala saat menyimpan ke Google Sheets.")
+
+            # =========================================================
+            # 3. FITUR TAMBAHAN: UPDATE FOTO BUKTI SUSULAN
+            # =========================================================
+            with st.expander("📎 Update Bukti Pembayaran (Susulan)", expanded=False):
+                st.info("Fitur ini digunakan jika staf lupa melampirkan foto bukti saat penginputan awal.")
+                df_pay_reset = df_pay.reset_index(drop=True)
+                
+                # Membangun daftar pilihan yang informatif
+                pay_options = [
+                    f"{i+1}. {r[COL_MARKETING]} | {r[COL_GROUP]} | Sisa: {format_rupiah_display(r[COL_SISA_BAYAR])}" 
+                    for i, r in df_pay_reset.iterrows()
+                ]
+                
+                sel_idx_upd = st.selectbox("Pilih Record Pembayaran:", range(len(pay_options)), 
+                                         format_func=lambda x: pay_options[x], key="desk_sel_susulan")
+                
+                file_susulan = st.file_uploader("Upload File Bukti Baru", key="desk_file_susulan")
+                
+                if st.button("⬆️ Upload Foto Sekarang", use_container_width=False):
+                    if file_susulan:
+                        mkt_name = df_pay_reset.iloc[sel_idx_upd][COL_MARKETING]
+                        ok, msg = update_bukti_pembayaran_by_index(sel_idx_upd, file_susulan, mkt_name, actor="Admin")
+                        if ok:
+                            st.success("Foto bukti berhasil ditambahkan!"); st.cache_data.clear(); time.sleep(1); st.rerun()
+                        else:
+                            st.error(msg)
+                    else:
+                        st.warning("Pilih file terlebih dahulu.")
 
 # --- 6. GLOBAL AUDIT LOG ---
 elif menu_nav == "📜 Global Audit Log":
