@@ -639,6 +639,22 @@ def delete_staff_account(username):
     except gspread.exceptions.CellNotFound:
         return False, "Username tidak ditemukan."
 
+# =========================================================
+# CONSTANTS
+# =========================================================
+NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
+FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
+
+# Sheet Names
+SHEET_CONFIG_NAMA = "Config_Staf"
+SHEET_TARGET_TEAM = "Target_Team_Checklist"
+SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
+SHEET_CONFIG_TEAM = "Config_Team"
+SHEET_CLOSING_DEAL = "Closing_Deal"
+SHEET_PEMBAYARAN = "Pembayaran_DP"
+SHEET_PRESENSI = "Presensi_Kehadiran"
+PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari",
+                    "Tanggal", "Bulan", "Tahun", "Waktu"]
 
 # =========================================================
 # 1. DEFINISI FUNGSI KONEKSI & ASSETS (TARUH PALING ATAS)
@@ -1267,24 +1283,6 @@ def ui_toast(message: str, icon=None):
         except Exception:
             pass
     st.success(message)
-
-
-# =========================================================
-# CONSTANTS
-# =========================================================
-NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
-FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
-
-# Sheet Names
-SHEET_CONFIG_NAMA = "Config_Staf"
-SHEET_TARGET_TEAM = "Target_Team_Checklist"
-SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
-SHEET_CONFIG_TEAM = "Config_Team"
-SHEET_CLOSING_DEAL = "Closing_Deal"
-SHEET_PEMBAYARAN = "Pembayaran_DP"
-SHEET_PRESENSI = "Presensi_Kehadiran"
-PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari",
-                    "Tanggal", "Bulan", "Tahun", "Waktu"]
 
 
 def init_presensi_db():
