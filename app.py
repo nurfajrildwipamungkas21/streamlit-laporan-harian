@@ -648,7 +648,22 @@ if "logged_in" not in st.session_state:
 
 if not st.session_state["logged_in"]:
     login_page()
-    st.stop()  # Berhenti disini jika belum login
+    st.stop() 
+
+# --- [BARU] DISINI TEMPATNYA ---
+# Jika lolos dari st.stop(), berarti user sudah login.
+# Sekarang kita kunci semua data & asset ke RAM VPS sebelum UI muncul.
+
+prefetch_all_data_to_state()  # Ambil semua data GSheet ke RAM (Instan)
+inject_global_css_fast()      # Suntik CSS dari RAM (Instan)
+render_header()               # Gambar Header dari RAM (Instan)
+
+# -------------------------------
+
+# Variabel Global (tetap seperti kode lama Anda)
+user_email = st.session_state["user_email"]
+user_name = st.session_state["user_name"]
+user_role = st.session_state["user_role"]
 
 # =========================================================
 # USER INFO SETELAH LOGIN (Variabel Global)
@@ -1680,7 +1695,32 @@ def init_connections():
 spreadsheet, dbx = init_connections()
 KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
 KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
-    
+
+@st.cache_data(ttl=None, show_spinner=False)
+def load_data_ke_ram(sheet_name):
+    """Mengambil data dari GSheet dan menguncinya di RAM VPS selamanya."""
+    try:
+        if spreadsheet:
+            ws = spreadsheet.worksheet(sheet_name)
+            return pd.DataFrame(ws.get_all_records())
+    except Exception as e:
+        print(f"Gagal Load {sheet_name} ke RAM: {e}")
+    return pd.DataFrame()
+
+def prefetch_all_data_to_state():
+    """
+    Memindahkan semua data dari RAM VPS ke dalam Session State.
+    Dijalankan hanya 1x saat login sukses.
+    """
+    if "data_loaded" not in st.session_state:
+        # Gunakan load_data_ke_ram yang punya @st.cache_data(ttl=None)
+        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
+        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
+        st.session_state["df_kpi_team"] = load_data_ke_ram(SHEET_TARGET_TEAM)
+        st.session_state["df_kpi_indiv"] = load_data_ke_ram(SHEET_TARGET_INDIVIDU)
+        st.session_state["df_staf"] = get_daftar_staf_terbaru() # Ini sudah cache data
+        
+        st.session_state["data_loaded"] = True
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
 SDK = "new"
@@ -3653,14 +3693,44 @@ def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame
             after_idx.at[key, COL_UPDATED_BY] = actor
     return after_idx.reset_index(drop=True)
 
+@st.cache_resource(show_spinner=False)
+def get_cached_assets():
+    """
+    Membaca semua file fisik (Disk) hanya 1x saat VPS start, 
+    lalu menyimpannya di RAM dalam format Base64 & String.
+    """
+    assets = {
+        "logo_left": _img_to_base64(LOGO_LEFT),
+        "logo_right": _img_to_base64(LOGO_RIGHT),
+        "logo_holding": _img_to_base64(LOGO_HOLDING),
+        "hero_bg": _img_to_base64(HERO_BG),
+        "global_css": """
+            <style>
+            /* Copy seluruh isi CSS dari fungsi inject_global_css Anda di sini */
+            @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
+            :root{ --bg0:#020805; --green:#16a34a; --gold:#facc15; }
+            /* ... (lanjutkan sisa CSS Anda) ... */
+            </style>
+        """
+    }
+    return assets
+
+# Panggil aset ke variabel global (Sekali jalan, langsung masuk RAM)
+RAM_ASSETS = get_cached_assets()
+
+def inject_global_css_fast():
+    """Ganti fungsi inject_global_css lama dengan ini agar instan."""
+    st.markdown(RAM_ASSETS["global_css"], unsafe_allow_html=True)
+
 
 def render_header():
     ts_now = datetime.now(tz=TZ_JKT).strftime("%d %B %Y %H:%M:%S")
 
-    left_b64 = _img_to_base64(LOGO_LEFT)
-    right_b64 = _img_to_base64(LOGO_RIGHT)
-    holding_b64 = _img_to_base64(LOGO_HOLDING)  # Logo UMB
-    bg_b64 = _img_to_base64(HERO_BG)
+    # MENGAMBIL DATA DARI RAM VPS (INSTAN)
+    left_b64 = RAM_ASSETS["logo_left"]
+    right_b64 = RAM_ASSETS["logo_right"]
+    holding_b64 = RAM_ASSETS["logo_holding"]
+    bg_b64 = RAM_ASSETS["hero_bg"]
 
     g_on = bool(KONEKSI_GSHEET_BERHASIL)
     d_on = bool(KONEKSI_DROPBOX_BERHASIL)
@@ -3669,19 +3739,18 @@ def render_header():
         cls = "sx-pill on" if on else "sx-pill off"
         return f"<span class='{cls}'><span class='sx-dot'></span>{label}</span>"
 
-    # Style background hero (Sportarium)
+    # Style background hero menggunakan data base64 dari RAM
     hero_style = (
         f"--hero-bg: url('data:image/jpeg;base64,{bg_b64}'); "
         f"--hero-bg-pos: 50% 72%; "
         f"--hero-bg-size: 140%;"
     ) if bg_b64 else "--hero-bg: none;"
 
-    # Logo Kiri & Kanan (Mentari Sejuk)
+    # Menyiapkan elemen HTML Logo Kiri & Kanan
     left_html = f"<img src='data:image/png;base64,{left_b64}' alt='Logo EO' />" if left_b64 else ""
     right_html = f"<img src='data:image/png;base64,{right_b64}' alt='Logo Training' />" if right_b64 else ""
 
-    # --- BAGIAN BARU: Logo Holding di Paling Atas ---
-    # Kita buat div terpisah di luar card utama
+    # Menyiapkan elemen HTML Logo Holding (Paling Atas)
     top_logo_html = ""
     if holding_b64:
         top_logo_html = f"""
@@ -3692,23 +3761,23 @@ def render_header():
         </div>
         """
 
-    # Susunan HTML: Logo Atas -> Baru kemudian Hero Card
+    # Menggabungkan seluruh komponen ke dalam satu template HTML Hero
     html = f"""
-{top_logo_html}
-<div class="sx-hero" style="{hero_style}">
-<div class="sx-hero-grid">
-<div class="sx-logo-card">{left_html}</div>
-<div class="sx-hero-center">
-<div class="sx-title">🚀 {APP_TITLE}</div>
-<div class="sx-subrow">
-<span>Realtime: {ts_now}</span>
-{pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
-{pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
-</div>
-</div>
-<div class="sx-logo-card">{right_html}</div>
-</div>
-</div>
+    {top_logo_html}
+    <div class="sx-hero" style="{hero_style}">
+        <div class="sx-hero-grid">
+            <div class="sx-logo-card">{left_html}</div>
+            <div class="sx-hero-center">
+                <div class="sx-title">🚀 {APP_TITLE}</div>
+                <div class="sx-subrow">
+                    <span>Realtime: {ts_now}</span>
+                    {pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
+                    {pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
+                </div>
+            </div>
+            <div class="sx-logo-card">{right_html}</div>
+        </div>
+    </div>
     """
 
     st.markdown(html, unsafe_allow_html=True)
@@ -4811,13 +4880,9 @@ elif menu_nav == "🤝 Closing Deal":
 
 # --- 5. PEMBAYARAN ---
 elif menu_nav == "💳 Pembayaran":
-    # =========================================================
-    # [OPTIMASI RAM] SINGLE LOAD & BUFFERING SYSTEM
-    # =========================================================
-    # Logic: Cek apakah data sudah ada di RAM? Jika belum, ambil dari GSheet.
-    # Ini mencegah "loading ulang" setiap kali user mengetik atau klik tombol.
+    # 1. Cek Buffer (Jika sudah login dan prefetch jalan, ini harusnya sudah ada)
     if "buffer_pay_data" not in st.session_state:
-        with st.spinner("🚀 Memuat Database Pembayaran ke RAM (High Speed)..."):
+        with st.spinner("🚀 Inisialisasi Database..."):
             st.session_state["buffer_pay_data"] = load_pembayaran_dp()
 
     # Ambil dataframe utama langsung dari RAM (0 detik delay)
