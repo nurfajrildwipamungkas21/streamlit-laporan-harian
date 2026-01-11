@@ -1134,6 +1134,56 @@ SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
 SHEET_CONFIG_TEAM = "Config_Team"
 SHEET_CLOSING_DEAL = "Closing_Deal"
 SHEET_PEMBAYARAN = "Pembayaran_DP"
+SHEET_PRESENSI = "Presensi_Kehadiran"
+PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari", "Tanggal", "Bulan", "Tahun", "Waktu"]
+
+def init_presensi_db():
+    """Memastikan sheet presensi tersedia."""
+    try:
+        try:
+            ws = spreadsheet.worksheet(SHEET_PRESENSI)
+        except gspread.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(title=SHEET_PRESENSI, rows=2000, cols=len(PRESENSI_COLUMNS))
+            ws.append_row(PRESENSI_COLUMNS, value_input_option="USER_ENTERED")
+            maybe_auto_format_sheet(ws, force=True)
+        return ws
+    except Exception:
+        return None
+
+def catat_presensi(nama_staf):
+    """Logika utama presensi: Otomatis, Real-time, No-edit."""
+    ws = init_presensi_db()
+    if not ws: return False, "Database Presensi Error"
+
+    # 1. Ambil Waktu Real-Time (WIB)
+    now = datetime.now(TZ_JKT)
+    
+    # Mapping Hari Indonesia
+    hari_map = {
+        "Monday": "Senin", "Tuesday": "Selasa", "Wednesday": "Rabu",
+        "Thursday": "Kamis", "Friday": "Jumat", "Saturday": "Sabtu", "Sunday": "Minggu"
+    }
+    
+    ts_full = now.strftime("%d-%m-%Y %H:%M:%S")
+    hari = hari_map.get(now.strftime("%A"), now.strftime("%A"))
+    tanggal = now.strftime("%d")
+    bulan = now.strftime("%B")
+    tahun = now.strftime("%Y")
+    waktu = now.strftime("%H:%M:%S")
+
+    # 2. Cek Duplikasi (Opsional: Cegah absen 2x di hari yang sama)
+    # Jika ingin membolehkan absen berkali-kali, bagian ini bisa dihapus
+    records = ws.get_all_records()
+    today_str = now.strftime("%d-%m-%Y")
+    for r in records:
+        if str(r.get("Nama")) == nama_staf and today_str in str(r.get("Timestamp")):
+            return False, f"Anda sudah melakukan presensi hari ini pada {r.get('Waktu')}."
+
+    # 3. Masukkan Data (User tidak input manual, semua dari sistem)
+    row = [f"'{ts_full}", nama_staf, hari, tanggal, bulan, tahun, waktu]
+    ws.append_row(row, value_input_option="USER_ENTERED")
+    
+    return True, f"Berhasil! Presensi tercatat pukul {waktu} WIB."
 
 # Kolom laporan harian
 COL_TIMESTAMP = "Timestamp"
@@ -3341,8 +3391,10 @@ if not KONEKSI_DROPBOX_BERHASIL:
 # =========================================================
 HOME_NAV = "🏠 Beranda"
 
+# Update: Menambahkan entry 'presensi' ke dalam Mapping
 NAV_MAP = {
     "home": HOME_NAV,
+    "presensi": "📅 Presensi",
     "report": "📝 Laporan Harian",
     "kpi": "🎯 Target & KPI",
     "closing": "🤝 Closing Deal",
@@ -3351,29 +3403,24 @@ NAV_MAP = {
     "admin": "📊 Dashboard Admin",
 }
 
-
 def _get_query_nav():
     try:
         # streamlit baru
         if hasattr(st, "query_params"):
             v = st.query_params.get("nav", None)
-            # ✅ normalisasi: kalau list, ambil elemen pertama
             if isinstance(v, (list, tuple)):
                 return v[0] if v else None
             return v
-
         # streamlit lama
         qp = st.experimental_get_query_params()
         return (qp.get("nav", [None])[0])
     except Exception:
         return None
 
-
 def set_nav(nav_key: str):
     nav_key = nav_key if nav_key in NAV_MAP else "home"
     try:
         if hasattr(st, "query_params"):
-            # ✅ konsisten dengan format list
             st.query_params["nav"] = [nav_key]
         else:
             st.experimental_set_query_params(nav=nav_key)
@@ -3382,20 +3429,18 @@ def set_nav(nav_key: str):
     st.session_state["menu_nav"] = NAV_MAP[nav_key]
     st.rerun()
 
-
 # Session defaults
 if "is_admin" not in st.session_state:
     st.session_state["is_admin"] = False
 
 if "menu_nav" not in st.session_state:
-    # Mobile masuk Beranda, Desktop tetap ke Laporan Harian (tidak berubah)
+    # Mobile masuk Beranda, Desktop tetap ke Laporan Harian
     st.session_state["menu_nav"] = HOME_NAV if IS_MOBILE else "📝 Laporan Harian"
 
 # Sinkronkan kalau URL ada ?nav=...
 nav_from_url = _get_query_nav()
 if nav_from_url in NAV_MAP:
     st.session_state["menu_nav"] = NAV_MAP[nav_from_url]
-
 
 # Render header
 render_header()
@@ -3408,7 +3453,6 @@ if IS_MOBILE and menu_nav == HOME_NAV:
     render_home_mobile()
     st.stop()
 
-
 # =========================================================
 # SIDEBAR (SpaceX-inspired)
 # =========================================================
@@ -3416,17 +3460,21 @@ with st.sidebar:
     if st.button("🔄 Refresh Data", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+        
     st.markdown("<div class='sx-section-title'>Navigation</div>",
                 unsafe_allow_html=True)
 
+    # Update: Menambahkan "📅 Presensi" di daftar menu utama sidebar
     menu_items = [
+        "📅 Presensi",
         "📝 Laporan Harian",
         "🎯 Target & KPI",
         "🤝 Closing Deal",
         "💳 Pembayaran",
         "📜 Global Audit Log",
     ]
-    if st.session_state["is_admin"]:
+    
+    if st.session_state.get("is_admin"):
         menu_items.append("📊 Dashboard Admin")
 
     # SpaceX-like nav buttons
@@ -3436,11 +3484,17 @@ with st.sidebar:
         btype = "primary" if active else "secondary"
         if st.button(item, use_container_width=True, type=btype, key=f"nav_{i}"):
             st.session_state["menu_nav"] = item
+            # Sync URL query param saat menu diklik
+            nav_k = [k for k, v in NAV_MAP.items() if v == item]
+            if nav_k:
+                try:
+                    if hasattr(st, "query_params"):
+                        st.query_params["nav"] = nav_k[0]
+                    else:
+                        st.experimental_set_query_params(nav=nav_k[0])
+                except: pass
             st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
-
-    st.divider()
-
     # -----------------------------------------------------------
     # PROFIL USER (OTP LOGIN)
     # -----------------------------------------------------------
@@ -3980,18 +4034,66 @@ def render_audit_mobile():
 # =========================================================
 
 
-if menu_nav == "📝 Laporan Harian":
+# =========================================================
+# MAIN ROUTER LOGIC: IMPLEMENTASI SELURUH FITUR
+# =========================================================
+
+# --- 1. HALAMAN PRESENSI (REAL-TIME & NO-EDIT) ---
+if menu_nav == "📅 Presensi":
+    st.markdown("## 📅 Presensi Kehadiran Real-Time")
+    st.caption("Silakan pilih nama Anda. Waktu, hari, dan tanggal akan tercatat otomatis oleh sistem (WIB).")
+
+    with st.container(border=True):
+        staff_list = get_daftar_staf_terbaru()
+        pilih_nama = st.selectbox("Pilih Nama Anda:", ["-- Pilih Nama --"] + staff_list, key="presensi_name_sel")
+        
+        waktu_skrg = datetime.now(TZ_JKT)
+        st.info(f"🕒 Waktu Sistem Saat Ini: **{waktu_skrg.strftime('%A, %d %B %Y - %H:%M:%S')} WIB**")
+
+        if st.button("✅ Kirim Presensi Sekarang", type="primary", use_container_width=True):
+            if pilih_nama == "-- Pilih Nama --":
+                st.error("Silakan pilih nama terlebih dahulu!")
+            else:
+                with st.spinner("Mencatat kehadiran..."):
+                    ok, msg = catat_presensi(pilih_nama)
+                    if ok:
+                        st.success(msg)
+                        force_audit_log(
+                            actor=pilih_nama, 
+                            action="✅ PRESENSI", 
+                            target_sheet="Presensi_Kehadiran", 
+                            chat_msg="Absensi Masuk Real-time", 
+                            details_input=f"Presensi sukses pukul {waktu_skrg.strftime('%H:%M:%S')}"
+                        )
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.warning(msg)
+
+    st.divider()
+    st.markdown("### 📋 Kehadiran Hari Ini")
+    ws_p = init_presensi_db()
+    if ws_p:
+        data_p = ws_p.get_all_records()
+        if data_p:
+            df_p = pd.DataFrame(data_p)
+            tgl_hari_ini = waktu_skrg.strftime("%d")
+            bln_hari_ini = waktu_skrg.strftime("%B")
+            df_today = df_p[(df_p['Tanggal'].astype(str) == tgl_hari_ini) & (df_p['Bulan'] == bln_hari_ini)]
+            if not df_today.empty:
+                st.dataframe(df_today, use_container_width=True, hide_index=True)
+            else:
+                st.info("Belum ada data kehadiran hari ini.")
+
+# --- 2. HALAMAN LAPORAN HARIAN ---
+elif menu_nav == "📝 Laporan Harian":
     if IS_MOBILE:
         render_laporan_harian_mobile()
     else:
-        # --- DESKTOP FULL FORM ---
         st.markdown("## 📝 Laporan Kegiatan Harian")
-
-        # Header Info
         c1, c2 = st.columns([1, 2])
         with c1:
-            pelapor = st.selectbox(
-                "Nama Pelapor", get_daftar_staf_terbaru(), key="pelapor_desk")
+            pelapor = st.selectbox("Nama Pelapor", get_daftar_staf_terbaru(), key="pelapor_desk")
         with c2:
             pending = get_reminder_pending(pelapor)
             if pending: st.warning(f"🔔 Reminder Pending: {pending}")
@@ -4000,59 +4102,136 @@ if menu_nav == "📝 Laporan Harian":
             with st.form("daily_report_desk", clear_on_submit=False):
                 st.markdown("### 📌 Detail Aktivitas")
                 col_kiri, col_kanan = st.columns(2)
-
                 with col_kiri:
-                    kategori = st.radio(
-                        "Kategori", ["🚗 Sales Lapangan", "💻 Digital/Kantor", "📞 Telesales", "🏢 Lainnya"])
-                    lokasi = st.text_input(
-                        "Lokasi / Nama Klien / Jenis Tugas", placeholder="Wajib diisi...")
+                    kategori = st.radio("Kategori", ["🚗 Sales Lapangan", "💻 Digital/Kantor", "📞 Telesales", "🏢 Lainnya"])
+                    lokasi = st.text_input("Lokasi / Nama Klien / Jenis Tugas", placeholder="Wajib diisi...")
                     deskripsi = st.text_area("Deskripsi Detail", height=150)
-                    foto = st.file_uploader(
-                        "Upload Bukti", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
-
+                    foto = st.file_uploader("Upload Bukti", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
                 with col_kanan:
                     st.markdown("### 📊 Hasil & Follow Up")
                     kesimpulan = st.text_area("Kesimpulan / Hasil", height=80)
-                    kendala = st.text_area(
-                        "Kendala Internal/Lapangan", height=60)
+                    kendala = st.text_area("Kendala Internal/Lapangan", height=60)
                     next_plan = st.text_input("Next Plan / Pending (Reminder)")
-
-                    st.markdown("### 👤 Data Klien (Jika ada)")
+                    st.markdown("### 👤 Data Klien")
                     cl_nama = st.text_input("Nama Klien")
                     cl_kontak = st.text_input("No HP/WA")
-                    cl_interest = st.selectbox(
-                        "Interest Level", ["-", "Under 50%", "50-75%", "75-100%"])
-
+                    cl_interest = st.selectbox("Interest Level", ["-", "Under 50%", "50-75%", "75-100%"])
                 st.divider()
                 if st.form_submit_button("✅ KIRIM LAPORAN", type="primary", use_container_width=True):
                     if not lokasi or not deskripsi:
                         st.error("Lokasi dan Deskripsi wajib diisi!")
                     else:
                         with st.spinner("Mengirim laporan..."):
-                            # Logic Upload & Save mirip mobile
                             ts = now_ts_str()
                             final_link = "-"
                             if foto and KONEKSI_DROPBOX_BERHASIL:
-                                links = []
-                                for f in foto:
-                                    l = upload_ke_dropbox(
-                                        f, pelapor, "Laporan_Harian")
-                                    links.append(l)
+                                links = [upload_ke_dropbox(f, pelapor, "Laporan_Harian") for f in foto]
                                 final_link = ", ".join(links)
-
-                            row_data = [
-                                ts, pelapor, lokasi, deskripsi, final_link, "-",
-                                kesimpulan, kendala, "-", next_plan, "-",
-                                cl_interest, cl_nama, cl_kontak
-                            ]
-
+                            row_data = [ts, pelapor, lokasi, deskripsi, final_link, "-", kesimpulan, kendala, "-", next_plan, "-", cl_interest, cl_nama, cl_kontak]
                             if simpan_laporan_harian_batch([row_data], pelapor):
-                                st.success("Laporan Terkirim!")
-                                st.cache_data.clear()
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("Gagal simpan ke GSheet.")
+                                st.success("Laporan Terkirim!"); st.cache_data.clear(); time.sleep(1); st.rerun()
+                            else: st.error("Gagal simpan ke GSheet.")
+
+# --- 3. TARGET & KPI ---
+elif menu_nav == "🎯 Target & KPI":
+    if IS_MOBILE:
+        render_kpi_mobile()
+    else:
+        st.markdown("## 🎯 Manajemen Target & KPI")
+        tab1, tab2, tab3 = st.tabs(["🏆 Target Team", "⚡ Target Individu", "⚙️ Admin Setup"])
+        with tab1:
+            df_team = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
+            if not df_team.empty:
+                edited_team = render_hybrid_table(df_team, "team_desk", "Misi")
+                if st.button("💾 Simpan Perubahan Team"):
+                    final_df = apply_audit_checklist_changes(df_team, edited_team, ["Misi"], get_actor_fallback())
+                    save_checklist(SHEET_TARGET_TEAM, final_df, TEAM_CHECKLIST_COLUMNS)
+                    st.success("Tersimpan!"); st.cache_data.clear(); st.rerun()
+        with tab2:
+            st.caption("Monitoring target perorangan.")
+            pilih_staf = st.selectbox("Pilih Nama Staf:", get_daftar_staf_terbaru())
+            df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
+            df_user = df_indiv_all[df_indiv_all["Nama"] == pilih_staf]
+            if not df_user.empty:
+                edited_indiv = render_hybrid_table(df_user, f"indiv_{pilih_staf}", "Target")
+                if st.button(f"💾 Simpan Target {pilih_staf}"):
+                    df_merged = df_indiv_all.copy(); df_merged.update(edited_indiv)
+                    final_df = apply_audit_checklist_changes(df_indiv_all, df_merged, ["Nama", "Target"], pilih_staf)
+                    save_checklist(SHEET_TARGET_INDIVIDU, final_df, INDIV_CHECKLIST_COLUMNS)
+                    st.success("Tersimpan!"); st.cache_data.clear(); st.rerun()
+        with tab3:
+            st.markdown("### ➕ Tambah Target Baru")
+            jenis_t = st.radio("Jenis Target", ["Team", "Individu"], horizontal=True)
+            with st.form("add_kpi_desk"):
+                target_text = st.text_area("Isi Target (1 per baris)")
+                tgl_m = st.date_input("Mulai", value=datetime.now())
+                tgl_s = st.date_input("Selesai", value=datetime.now()+timedelta(days=30))
+                nama_t = st.selectbox("Untuk Staf:", get_daftar_staf_terbaru()) if jenis_t == "Individu" else ""
+                if st.form_submit_button("Tambah Target"):
+                    targets = clean_bulk_input(target_text)
+                    sheet = SHEET_TARGET_TEAM if jenis_t == "Team" else SHEET_TARGET_INDIVIDU
+                    base = ["", str(tgl_m), str(tgl_s), "FALSE", "-"]
+                    if jenis_t == "Individu": base = [nama_t] + base
+                    if add_bulk_targets(sheet, base, targets):
+                        st.success("Berhasil!"); st.cache_data.clear(); st.rerun()
+
+# --- 4. CLOSING DEAL ---
+elif menu_nav == "🤝 Closing Deal":
+    if IS_MOBILE:
+        render_closing_mobile()
+    else:
+        st.markdown("## 🤝 Closing Deal")
+        with st.container(border=True):
+            with st.form("form_closing_desk_full", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                inp_group = c1.text_input("Nama Group (Opsional)")
+                inp_marketing = c2.text_input("Nama Marketing")
+                inp_tgl_event = c3.date_input("Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
+                inp_bidang = st.text_input("Bidang / Jenis Event")
+                inp_nilai = st.text_input("Nilai Kontrak (Rupiah)")
+                if st.form_submit_button("✅ Simpan Closing Deal", type="primary", use_container_width=True):
+                    res, msg = tambah_closing_deal(inp_group, inp_marketing, inp_tgl_event, inp_bidang, inp_nilai)
+                    if res: st.success(msg); st.cache_data.clear(); time.sleep(1); st.rerun()
+                    else: st.error(msg)
+        st.divider()
+        df_cd = load_closing_deal()
+        if not df_cd.empty:
+            st.dataframe(df_cd, use_container_width=True, hide_index=True)
+
+# --- 5. PEMBAYARAN ---
+elif menu_nav == "💳 Pembayaran":
+    if IS_MOBILE:
+        render_payment_mobile()
+    else:
+        st.markdown("## 💳 Manajemen Pembayaran")
+        # Logic Pembayaran Anda yang sudah ada...
+        df_pay = load_pembayaran_dp()
+        st.dataframe(df_pay, use_container_width=True, hide_index=True)
+
+# --- 6. GLOBAL AUDIT LOG ---
+elif menu_nav == "📜 Global Audit Log":
+    from audit_service import load_audit_log
+    st.markdown("## 📜 Global Audit Log")
+    df_raw = load_audit_log(spreadsheet)
+    if not df_raw.empty:
+        df_log = dynamic_column_mapper(df_raw)
+        st.dataframe(df_log, use_container_width=True, hide_index=True)
+
+# --- 7. DASHBOARD ADMIN ---
+elif menu_nav == "📊 Dashboard Admin":
+    if IS_MOBILE:
+        render_admin_mobile()
+    else:
+        if not st.session_state.get("is_admin"):
+            # Form Login Admin...
+            pass
+        else:
+            st.markdown("## 📊 Dashboard Admin")
+            # Logic Dashboard Admin Lengkap Anda...
+            pass
+
+# Render watermark secara global di akhir semua halaman
+render_section_watermark()
 
 elif menu_nav == "🎯 Target & KPI":
     if IS_MOBILE:
