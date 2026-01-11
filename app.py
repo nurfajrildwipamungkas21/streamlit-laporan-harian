@@ -4323,7 +4323,8 @@ def render_admin_mobile():
                     st.info(ai_response.text)
                     
                 except Exception as e:
-                    st.error(f"⚠️ Kendala Teknis: {str(e)}")
+                    # Hapus baris st.warning lama, ganti dengan st.error untuk melihat masalah asli
+                    st.error(f"⚠️ DEBUG ERROR: {str(e)}")
         else:
             st.info("No data")
 
