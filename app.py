@@ -2398,10 +2398,12 @@ def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
 # TARGET / CHECKLIST HELPERS
 # =========================================================
 def clean_bulk_input(text_input):
-    lines = (text_input or "").split("\\n")
+    # GUNAKAN \n (satu backslash), bukan \\n
+    lines = (text_input or "").split("\n") 
     cleaned_targets = []
     for line in lines:
-        cleaned = re.sub(r"^[\\d\\.\\-\\*\\s]+", "", line).strip()
+        # Regex ini akan menghapus angka "1.", "2.", "-", atau "*" di awal baris
+        cleaned = re.sub(r"^[\d\.\-\*\s]+", "", line).strip()
         if cleaned:
             cleaned_targets.append(cleaned)
     return cleaned_targets
@@ -4563,22 +4565,49 @@ elif menu_nav == "🎯 Target & KPI":
             st.caption("Monitoring target perorangan.")
             pilih_staf = st.selectbox(
                 "Pilih Nama Staf:", get_daftar_staf_terbaru())
+            
             df_indiv_all = load_checklist(
                 SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
             df_user = df_indiv_all[df_indiv_all["Nama"] == pilih_staf]
+            
             if not df_user.empty:
+                # ==========================================
+                # ANCHOR: LOGIKA PROGRESS BAR (PENTING)
+                # ==========================================
+                total_target = len(df_user)
+                # Menghitung jumlah baris yang statusnya dicentang (True)
+                jumlah_selesai = df_user["Status"].sum() 
+                persentase = jumlah_selesai / total_target if total_target > 0 else 0
+                
+                # Tampilan Visual Progres
+                st.markdown(f"### 📈 Progres {pilih_staf}: {int(persentase * 100)}%")
+                st.progress(persentase)
+                st.write(f"✅ **{jumlah_selesai}** selesai dari **{total_target}** target.")
+                st.divider()
+                # ==========================================
+
+                # Tabel editor untuk mencentang target
                 edited_indiv = render_hybrid_table(
                     df_user, f"indiv_{pilih_staf}", "Target")
-                if st.button(f"💾 Simpan Target {pilih_staf}"):
+                
+                if st.button(f"💾 Simpan Target {pilih_staf}", use_container_width=True):
                     df_merged = df_indiv_all.copy()
+                    
+                    # Update data lama dengan data hasil editan tabel
                     df_merged.update(edited_indiv)
+                    
                     final_df = apply_audit_checklist_changes(
                         df_indiv_all, df_merged, ["Nama", "Target"], pilih_staf)
-                    save_checklist(SHEET_TARGET_INDIVIDU,
-                                   final_df, INDIV_CHECKLIST_COLUMNS)
-                    st.success("Tersimpan!")
-                    st.cache_data.clear()
-                    st.rerun()
+                    
+                    if save_checklist(SHEET_TARGET_INDIVIDU, final_df, INDIV_CHECKLIST_COLUMNS):
+                        st.success(f"Berhasil menyimpan progres {pilih_staf}!")
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Gagal menyimpan ke database.")
+            else:
+                st.info(f"Belum ada target yang ditugaskan untuk {pilih_staf}.")
         with tab3:
             st.markdown("### ➕ Tambah Target Baru")
             jenis_t = st.radio(
