@@ -388,6 +388,44 @@ st.set_page_config(
 )
 
 # =========================================================
+# CONNECTIONS (PERSISTENT IN RAM)
+# =========================================================
+@st.cache_resource(ttl=None, show_spinner=False) # Simpan selamanya di RAM
+def init_connections():
+    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
+    gs_obj = None
+    dbx_obj = None
+    
+    # 1. Setup Google Sheets
+    try:
+        if "gcp_service_account" in st.secrets:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(creds)
+            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
+            
+            # Pre-load Audit Sheet agar tidak perlu dicek lagi nanti
+            from audit_service import ensure_audit_sheet
+            try: ensure_audit_sheet(gs_obj)
+            except: pass
+    except Exception as e:
+        print(f"⚠️ GSheet Init Error: {e}")
+
+    # 2. Setup Dropbox
+    try:
+        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
+            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
+            dbx_obj.users_get_current_account()
+    except Exception as e:
+        print(f"⚠️ Dropbox Init Error: {e}")
+        
+    return gs_obj, dbx_obj
+
+# =========================================================
 # SYSTEM LOGIN OTP VIA EMAIL
 # =========================================================
 
@@ -1684,44 +1722,6 @@ def admin_secret_configured() -> bool:
     except Exception:
         return False
 
-
-# =========================================================
-# CONNECTIONS (PERSISTENT IN RAM)
-# =========================================================
-@st.cache_resource(ttl=None, show_spinner=False) # Simpan selamanya di RAM
-def init_connections():
-    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
-    gs_obj = None
-    dbx_obj = None
-    
-    # 1. Setup Google Sheets
-    try:
-        if "gcp_service_account" in st.secrets:
-            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-
-            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-            gc = gspread.authorize(creds)
-            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
-            
-            # Pre-load Audit Sheet agar tidak perlu dicek lagi nanti
-            from audit_service import ensure_audit_sheet
-            try: ensure_audit_sheet(gs_obj)
-            except: pass
-    except Exception as e:
-        print(f"⚠️ GSheet Init Error: {e}")
-
-    # 2. Setup Dropbox
-    try:
-        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
-            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
-            dbx_obj.users_get_current_account()
-    except Exception as e:
-        print(f"⚠️ Dropbox Init Error: {e}")
-        
-    return gs_obj, dbx_obj
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
 SDK = "new"
