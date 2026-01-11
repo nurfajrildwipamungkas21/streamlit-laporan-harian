@@ -25,69 +25,64 @@ import textwrap
 from audit_service import log_admin_action, compare_and_get_changes
 
 # =========================================================
-# CONSTANTS
-# =========================================================
-NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
-FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
-
-# Sheet Names
-SHEET_CONFIG_NAMA = "Config_Staf"
-SHEET_TARGET_TEAM = "Target_Team_Checklist"
-SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
-SHEET_CONFIG_TEAM = "Config_Team"
-SHEET_CLOSING_DEAL = "Closing_Deal"
-SHEET_PEMBAYARAN = "Pembayaran_DP"
-SHEET_PRESENSI = "Presensi_Kehadiran"
-PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari",
-                    "Tanggal", "Bulan", "Tahun", "Waktu"]
-
-# =========================================================
 # [BARU] SISTEM LOGGING LANGSUNG (ANTI-GAGAL)
 # =========================================================
 # Ganti fungsi force_audit_log dengan ini
 
-
-import threading
-
-def _background_log_worker(actor, action, target_sheet, chat_msg, details_input):
-    """Worker yang berjalan di background tanpa mengganggu UI."""
-    try:
-        ws = spreadsheet.worksheet("Global_Audit_Log")
-        ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
-        
-        # Format detail
-        final_details = str(details_input)[:4000] # Cegah error teks terlalu panjang
-        if isinstance(details_input, dict):
-            final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()])
-
-        row = [f"'{ts}", str(actor), str(action), str(target_sheet), str(chat_msg), final_details]
-        ws.append_row(row, value_input_option="USER_ENTERED")
-    except Exception as e:
-        print(f"Log Error: {e}")
-
-import threading
-
-def _background_log_worker(actor, action, target_sheet, chat_msg, details_input):
-    """Worker berjalan di background thread."""
-    try:
-        if not spreadsheet: return
-        ws = spreadsheet.worksheet("Global_Audit_Log")
-        ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
-        final_details = str(details_input)[:4000] 
-        if isinstance(details_input, dict):
-            final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()])
-        row = [f"'{ts}", str(actor), str(action), str(target_sheet), str(chat_msg), final_details]
-        ws.append_row(row, value_input_option="USER_ENTERED")
-    except Exception as e:
-        print(f"Log Background Error: {e}")
-
 def force_audit_log(actor, action, target_sheet, chat_msg, details_input):
-    """Langsung return True agar UI instan, log jalan sendiri."""
-    threading.Thread(
-        target=_background_log_worker, 
-        args=(actor, action, target_sheet, chat_msg, details_input)
-    ).start()
-    return True
+    try:
+        SHEET_NAME = "Global_Audit_Log"
+        try:
+            ws = spreadsheet.worksheet(SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            # Buat baru jika tidak ada dengan header standar
+            ws = spreadsheet.add_worksheet(title=SHEET_NAME, rows=1000, cols=6)
+            ws.append_row(["Waktu", "User", "Status", "Target Data", "Chat & Catatan",
+                          "Detail Perubahan"], value_input_option="USER_ENTERED")
+
+        # Ambil header untuk tahu urutan kolom
+        headers = ws.row_values(1)
+
+        ts = datetime.now(ZoneInfo("Asia/Jakarta")
+                          ).strftime("%d-%m-%Y %H:%M:%S")
+        final_details = "\n".join([f"â€¢ {k}: {v}" for k, v in details_input.items()]) if isinstance(
+            details_input, dict) else (str(details_input) if details_input else "-")
+
+        # Data yang akan dimasukkan (Mapping Keyword ke Value)
+        payload = {
+            "waktu": f"'{ts}",
+            "user": str(actor),
+            "pelaku": str(actor),
+            "status": str(action),
+            "aksi": str(action),  # Menangkap "Aksi Dilakukan"
+            "target": str(target_sheet),
+            "nama data": str(target_sheet),
+            "chat": str(chat_msg),
+            "catatan": str(chat_msg),
+            "alasan": str(chat_msg),
+            "detail": str(final_details),
+            "rincian": str(final_details)
+        }
+
+        # Susun baris baru mengikuti urutan header di GSheet secara dinamis
+        row_to_append = [""] * len(headers)
+        for i, h in enumerate(headers):
+            h_lower = h.lower()
+            for key, val in payload.items():
+                if key in h_lower:
+                    row_to_append[i] = val
+                    break
+
+        # Jika baris masih kosong (header tidak cocok), gunakan format default di akhir
+        if all(x == "" for x in row_to_append):
+            row_to_append = [f"'{ts}", str(actor), str(action), str(
+                target_sheet), str(chat_msg), str(final_details)]
+
+        ws.append_row(row_to_append, value_input_option="USER_ENTERED")
+        return True
+    except Exception as e:
+        print(f"âš ï¸ FORCE LOG ERROR: {e}")
+        return False
 
 
 # =========================================================
@@ -137,12 +132,12 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
     for k, v_new in row_dict_new.items():
         v_old = row_dict_old.get(k, "")
         if str(v_new).strip() != str(v_old).strip():
-            diff_log[k] = f"{v_old} ➡ {v_new}"
+            diff_log[k] = f"{v_old} âž¡ {v_new}"
     diff_str = "\n".join(
         [f"{k}: {v}" for k, v in diff_log.items()]) if diff_log else "Re-save data."
 
-    force_audit_log(actor=requestor, action="⏳ PENDING", target_sheet=target_sheet,
-                    chat_msg=f"🙋‍♂️ [ADMIN]: {reason}", details_input=diff_str)
+    force_audit_log(actor=requestor, action="â³ PENDING", target_sheet=target_sheet,
+                    chat_msg=f"ðŸ™‹â€â™‚ï¸ [ADMIN]: {reason}", details_input=diff_str)
     return True, "Permintaan terkirim!"
 
 
@@ -155,8 +150,8 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
         req = all_requests[request_index_0based]
 
         if action == "REJECT":
-            force_audit_log(actor=admin_name, action="❌ DITOLAK",
-                            target_sheet=req["Target Sheet"], chat_msg=f"⛔ [MANAGER]: {rejection_note}", details_input=f"Pengaju: {req['Requestor']}")
+            force_audit_log(actor=admin_name, action="âŒ DITOLAK",
+                            target_sheet=req["Target Sheet"], chat_msg=f"â›” [MANAGER]: {rejection_note}", details_input=f"Pengaju: {req['Requestor']}")
             ws_pending.delete_rows(request_index_0based + 2)
             return True, "Ditolak."
 
@@ -168,8 +163,8 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             gsheet_row = int(req["Row Index (0-based)"]) + 2
             ws_target.update(range_name=f"A{gsheet_row}", values=[
                              row_values], value_input_option="USER_ENTERED")
-            force_audit_log(actor=admin_name, action="✅ SUKSES/ACC",
-                            target_sheet=req["Target Sheet"], chat_msg="✅ [MANAGER]: Disetujui.", details_input=f"Pengaju: {req['Requestor']}")
+            force_audit_log(actor=admin_name, action="âœ… SUKSES/ACC",
+                            target_sheet=req["Target Sheet"], chat_msg="âœ… [MANAGER]: Disetujui.", details_input=f"Pengaju: {req['Requestor']}")
             ws_pending.delete_rows(request_index_0based + 2)
             return True, "Disetujui."
     except Exception as e:
@@ -245,7 +240,7 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
         v_old = row_dict_old.get(k, "")
         # Normalisasi string agar tidak false alarm (spasi, dll)
         if str(v_new).strip() != str(v_old).strip():
-            diff_log[k] = f"{v_old} ➡ {v_new}"
+            diff_log[k] = f"{v_old} âž¡ {v_new}"
 
     # Flatten Dictionary ke String (agar muncul rapi di kolom 'Detail Perubahan')
     if not diff_log:
@@ -257,12 +252,12 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
     # --- 5. Format Chat & Catat Log (Revisi dari Code Kedua) ---
 
     # Format Chat Admin agar lebih interaktif di UI
-    final_chat = f"🙋‍♂️ [ADMIN]: {reason}" if reason else "🙋‍♂️ [ADMIN]: Request Update Data."
+    final_chat = f"ðŸ™‹â€â™‚ï¸ [ADMIN]: {reason}" if reason else "ðŸ™‹â€â™‚ï¸ [ADMIN]: Request Update Data."
 
     # Panggil fungsi logging yang baru
     force_audit_log(
         actor=requestor,
-        action="⏳ PENDING",       # Status Jelas
+        action="â³ PENDING",       # Status Jelas
         target_sheet=target_sheet,
         chat_msg=final_chat,       # Masuk ke kolom "Chat & Catatan"
         details_input=diff_str     # Masuk ke kolom "Detail Perubahan"
@@ -310,7 +305,7 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             for k, v in new_d.items():
                 old_v = old_d.get(k, "")
                 if str(old_v).strip() != str(v).strip():
-                    diff_list.append(f"• {k}: '{old_v}' ➡ '{v}'")
+                    diff_list.append(f"â€¢ {k}: '{old_v}' âž¡ '{v}'")
 
             diff_str_log = "\n".join(
                 diff_list) if diff_list else "Re-save (Tanpa Perubahan Nilai)."
@@ -327,9 +322,9 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             # LOG BARU: Menggunakan parameter 'chat_msg' dan 'details_input'
             force_audit_log(
                 actor=admin_name,
-                action="❌ DITOLAK",
+                action="âŒ DITOLAK",
                 target_sheet=target_sheet_name,
-                chat_msg=f"⛔ [MANAGER]: {final_reason}",
+                chat_msg=f"â›” [MANAGER]: {final_reason}",
                 details_input=f"Pengaju: {requestor_name}\n(Data dikembalikan ke Admin)"
             )
 
@@ -355,9 +350,9 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
             # 2. LOG BARU: Mencatat Sukses dengan detail perubahan
             force_audit_log(
                 actor=admin_name,
-                action="✅ SUKSES/ACC",
+                action="âœ… SUKSES/ACC",
                 target_sheet=target_sheet_name,
-                chat_msg="✅ [MANAGER]: Disetujui & Data Terupdate.",
+                chat_msg="âœ… [MANAGER]: Disetujui & Data Terupdate.",
                 details_input=f"Pengaju: {requestor_name}\n---\n{diff_str_log}"
             )
 
@@ -399,48 +394,10 @@ except ImportError:
 APP_TITLE = "Sales & Marketing Action Center"
 st.set_page_config(
     page_title=APP_TITLE,
-    page_icon="🚀",
+    page_icon="ðŸš€",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# =========================================================
-# CONNECTIONS (PERSISTENT IN RAM)
-# =========================================================
-@st.cache_resource(ttl=None, show_spinner=False) # Simpan selamanya di RAM
-def init_connections():
-    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
-    gs_obj = None
-    dbx_obj = None
-    
-    # 1. Setup Google Sheets
-    try:
-        if "gcp_service_account" in st.secrets:
-            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-
-            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-            gc = gspread.authorize(creds)
-            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
-            
-            # Pre-load Audit Sheet agar tidak perlu dicek lagi nanti
-            from audit_service import ensure_audit_sheet
-            try: ensure_audit_sheet(gs_obj)
-            except: pass
-    except Exception as e:
-        print(f"⚠️ GSheet Init Error: {e}")
-
-    # 2. Setup Dropbox
-    try:
-        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
-            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
-            dbx_obj.users_get_current_account()
-    except Exception as e:
-        print(f"⚠️ Dropbox Init Error: {e}")
-        
-    return gs_obj, dbx_obj
 
 # =========================================================
 # SYSTEM LOGIN OTP VIA EMAIL
@@ -501,7 +458,7 @@ def generate_otp():
 
 def login_page():
     st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center;'>🔐 Access Portal</h1>",
+    st.markdown("<h1 style='text-align: center;'>ðŸ” Access Portal</h1>",
                 unsafe_allow_html=True)
     st.markdown(
         f"<p style='text-align: center;'>{APP_TITLE}</p>", unsafe_allow_html=True)
@@ -510,11 +467,12 @@ def login_page():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         # MEMBUAT TABS: Staff (Langsung) vs Admin (OTP)
-        tab_staff, tab_admin = st.tabs(["🚀 Akses Staff", "🛡️ Login Admin"])
+        tab_staff, tab_admin = st.tabs(
+            ["ðŸš€ Akses Staff", "ðŸ›¡ï¸ Login Admin"])
 
         # --- TAB 1: AKSES STAFF (LANGSUNG) ---
         with tab_staff:
-            st.markdown("### 👋 Halo, Team!")
+            st.markdown("### ðŸ‘‹ Halo, Team!")
             st.info("Klik tombol di bawah untuk masuk dan mulai membuat laporan.")
 
             if st.button("Masuk Aplikasi (Staff)", type="primary", use_container_width=True):
@@ -560,7 +518,7 @@ def login_page():
                                     "Gagal kirim email (Cek Config SMTP).")
                         else:
                             st.error(
-                                "⛔ Akses Ditolak: Email tidak terdaftar sebagai Admin/Manager.")
+                                "â›” Akses Ditolak: Email tidak terdaftar sebagai Admin/Manager.")
 
             # Step 2: Input OTP
             elif st.session_state.get("otp_step") == 2:
@@ -573,12 +531,12 @@ def login_page():
                     c_back, c_ok = st.columns(2)
 
                     # Tombol Kembali
-                    if c_back.form_submit_button("⬅️ Ganti Email"):
+                    if c_back.form_submit_button("â¬…ï¸ Ganti Email"):
                         st.session_state["otp_step"] = 1
                         st.rerun()
 
                     # Tombol Verifikasi
-                    if c_ok.form_submit_button("Verifikasi ✅", type="primary"):
+                    if c_ok.form_submit_button("Verifikasi âœ…", type="primary"):
                         if otp_input == st.session_state["generated_otp"]:
                             # LOGIN ADMIN/MANAGER SUKSES
                             email_fix = st.session_state["temp_email"]
@@ -693,38 +651,25 @@ def delete_staff_account(username):
         return True, f"User {username} dihapus."
     except gspread.exceptions.CellNotFound:
         return False, "Username tidak ditemukan."
-    
 
-# Load Global Connections dari Cache
-spreadsheet, dbx = init_connections()
-KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
-KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
 
-@st.cache_data(ttl=None, show_spinner=False)
-def load_data_ke_ram(sheet_name):
-    """Mengambil data dari GSheet dan menguncinya di RAM VPS selamanya."""
-    try:
-        if spreadsheet:
-            ws = spreadsheet.worksheet(sheet_name)
-            return pd.DataFrame(ws.get_all_records())
-    except Exception as e:
-        print(f"Gagal Load {sheet_name} ke RAM: {e}")
-    return pd.DataFrame()
+# =========================================================
+# MAIN FLOW CHECK
+# =========================================================
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
 
-def prefetch_all_data_to_state():
-    """
-    Memindahkan semua data dari RAM VPS ke dalam Session State.
-    Dijalankan hanya 1x saat login sukses.
-    """
-    if "data_loaded" not in st.session_state:
-        # Gunakan load_data_ke_ram yang punya @st.cache_data(ttl=None)
-        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
-        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
-        st.session_state["df_kpi_team"] = load_data_ke_ram(SHEET_TARGET_TEAM)
-        st.session_state["df_kpi_indiv"] = load_data_ke_ram(SHEET_TARGET_INDIVIDU)
-        st.session_state["df_staf"] = get_daftar_staf_terbaru() # Ini sudah cache data
-        
-        st.session_state["data_loaded"] = True
+if not st.session_state["logged_in"]:
+    login_page()
+    st.stop()  # Berhenti disini jika belum login
+
+# =========================================================
+# USER INFO SETELAH LOGIN (Variabel Global)
+# =========================================================
+# Variabel ini akan dipakai di seluruh aplikasi
+user_email = st.session_state["user_email"]
+user_name = st.session_state["user_name"]
+user_role = st.session_state["user_role"]
 
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
@@ -757,13 +702,13 @@ except ImportError:
 APP_TITLE = "Sales & Marketing Action Center"
 st.set_page_config(
     page_title=APP_TITLE,
-    page_icon="🚀",
+    page_icon="ðŸš€",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # =========================================================
-# GLOBAL STYLE (SpaceX x Muhammadiyah — Elegant, International)
+# GLOBAL STYLE (SpaceX x Muhammadiyah â€” Elegant, International)
 # =========================================================
 
 
@@ -1145,7 +1090,7 @@ def inject_global_css():
         }
 
         /* =========================================
-           PATCH LANJUTAN – KONTRAS TEKS DI DALAM CARD
+           PATCH LANJUTAN â€“ KONTRAS TEKS DI DALAM CARD
            (Riwayat Closing, dst)
            ========================================= */
 
@@ -1273,6 +1218,24 @@ def ui_toast(message: str, icon=None):
     st.success(message)
 
 
+# =========================================================
+# CONSTANTS
+# =========================================================
+NAMA_GOOGLE_SHEET = "Laporan Kegiatan Harian"
+FOLDER_DROPBOX = "/Laporan_Kegiatan_Harian"
+
+# Sheet Names
+SHEET_CONFIG_NAMA = "Config_Staf"
+SHEET_TARGET_TEAM = "Target_Team_Checklist"
+SHEET_TARGET_INDIVIDU = "Target_Individu_Checklist"
+SHEET_CONFIG_TEAM = "Config_Team"
+SHEET_CLOSING_DEAL = "Closing_Deal"
+SHEET_PEMBAYARAN = "Pembayaran_DP"
+SHEET_PRESENSI = "Presensi_Kehadiran"
+PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari",
+                    "Tanggal", "Bulan", "Tahun", "Waktu"]
+
+
 def init_presensi_db():
     """Memastikan sheet presensi tersedia."""
     try:
@@ -1374,32 +1337,33 @@ COL_BIDANG = "Bidang"
 COL_NILAI_KONTRAK = "Nilai Kontrak"  # disimpan sebagai angka (int)
 
 CLOSING_COLUMNS = [
-    COL_GROUP, 
-    COL_MARKETING, 
-    COL_TGL_EVENT, 
-    COL_BIDANG, 
+    COL_GROUP,
+    COL_MARKETING,
+    COL_TGL_EVENT,
+    COL_BIDANG,
     COL_NILAI_KONTRAK
 ]
 
 # --- 2. Target / Checklist Columns ---
 TEAM_CHECKLIST_COLUMNS = [
-    "Misi", "Tgl_Mulai", "Tgl_Selesai", "Status", 
+    "Misi", "Tgl_Mulai", "Tgl_Selesai", "Status",
     "Bukti/Catatan", COL_TS_UPDATE, COL_UPDATED_BY
 ]
 INDIV_CHECKLIST_COLUMNS = [
-    "Nama", "Target", "Tgl_Mulai", "Tgl_Selesai", "Status", 
+    "Nama", "Target", "Tgl_Mulai", "Tgl_Selesai", "Status",
     "Bukti/Catatan", COL_TS_UPDATE, COL_UPDATED_BY
 ]
 
 # --- 3. Smart Pembayaran Columns (Update Khusus) ---
 COL_TS_BAYAR = "Timestamp Input"
-COL_NILAI_KESEPAKATAN = "Total Nilai Kesepakatan" # [NEW]
+COL_NILAI_KESEPAKATAN = "Total Nilai Kesepakatan"  # [NEW]
 COL_JENIS_BAYAR = "Jenis Pembayaran"             # DP, Cicilan, atau Cash
 COL_NOMINAL_BAYAR = "Nominal Pembayaran"         # Nominal yang masuk saat ini
 COL_TENOR_CICILAN = "Tenor (Bulan)"              # [NEW]
 COL_SISA_BAYAR = "Sisa Pembayaran"               # [NEW] Kalkulator Otomatis
 COL_JATUH_TEMPO = "Batas Waktu Bayar"
-COL_STATUS_BAYAR = "Status Pembayaran"           # Deskripsi status (Lunas/Belum)
+# Deskripsi status (Lunas/Belum)
+COL_STATUS_BAYAR = "Status Pembayaran"
 COL_BUKTI_BAYAR = "Bukti Pembayaran"
 COL_CATATAN_BAYAR = "Catatan"
 
@@ -1408,7 +1372,7 @@ PAYMENT_COLUMNS = [
     COL_GROUP,
     COL_MARKETING,
     COL_TGL_EVENT,
-    COL_NILAI_KESEPAKATAN, # Letakkan total di awal agar alur logika jelas
+    COL_NILAI_KESEPAKATAN,  # Letakkan total di awal agar alur logika jelas
     COL_JENIS_BAYAR,
     COL_NOMINAL_BAYAR,
     COL_TENOR_CICILAN,
@@ -1461,51 +1425,67 @@ def now_ts_str() -> str:
 # =========================================================
 # [MIGRASI] PEMBAYARAN LOGIC HELPERS
 # =========================================================
+
+
 def parse_payment_log_lines(log_text: str):
     log_text = safe_str(log_text, "").strip()
-    if not log_text: return []
+    if not log_text:
+        return []
     raw_lines = [ln.rstrip() for ln in log_text.splitlines() if ln.strip()]
     out = []
     for ln in raw_lines:
         mnum = re.match(r"^\s*\d+\.\s*(.*)$", ln)
-        if mnum: ln = mnum.group(1).rstrip()
+        if mnum:
+            ln = mnum.group(1).rstrip()
         m = re.match(r"^\[(.*?)\]\s*\((.*?)\)\s*(.*)$", ln)
         if m:
-            ts, actor, rest = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+            ts, actor, rest = m.group(1).strip(), m.group(
+                2).strip(), m.group(3).strip()
             prefix = f"[{ts}] ({actor})"
             if rest:
                 parts = [p.strip() for p in rest.split(";") if p.strip()]
                 if parts:
                     out.append(f"{prefix} {parts[0]}")
-                    for p in parts[1:]: out.append(f" {p}")
-                else: out.append(prefix)
-            else: out.append(prefix)
-        else: out.append(ln)
+                    for p in parts[1:]:
+                        out.append(f" {p}")
+                else:
+                    out.append(prefix)
+            else:
+                out.append(prefix)
+        else:
+            out.append(ln)
     return out
+
 
 def build_numbered_log(lines):
     lines = [str(l).rstrip() for l in (lines or []) if safe_str(l, "").strip()]
     return "\n".join([f"{i}. {line}" for i, line in enumerate(lines, 1)]).strip()
+
 
 def _fmt_payment_val_for_log(col_name: str, v):
     if col_name == COL_NOMINAL_BAYAR:
         x = parse_rupiah_to_int(v)
         return format_rupiah_display(x) if x is not None else "-"
     if col_name == COL_STATUS_BAYAR:
-        return "✅ Dibayar" if normalize_bool(v) else "⏳ Belum"
+        return "âœ… Dibayar" if normalize_bool(v) else "â³ Belum"
     if col_name in {COL_JATUH_TEMPO, COL_TGL_EVENT}:
         d = normalize_date(v)
         return d.strftime("%Y-%m-%d") if d else "-"
     s = safe_str(v, "-").replace("\n", " ").strip()
     return s if s else "-"
 
+
 def append_payment_ts_update(existing_log: str, ts: str, actor: str, changes):
     lines = parse_payment_log_lines(existing_log)
-    changes = [safe_str(c, "").strip() for c in (changes or []) if safe_str(c, "").strip()]
-    if not changes: return build_numbered_log(lines)
-    actor, ts = (safe_str(actor, "-").strip() or "-"), (safe_str(ts, now_ts_str()).strip() or now_ts_str())
+    changes = [safe_str(c, "").strip()
+               for c in (changes or []) if safe_str(c, "").strip()]
+    if not changes:
+        return build_numbered_log(lines)
+    actor, ts = (safe_str(actor, "-").strip()
+                 or "-"), (safe_str(ts, now_ts_str()).strip() or now_ts_str())
     lines.append(f"[{ts}] ({actor}) {changes[0]}")
-    for c in changes[1:]: lines.append(f" {c}")
+    for c in changes[1:]:
+        lines.append(f" {c}")
     return build_numbered_log(lines)
 
 
@@ -1581,6 +1561,7 @@ def dynamic_column_mapper(df):
 # [BARU] DYNAMIC UI HELPERS (Anti-Crash & Auto-Type)
 # =========================================================
 
+
 def clean_df_types_dynamically(df: pd.DataFrame) -> pd.DataFrame:
     """
     Versi Perbaikan: Menggunakan datetime64[ns] dan sinkronisasi keyword 
@@ -1589,25 +1570,27 @@ def clean_df_types_dynamically(df: pd.DataFrame) -> pd.DataFrame:
     df_clean = df.copy()
     for col in df_clean.columns:
         col_lower = col.lower()
-        
+
         # 1. Kolom Numerik: Pastikan murni angka dan isi NaN dengan 0
         # Menambahkan 'tenor' agar konsisten dengan NumberColumn
         if any(key in col_lower for key in ["nilai", "nominal", "sisa", "kontrak", "sepakat", "tenor"]):
             # Konversi rupiah string ke int, lalu paksa ke numeric murni
             df_clean[col] = pd.to_numeric(
-                df_clean[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x), 
+                df_clean[col].apply(lambda x: parse_rupiah_to_int(
+                    x) if isinstance(x, str) else x),
                 errors='coerce'
             ).fillna(0)
-            
+
         # 2. Kolom Tanggal: Gunakan tipe datetime pandas asli
         elif any(key in col_lower for key in ["tanggal", "tempo", "waktu"]):
             if not any(k in col_lower for k in ["log", "update", "timestamp"]):
-                # PERBAIKAN: Hapus .dt.date. 
+                # PERBAIKAN: Hapus .dt.date.
                 # Pandas menyimpan .dt.date sebagai tipe 'object', yang memicu error di st.data_editor.
                 # Biarkan tetap bertipe datetime64[ns].
                 df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce')
-                
+
     return df_clean
+
 
 def generate_dynamic_column_config(df):
     """
@@ -1616,25 +1599,27 @@ def generate_dynamic_column_config(df):
     config = {}
     for col in df.columns:
         col_lower = col.lower()
-        
+
         # Numerik: Gunakan NumberColumn untuk kolom yang sudah di-clean jadi angka
         if any(key in col_lower for key in ["nilai", "nominal", "sisa", "kontrak", "sepakat", "tenor"]):
-            config[col] = st.column_config.NumberColumn(col, format="Rp %d", min_value=0)
-            
+            config[col] = st.column_config.NumberColumn(
+                col, format="Rp %d", min_value=0)
+
         # Tanggal: Gunakan DateColumn untuk kolom datetime64[ns]
         elif any(key in col_lower for key in ["tanggal", "tempo", "waktu"]):
             if "timestamp" not in col_lower:
-                config[col] = st.column_config.DateColumn(col, format="DD/MM/YYYY")
+                config[col] = st.column_config.DateColumn(
+                    col, format="DD/MM/YYYY")
             else:
                 config[col] = st.column_config.TextColumn(col, disabled=True)
-                
+
         # Status: Gunakan CheckboxColumn jika data berisi Boolean (True/False)
         elif "status" in col_lower:
             config[col] = st.column_config.CheckboxColumn(col)
-            
+
         else:
             config[col] = st.column_config.TextColumn(col)
-            
+
     return config
 
 
@@ -1688,6 +1673,61 @@ def admin_secret_configured() -> bool:
         return False
 
 
+# =========================================================
+# CONNECTIONS
+# =========================================================
+KONEKSI_GSHEET_BERHASIL = False
+KONEKSI_DROPBOX_BERHASIL = False
+spreadsheet = None
+dbx = None
+
+# 1) Google Sheets
+try:
+    if "gcp_service_account" in st.secrets:
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace(
+                "\\n", "\n")
+
+        creds = Credentials.from_service_account_info(
+            creds_dict, scopes=scopes)
+        gc = gspread.authorize(creds)
+        spreadsheet = gc.open(NAMA_GOOGLE_SHEET)
+        KONEKSI_GSHEET_BERHASIL = True
+        # =========================================================
+        # [BARU] AUTO-CREATE AUDIT SHEET SAAT STARTUP
+        # =========================================================
+        # Tambahkan blok ini agar sheet otomatis dibuat saat aplikasi dibuka
+        from audit_service import ensure_audit_sheet
+        try:
+            ensure_audit_sheet(spreadsheet)
+            # print("Audit sheet ready.") # Opsional untuk debug console
+        except Exception as e:
+            st.error(
+                f"âš ï¸ Sistem Error: Gagal membuat Sheet Audit otomatis. Pesan: {e}")
+            # Ini akan memunculkan kotak merah di layar jika gagal,
+            # jadi admin langsung tahu ada yang salah.
+    else:
+        st.error("GSheet Error: Kredensial tidak ditemukan.")
+except Exception as e:
+    st.error(f"GSheet Error: {e}")
+
+# 2) Dropbox
+try:
+    if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
+        dbx = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
+        dbx.users_get_current_account()
+        KONEKSI_DROPBOX_BERHASIL = True
+except AuthError:
+    st.error("Dropbox Error: Token Autentikasi tidak valid.")
+except Exception as e:
+    st.error(f"Dropbox Error: {e}")
+
+
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
 SDK = "new"
 try:
@@ -1724,35 +1764,6 @@ if SDK == "new":
 else:
     genai_legacy.configure(api_key=API_KEY)
 
-def prefetch_all_data():
-    """
-    Memuat SEMUA data sheet ke RAM (Session State) sekaligus.
-    Hanya jalan 1x saat login. Menu lain tinggal baca RAM (0 detik).
-    """
-    if "data_buffered" not in st.session_state:
-        placeholder = st.empty()
-        placeholder.info("🚀 Sedang menyiapkan Database ke RAM (High Speed Mode)...")
-        
-        # Load Payment
-        st.session_state["buf_payment"] = load_pembayaran_dp()
-        # Load Closing
-        st.session_state["buf_closing"] = load_closing_deal()
-        # Load KPI
-        st.session_state["buf_kpi_team"] = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
-        st.session_state["buf_kpi_indiv"] = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
-        # Load Staf
-        st.session_state["buf_staf"] = get_daftar_staf_terbaru()
-        
-        st.session_state["data_buffered"] = True
-        placeholder.empty()
-
-def force_refresh_buffer():
-    """Hapus buffer untuk paksa download ulang."""
-    keys = ["buf_payment", "buf_closing", "buf_kpi_team", "buf_kpi_indiv", "buf_staf", "data_buffered"]
-    for k in keys:
-        if k in st.session_state: del st.session_state[k]
-    st.cache_data.clear()
-    st.rerun()
 
 # =========================================================
 # RUPIAH PARSER (input bebas -> int Rupiah)
@@ -1907,7 +1918,7 @@ def _fmt_payment_val_for_log(col_name: str, v):
         x = parse_rupiah_to_int(v)
         return format_rupiah_display(x) if x is not None else "-"
     if col_name == COL_STATUS_BAYAR:
-        return "✅ Dibayar" if normalize_bool(v) else "⏳ Belum"
+        return "âœ… Dibayar" if normalize_bool(v) else "â³ Belum"
     if col_name in {COL_JATUH_TEMPO, COL_TGL_EVENT}:
         d = normalize_date(v)
         return d.strftime("%Y-%m-%d") if d else "-"
@@ -2074,39 +2085,21 @@ def _build_currency_number_format_rupiah():
 
 
 def maybe_auto_format_sheet(worksheet, force: bool = False):
-    """
-    Throttled formatting: Mencegah pemanggilan fungsi formatting yang berat 
-    terlalu sering untuk menghemat kuota API dan menjaga performa.
-    """
+    """Throttled formatting: avoid calling heavy formatting too often."""
     try:
-        # 1. Validasi keberadaan worksheet
         if worksheet is None:
             return
-            
-        # 2. Inisialisasi penyimpanan waktu terakhir format di session state
         if "_fmt_sheet_last" not in st.session_state:
             st.session_state["_fmt_sheet_last"] = {}
 
         now = time.time()
-        
-        # 3. Identifikasi sheet menggunakan ID unik (atau 'unknown')
-        # gspread worksheet object memiliki atribut 'id'
         key = str(getattr(worksheet, "id", "unknown"))
-        
-        # Ambil waktu terakhir sheet ini diformat
         last = float(st.session_state["_fmt_sheet_last"].get(key, 0))
-        
-        # 4. Cek apakah harus menjalankan auto_format
-        # Dijalankan jika: dipaksa (force=True) ATAU selisih waktu > batas throttle
         if force or (now - last) > FORMAT_THROTTLE_SECONDS:
             auto_format_sheet(worksheet)
-            
-            # Update timestamp terakhir kali berhasil format
             st.session_state["_fmt_sheet_last"][key] = now
-            
     except Exception:
-        # Fitur pengaman: Error pada formatting tidak boleh membuat 
-        # seluruh aplikasi crash/berhenti.
+        # Never break app due to formatting.
         pass
 
 
@@ -2465,7 +2458,7 @@ def upload_ke_dropbox(file_obj, nama_staf, kategori="Umum"):
 # =========================================================
 def clean_bulk_input(text_input):
     # GUNAKAN \n (satu backslash), bukan \\n
-    lines = (text_input or "").split("\n") 
+    lines = (text_input or "").split("\n")
     cleaned_targets = []
     for line in lines:
         # Regex ini akan menghapus angka "1.", "2.", "-", atau "*" di awal baris
@@ -2511,37 +2504,32 @@ def load_checklist(sheet_name, columns):
 def save_checklist(sheet_name, df, columns):
     try:
         ws = spreadsheet.worksheet(sheet_name)
-        # Tidak perlu ensure_headers setiap saat jika struktur stabil
-        
-        # Siapkan data
+        ensure_headers(ws, columns)
+
+        ws.clear()
+
+        rows_needed = len(df) + 1
+        if ws.row_count < rows_needed:
+            ws.resize(rows=rows_needed)
+
         df_save = df.copy().fillna("")
-        for c in columns: # Pastikan kolom lengkap
-            if c not in df_save.columns: df_save[c] = ""
-        
-        # Konversi boolean ke string explicit
+        for c in columns:
+            if c not in df_save.columns:
+                df_save[c] = ""
+
         if "Status" in df_save.columns:
-            df_save["Status"] = df_save["Status"].apply(lambda x: "TRUE" if x is True or str(x).upper()=='TRUE' else "FALSE")
+            df_save["Status"] = df_save["Status"].apply(
+                lambda x: "TRUE" if bool(x) else "FALSE")
 
-        # Gabungkan Header + Data
-        data_body = [columns] + df_save.astype(str).values.tolist()
-        
-        # UPDATE CERDAS: Hanya update area yang diperlukan (A1 sampai Z_sekian)
-        num_rows = len(data_body)
-        num_cols = len(columns)
-        range_sq = f"A1:{gspread.utils.rowcol_to_a1(num_rows, num_cols)}"
-        
-        ws.update(range_name=range_sq, values=data_body, value_input_option="USER_ENTERED")
-        
-        # Hapus sisa baris kosong di bawah (Cleanup) sesekali saja
-        if ws.row_count > num_rows + 50:
-             ws.resize(rows=num_rows + 10)
+        df_save = df_save[columns].astype(str)
+        data_to_save = [df_save.columns.values.tolist()] + \
+            df_save.values.tolist()
 
-        # Matikan auto-format agar simpan instan (< 1 detik)
-        # maybe_auto_format_sheet(ws) 
-        
+        ws.update(range_name="A1", values=data_to_save,
+                  value_input_option="USER_ENTERED")
+        # maybe_auto_format_sheet(ws)
         return True
-    except Exception as e:
-        print(f"Save Error: {e}")
+    except Exception:
         return False
 
 
@@ -2641,7 +2629,7 @@ def add_bulk_targets(sheet_name, base_row_data, targets_list):
 def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_name, kategori_folder):
     """
     Update bukti/catatan untuk checklist (Team/Individu).
-    ✅ Optimasi: gunakan batch_update untuk mengurangi jumlah API call.
+    âœ… Optimasi: gunakan batch_update untuk mengurangi jumlah API call.
     """
     try:
         ws = spreadsheet.worksheet(sheet_name)
@@ -2771,7 +2759,7 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         ensure_headers(ws, NAMA_KOLOM_STANDAR)
         ws.append_rows(list_of_rows, value_input_option="USER_ENTERED")
 
-        # ✅ Optimasi: jangan format tiap submit (throttled)
+        # âœ… Optimasi: jangan format tiap submit (throttled)
         # maybe_auto_format_sheet(ws)
 
         return True
@@ -2812,7 +2800,7 @@ def load_all_reports(daftar_staf):
             pass
     return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 
-
+@st.fragment
 def render_hybrid_table(df_data, unique_key, main_text_col):
     use_aggrid_attempt = HAS_AGGRID
 
@@ -2884,12 +2872,12 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
         use_container_width=True
     )
 
-
+@st.fragment
 def render_laporan_harian_mobile():
-    st.markdown("## 📝 Laporan Harian")
+    st.markdown("## ðŸ“ Laporan Harian")
 
     # tombol balik
-    if st.button("⬅️ Kembali ke Beranda", use_container_width=True):
+    if st.button("â¬…ï¸ Kembali ke Beranda", use_container_width=True):
         set_nav("home")
 
     staff_list = get_daftar_staf_terbaru()
@@ -2899,21 +2887,21 @@ def render_laporan_harian_mobile():
 
     pending_msg = get_reminder_pending(nama_pelapor)
     if pending_msg:
-        st.warning(f"🔔 Pending terakhir: **{pending_msg}**")
+        st.warning(f"ðŸ”” Pending terakhir: **{pending_msg}**")
 
     tab1, tab2, tab3, tab4 = st.tabs(
-        ["📌 Aktivitas", "🏁 Kesimpulan", "📇 Kontak", "✅ Submit"])
+        ["ðŸ“Œ Aktivitas", "ðŸ Kesimpulan", "ðŸ“‡ Kontak", "âœ… Submit"])
 
     # ===== TAB 1: Aktivitas =====
     with tab1:
         kategori_aktivitas = st.radio(
             "Jenis Aktivitas",
-            ["🚗 Sales (Kunjungan Lapangan)", "💻 Digital Marketing / Konten / Ads",
-             "📞 Telesales / Follow Up", "🏢 Lainnya"],
+            ["ðŸš— Sales (Kunjungan Lapangan)", "ðŸ’» Digital Marketing / Konten / Ads",
+             "ðŸ“ž Telesales / Follow Up", "ðŸ¢ Lainnya"],
             horizontal=False,
             key="m_kategori"
         )
-        is_kunjungan = kategori_aktivitas.startswith("🚗")
+        is_kunjungan = kategori_aktivitas.startswith("ðŸš—")
 
         if "Digital Marketing" in kategori_aktivitas:
             st.text_input("Link Konten / Ads / Drive (Opsional)",
@@ -2921,7 +2909,7 @@ def render_laporan_harian_mobile():
 
         if is_kunjungan:
             st.text_input(
-                "📍 Nama Klien / Lokasi Kunjungan (Wajib)", key="m_lokasi")
+                "ðŸ“ Nama Klien / Lokasi Kunjungan (Wajib)", key="m_lokasi")
         else:
             st.text_input("Jenis Tugas", value=kategori_aktivitas,
                           disabled=True, key="m_tugas")
@@ -2944,32 +2932,34 @@ def render_laporan_harian_mobile():
 
     # ===== TAB 2: Kesimpulan =====
     with tab2:
-        st.text_area("💡 Kesimpulan hari ini", height=100, key="m_kesimpulan")
-        st.text_area("🚧 Kendala internal", height=90, key="m_kendala")
-        st.text_area("🧑‍💼 Kendala klien", height=90, key="m_kendala_klien")
+        st.text_area("ðŸ’¡ Kesimpulan hari ini",
+                     height=100, key="m_kesimpulan")
+        st.text_area("ðŸš§ Kendala internal", height=90, key="m_kendala")
+        st.text_area("ðŸ§‘â€ðŸ’¼ Kendala klien",
+                     height=90, key="m_kendala_klien")
 
     # ===== TAB 3: Kontak =====
     with tab3:
         st.radio(
-            "📈 Tingkat Interest",
+            "ðŸ“ˆ Tingkat Interest",
             ["Under 50% (A)", "50-75% (B)", "75%-100%"],
             horizontal=False,
             key="interest_persen"
         )
-        st.text_input("👤 Nama Klien", key="nama_klien_input")
-        st.text_input("📞 No HP/WA Klien", key="kontak_klien_input")
-        st.text_input("📌 Next Plan / Pending (Reminder Besok)",
+        st.text_input("ðŸ‘¤ Nama Klien", key="nama_klien_input")
+        st.text_input("ðŸ“ž No HP/WA Klien", key="kontak_klien_input")
+        st.text_input("ðŸ“Œ Next Plan / Pending (Reminder Besok)",
                       key="m_pending")
 
 # ===== TAB 4: Submit =====
     with tab4:
         st.caption("Pastikan data sudah benar, lalu submit.")
 
-        if st.button("✅ Submit Laporan", type="primary", use_container_width=True):
+        if st.button("âœ… Submit Laporan", type="primary", use_container_width=True):
 
             # --- 1. SIAPKAN VARIABEL DATA ---
             kategori_aktivitas = st.session_state.get("m_kategori", "")
-            is_kunjungan = str(kategori_aktivitas).startswith("🚗")
+            is_kunjungan = str(kategori_aktivitas).startswith("ðŸš—")
             lokasi_input = st.session_state.get(
                 "m_lokasi", "") if is_kunjungan else kategori_aktivitas
             main_deskripsi = st.session_state.get("m_deskripsi", "")
@@ -2997,7 +2987,7 @@ def render_laporan_harian_mobile():
 
             # Tampilkan Bar Awal (0%)
             my_bar = progress_placeholder.progress(
-                0, text="🚀 Memulai proses...")
+                0, text="ðŸš€ Memulai proses...")
 
             try:
                 # Siapkan data timestamp & string lain
@@ -3031,7 +3021,7 @@ def render_laporan_harian_mobile():
                             pct = 1.0
 
                         my_bar.progress(
-                            pct, text=f"📤 Mengupload foto ke-{i+1} dari {jml_foto}...")
+                            pct, text=f"ðŸ“¤ Mengupload foto ke-{i+1} dari {jml_foto}...")
 
                         # Eksekusi Upload (Berat)
                         url = upload_ke_dropbox(
@@ -3069,21 +3059,21 @@ def render_laporan_harian_mobile():
                     pct_save = 0.95  # Biarkan sisa sedikit untuk efek selesai
 
                 my_bar.progress(
-                    pct_save, text="💾 Menyimpan data ke Database...")
+                    pct_save, text="ðŸ’¾ Menyimpan data ke Database...")
 
                 # Eksekusi Simpan (Berat)
                 ok = simpan_laporan_harian_batch(rows, nama_pelapor)
 
                 # --- 6. FINISHING ---
                 # Set bar ke 100%
-                my_bar.progress(1.0, text="✅ Selesai!")
+                my_bar.progress(1.0, text="âœ… Selesai!")
                 time.sleep(0.8)  # Jeda sebentar agar user lihat status 100%
                 progress_placeholder.empty()  # Hapus bar agar bersih
 
                 if ok:
                     st.success(
-                        f"✅ Laporan tersimpan! Reminder: **{val_pending}**")
-                    ui_toast("Laporan tersimpan!", icon="✅")
+                        f"âœ… Laporan tersimpan! Reminder: **{val_pending}**")
+                    ui_toast("Laporan tersimpan!", icon="âœ…")
 
                     # Clear cache & Navigasi
                     st.cache_data.clear()
@@ -3101,6 +3091,7 @@ def render_laporan_harian_mobile():
 # =========================================================
 # CLOSING DEAL
 # =========================================================
+@st.fragment
 @st.cache_data(ttl=3600)
 def load_closing_deal():
     if not KONEKSI_GSHEET_BERHASIL:
@@ -3137,7 +3128,7 @@ def load_closing_deal():
     except Exception:
         return pd.DataFrame(columns=CLOSING_COLUMNS)
 
-
+@st.fragment
 def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai_kontrak_input):
     if not KONEKSI_GSHEET_BERHASIL:
         return False, "Koneksi GSheet belum aktif."
@@ -3242,7 +3233,7 @@ def load_pembayaran_dp():
     except Exception:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
-
+@st.fragment
 def save_pembayaran_dp(df: pd.DataFrame) -> bool:
     try:
         ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
@@ -3362,19 +3353,19 @@ def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame
             if col == COL_STATUS_BAYAR:
                 if normalize_bool(oldv) != normalize_bool(newv):
                     changes.append(
-                        f"Status Pembayaran: {_fmt_payment_val_for_log(col, oldv)} → {_fmt_payment_val_for_log(col, newv)}")
+                        f"Status Pembayaran: {_fmt_payment_val_for_log(col, oldv)} â†’ {_fmt_payment_val_for_log(col, newv)}")
             elif col == COL_JATUH_TEMPO:
                 if normalize_date(oldv) != normalize_date(newv):
                     changes.append(
-                        f"Jatuh Tempo: {_fmt_payment_val_for_log(col, oldv)} → {_fmt_payment_val_for_log(col, newv)}")
+                        f"Jatuh Tempo: {_fmt_payment_val_for_log(col, oldv)} â†’ {_fmt_payment_val_for_log(col, newv)}")
             elif col == COL_NOMINAL_BAYAR:
                 if parse_rupiah_to_int(oldv) != parse_rupiah_to_int(newv):
                     changes.append(
-                        f"Nominal: {_fmt_payment_val_for_log(col, oldv)} → {_fmt_payment_val_for_log(col, newv)}")
+                        f"Nominal: {_fmt_payment_val_for_log(col, oldv)} â†’ {_fmt_payment_val_for_log(col, newv)}")
             else:
                 if safe_str(oldv, "").strip() != safe_str(newv, "").strip():
                     changes.append(
-                        f"{col}: {_fmt_payment_val_for_log(col, oldv)} → {_fmt_payment_val_for_log(col, newv)}")
+                        f"{col}: {_fmt_payment_val_for_log(col, oldv)} â†’ {_fmt_payment_val_for_log(col, newv)}")
 
         if changes:
             oldlog = safe_str(prev.get(COL_TS_UPDATE, ""), "")
@@ -3384,53 +3375,57 @@ def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame
 
     return after_idx.reset_index(drop=True)
 
-
+@st.fragment
 def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nominal_input, total_sepakat_input, tenor, jatuh_tempo, bukti_file, catatan):
     """
     Menambah record pembayaran dengan sistem Smart Balance Tracking dan kalkulator cicilan transparan.
     """
-    if not KONEKSI_GSHEET_BERHASIL: 
+    if not KONEKSI_GSHEET_BERHASIL:
         return False, "Sistem Error: Koneksi Google Sheets tidak aktif."
 
     try:
         group = str(nama_group).strip() if nama_group else "-"
-        marketing = str(nama_marketing).strip() if nama_marketing else "Unknown"
+        marketing = str(nama_marketing).strip(
+        ) if nama_marketing else "Unknown"
         catatan_clean = str(catatan).strip() if catatan else "-"
-        
+
         nom_bayar = parse_rupiah_to_int(nominal_input) or 0
         total_sepakat = parse_rupiah_to_int(total_sepakat_input) or 0
         tenor_val = int(tenor) if tenor else 0
-        
+
         if total_sepakat <= 0:
             return False, "Input Gagal: Total nilai kesepakatan harus diisi dengan benar."
 
         sisa_bayar = total_sepakat - nom_bayar
-        
+
         info_cicilan = ""
         if tenor_val > 0 and sisa_bayar > 0:
             nilai_per_cicilan = sisa_bayar / tenor_val
             info_cicilan = f" | Cicilan: {format_rupiah_display(nilai_per_cicilan)} x{tenor_val} term"
 
         if sisa_bayar <= 0:
-            status_fix = "✅ Lunas"
-            if jenis_bayar == "Cash": 
+            status_fix = "âœ… Lunas"
+            if jenis_bayar == "Cash":
                 status_fix += " (Cash)"
         else:
             if jenis_bayar == "Down Payment (DP)":
-                status_fix = f"⏳ DP (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
+                status_fix = f"â³ DP (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
             elif jenis_bayar == "Cicilan":
-                status_fix = f"💳 Cicilan (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
+                status_fix = f"ðŸ’³ Cicilan (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
             else:
-                status_fix = f"⚠️ Belum Lunas (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
+                status_fix = f"âš ï¸ Belum Lunas (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
 
         link_bukti = "-"
         if bukti_file and KONEKSI_DROPBOX_BERHASIL:
-            link_bukti = upload_ke_dropbox(bukti_file, marketing, kategori="Bukti_Pembayaran")
+            link_bukti = upload_ke_dropbox(
+                bukti_file, marketing, kategori="Bukti_Pembayaran")
 
         ts_in = now_ts_str()
-        
-        fmt_tgl_event = tgl_event.strftime("%Y-%m-%d") if hasattr(tgl_event, "strftime") else str(tgl_event)
-        fmt_jatuh_tempo = jatuh_tempo.strftime("%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
+
+        fmt_tgl_event = tgl_event.strftime(
+            "%Y-%m-%d") if hasattr(tgl_event, "strftime") else str(tgl_event)
+        fmt_jatuh_tempo = jatuh_tempo.strftime(
+            "%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
 
         log_entry = f"[{ts_in}] Input Baru: {jenis_bayar}{info_cicilan}"
 
@@ -3454,9 +3449,9 @@ def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nom
 
         ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
         ensure_headers(ws, PAYMENT_COLUMNS)
-        
+
         ws.append_row(row, value_input_option="USER_ENTERED")
-        
+
         msg_feedback = f"Pembayaran berhasil disimpan! "
         if sisa_bayar > 0:
             msg_feedback += f"Sisa tagihan: {format_rupiah_display(sisa_bayar)} dengan rincian {info_cicilan.replace(' | ', '')}."
@@ -3468,7 +3463,7 @@ def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nom
     except Exception as e:
         return False, f"System Error: {str(e)}"
 
-
+@st.fragment
 def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
     """
     Sistem Alert Pintar (Hybrid): 
@@ -3481,17 +3476,19 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
         return pd.DataFrame(columns=cols), pd.DataFrame(columns=cols)
 
     today = datetime.now(tz=TZ_JKT).date()
-    
+
     # 2. Copy data agar manipulasi tipe data tidak merusak data utama di memori
     df_alert = df.copy()
 
     # 3. Normalisasi Tipe Data (Penting untuk kalkulator sisa)
     # Pastikan Jatuh Tempo adalah objek date dan Sisa Pembayaran adalah angka
     if COL_JATUH_TEMPO in df_alert.columns:
-        df_alert[COL_JATUH_TEMPO] = pd.to_datetime(df_alert[COL_JATUH_TEMPO], errors="coerce").dt.date
-    
+        df_alert[COL_JATUH_TEMPO] = pd.to_datetime(
+            df_alert[COL_JATUH_TEMPO], errors="coerce").dt.date
+
     if COL_SISA_BAYAR in df_alert.columns:
-        df_alert[COL_SISA_BAYAR] = pd.to_numeric(df_alert[COL_SISA_BAYAR], errors='coerce').fillna(0)
+        df_alert[COL_SISA_BAYAR] = pd.to_numeric(
+            df_alert[COL_SISA_BAYAR], errors='coerce').fillna(0)
     else:
         # Fallback jika kolom sisa belum ada (masa transisi), buat sisa 0 agar tidak alert
         df_alert[COL_SISA_BAYAR] = 0
@@ -3499,7 +3496,7 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
     # 4. KRITERIA PINTAR: Filter hanya data yang benar-benar belum lunas (Sisa > 0)
     # Fitur lama 'COL_STATUS_BAYAR == False' otomatis terwakili oleh 'Sisa > 0'
     df_tagihan_aktif = df_alert[
-        (df_alert[COL_SISA_BAYAR] > 0) & 
+        (df_alert[COL_SISA_BAYAR] > 0) &
         (pd.notna(df_alert[COL_JATUH_TEMPO]))
     ].copy()
 
@@ -3508,20 +3505,22 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
         return pd.DataFrame(columns=df.columns), pd.DataFrame(columns=df.columns)
 
     # 5. PEMBAGIAN KATEGORI (Overdue vs Due Soon)
-    
+
     # Kategori A: Overdue (Sisa > 0 DAN Tanggal sudah terlewat)
-    overdue = df_tagihan_aktif[df_tagihan_aktif[COL_JATUH_TEMPO] < today].copy()
-    
+    overdue = df_tagihan_aktif[df_tagihan_aktif[COL_JATUH_TEMPO] < today].copy(
+    )
+
     # Kategori B: Due Soon (Sisa > 0 DAN Tanggal mendekati/hari ini)
     # Menggunakan parameter 'days_due_soon' agar fitur lama tetap berfungsi
     due_soon = df_tagihan_aktif[
-        (df_tagihan_aktif[COL_JATUH_TEMPO] >= today) & 
-        (df_tagihan_aktif[COL_JATUH_TEMPO] <= (today + timedelta(days=days_due_soon)))
+        (df_tagihan_aktif[COL_JATUH_TEMPO] >= today) &
+        (df_tagihan_aktif[COL_JATUH_TEMPO] <=
+         (today + timedelta(days=days_due_soon)))
     ].copy()
 
     return overdue, due_soon
 
-
+@st.fragment
 def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marketing: str, actor: str = "-"):
     if not KONEKSI_GSHEET_BERHASIL:
         return False, "Koneksi GSheet belum aktif."
@@ -3570,7 +3569,7 @@ def update_bukti_pembayaran_by_index(row_index_0based: int, file_obj, nama_marke
                 old_log,
                 ts,
                 actor_final,
-                [f"{COL_BUKTI_BAYAR}: {_fmt_payment_val_for_log(COL_BUKTI_BAYAR, old_bukti)} → {_fmt_payment_val_for_log(COL_BUKTI_BAYAR, link)}"]
+                [f"{COL_BUKTI_BAYAR}: {_fmt_payment_val_for_log(COL_BUKTI_BAYAR, old_bukti)} â†’ {_fmt_payment_val_for_log(COL_BUKTI_BAYAR, link)}"]
             )
             cell_ts = gspread.utils.rowcol_to_a1(row_gsheet, col_ts)
             updates.append({"range": cell_ts, "values": [[new_log]]})
@@ -3608,18 +3607,20 @@ def _img_to_base64(path: Path) -> str:
         return ""
     except Exception:
         return ""
-    
+
 
 # =========================================================
 # [MIGRASI] CORE DATABASE & AUDIT PAYMENTS
 # =========================================================
+@st.fragment
 def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame, actor: str):
     actor = safe_str(actor, "-").strip() or "-"
     before = df_before.copy() if df_before is not None else pd.DataFrame()
     after = df_after.copy()
     for c in [COL_TS_UPDATE, COL_UPDATED_BY]:
-        if c not in after.columns: after[c] = ""
-    
+        if c not in after.columns:
+            after[c] = ""
+
     if before.empty:
         ts = now_ts_str()
         for i in range(len(after)):
@@ -3629,74 +3630,52 @@ def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame
 
     before_idx = before.set_index(COL_TS_BAYAR, drop=False)
     after_idx = after.set_index(COL_TS_BAYAR, drop=False)
-    watched_cols = [COL_JENIS_BAYAR, COL_NOMINAL_BAYAR, COL_JATUH_TEMPO, COL_STATUS_BAYAR, COL_BUKTI_BAYAR, COL_CATATAN_BAYAR]
+    watched_cols = [COL_JENIS_BAYAR, COL_NOMINAL_BAYAR, COL_JATUH_TEMPO,
+                    COL_STATUS_BAYAR, COL_BUKTI_BAYAR, COL_CATATAN_BAYAR]
     ts = now_ts_str()
 
     for key, row in after_idx.iterrows():
-        if key not in before_idx.index: continue
+        if key not in before_idx.index:
+            continue
         prev = before_idx.loc[key]
-        if isinstance(prev, pd.DataFrame): prev = prev.iloc[0]
+        if isinstance(prev, pd.DataFrame):
+            prev = prev.iloc[0]
         changes = []
         for col in watched_cols:
-            if col not in after_idx.columns: continue
+            if col not in after_idx.columns:
+                continue
             oldv, newv = prev[col], row[col]
             if col == COL_STATUS_BAYAR:
                 if normalize_bool(oldv) != normalize_bool(newv):
-                    changes.append(f"Status: {_fmt_payment_val_for_log(col, oldv)} → {_fmt_payment_val_for_log(col, newv)}")
+                    changes.append(
+                        f"Status: {_fmt_payment_val_for_log(col, oldv)} â†’ {_fmt_payment_val_for_log(col, newv)}")
             elif col == COL_NOMINAL_BAYAR:
                 if parse_rupiah_to_int(oldv) != parse_rupiah_to_int(newv):
-                    changes.append(f"Nominal: {_fmt_payment_val_for_log(col, oldv)} → {_fmt_payment_val_for_log(col, newv)}")
+                    changes.append(
+                        f"Nominal: {_fmt_payment_val_for_log(col, oldv)} â†’ {_fmt_payment_val_for_log(col, newv)}")
             elif col == COL_JATUH_TEMPO:
                 if normalize_date(oldv) != normalize_date(newv):
-                    changes.append(f"Jatuh Tempo: {_fmt_payment_val_for_log(col, oldv)} → {_fmt_payment_val_for_log(col, newv)}")
+                    changes.append(
+                        f"Jatuh Tempo: {_fmt_payment_val_for_log(col, oldv)} â†’ {_fmt_payment_val_for_log(col, newv)}")
             else:
                 if safe_str(oldv).strip() != safe_str(newv).strip():
-                    changes.append(f"{col}: {oldv} → {newv}")
+                    changes.append(f"{col}: {oldv} â†’ {newv}")
 
         if changes:
             oldlog = safe_str(prev.get(COL_TS_UPDATE, ""), "")
-            after_idx.at[key, COL_TS_UPDATE] = append_payment_ts_update(oldlog, ts, actor, changes)
+            after_idx.at[key, COL_TS_UPDATE] = append_payment_ts_update(
+                oldlog, ts, actor, changes)
             after_idx.at[key, COL_UPDATED_BY] = actor
     return after_idx.reset_index(drop=True)
 
-@st.cache_resource(show_spinner=False)
-def get_cached_assets():
-    """
-    Membaca semua file fisik (Disk) hanya 1x saat VPS start, 
-    lalu menyimpannya di RAM dalam format Base64 & String.
-    """
-    assets = {
-        "logo_left": _img_to_base64(LOGO_LEFT),
-        "logo_right": _img_to_base64(LOGO_RIGHT),
-        "logo_holding": _img_to_base64(LOGO_HOLDING),
-        "hero_bg": _img_to_base64(HERO_BG),
-        "global_css": """
-            <style>
-            /* Copy seluruh isi CSS dari fungsi inject_global_css Anda di sini */
-            @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
-            :root{ --bg0:#020805; --green:#16a34a; --gold:#facc15; }
-            /* ... (lanjutkan sisa CSS Anda) ... */
-            </style>
-        """
-    }
-    return assets
-
-# Panggil aset ke variabel global (Sekali jalan, langsung masuk RAM)
-RAM_ASSETS = get_cached_assets()
-
-def inject_global_css_fast():
-    """Ganti fungsi inject_global_css lama dengan ini agar instan."""
-    st.markdown(RAM_ASSETS["global_css"], unsafe_allow_html=True)
-
-
+@st.fragment
 def render_header():
     ts_now = datetime.now(tz=TZ_JKT).strftime("%d %B %Y %H:%M:%S")
 
-    # MENGAMBIL DATA DARI RAM VPS (INSTAN)
-    left_b64 = RAM_ASSETS["logo_left"]
-    right_b64 = RAM_ASSETS["logo_right"]
-    holding_b64 = RAM_ASSETS["logo_holding"]
-    bg_b64 = RAM_ASSETS["hero_bg"]
+    left_b64 = _img_to_base64(LOGO_LEFT)
+    right_b64 = _img_to_base64(LOGO_RIGHT)
+    holding_b64 = _img_to_base64(LOGO_HOLDING)  # Logo UMB
+    bg_b64 = _img_to_base64(HERO_BG)
 
     g_on = bool(KONEKSI_GSHEET_BERHASIL)
     d_on = bool(KONEKSI_DROPBOX_BERHASIL)
@@ -3705,18 +3684,19 @@ def render_header():
         cls = "sx-pill on" if on else "sx-pill off"
         return f"<span class='{cls}'><span class='sx-dot'></span>{label}</span>"
 
-    # Style background hero menggunakan data base64 dari RAM
+    # Style background hero (Sportarium)
     hero_style = (
         f"--hero-bg: url('data:image/jpeg;base64,{bg_b64}'); "
         f"--hero-bg-pos: 50% 72%; "
         f"--hero-bg-size: 140%;"
     ) if bg_b64 else "--hero-bg: none;"
 
-    # Menyiapkan elemen HTML Logo Kiri & Kanan
+    # Logo Kiri & Kanan (Mentari Sejuk)
     left_html = f"<img src='data:image/png;base64,{left_b64}' alt='Logo EO' />" if left_b64 else ""
     right_html = f"<img src='data:image/png;base64,{right_b64}' alt='Logo Training' />" if right_b64 else ""
 
-    # Menyiapkan elemen HTML Logo Holding (Paling Atas)
+    # --- BAGIAN BARU: Logo Holding di Paling Atas ---
+    # Kita buat div terpisah di luar card utama
     top_logo_html = ""
     if holding_b64:
         top_logo_html = f"""
@@ -3727,28 +3707,28 @@ def render_header():
         </div>
         """
 
-    # Menggabungkan seluruh komponen ke dalam satu template HTML Hero
+    # Susunan HTML: Logo Atas -> Baru kemudian Hero Card
     html = f"""
-    {top_logo_html}
-    <div class="sx-hero" style="{hero_style}">
-        <div class="sx-hero-grid">
-            <div class="sx-logo-card">{left_html}</div>
-            <div class="sx-hero-center">
-                <div class="sx-title">🚀 {APP_TITLE}</div>
-                <div class="sx-subrow">
-                    <span>Realtime: {ts_now}</span>
-                    {pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
-                    {pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
-                </div>
-            </div>
-            <div class="sx-logo-card">{right_html}</div>
-        </div>
-    </div>
+{top_logo_html}
+<div class="sx-hero" style="{hero_style}">
+<div class="sx-hero-grid">
+<div class="sx-logo-card">{left_html}</div>
+<div class="sx-hero-center">
+<div class="sx-title">ðŸš€ {APP_TITLE}</div>
+<div class="sx-subrow">
+<span>Realtime: {ts_now}</span>
+{pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
+{pill('Dropbox: ON' if d_on else 'Dropbox: OFF', d_on)}
+</div>
+</div>
+<div class="sx-logo-card">{right_html}</div>
+</div>
+</div>
     """
 
     st.markdown(html, unsafe_allow_html=True)
 
-
+@st.fragment
 def render_section_watermark():
     """
     Menampilkan watermark Sportarium di bagian bawah halaman/tab.
@@ -3770,23 +3750,23 @@ def render_section_watermark():
     """
     st.markdown(html, unsafe_allow_html=True)
 
-
+@st.fragment
 def render_home_mobile():
-    st.markdown("## 🧭 Menu Utama")
+    st.markdown("## ðŸ§­ Menu Utama")
     st.caption("Pilih fitur seperti shortcut ala aplikasi mobile.")
 
     features = [
-        {"key": "report",  "icon": "📝", "title": "Laporan Harian",
+        {"key": "report",  "icon": "ðŸ“", "title": "Laporan Harian",
             "sub": "Input aktivitas + reminder"},
-        {"key": "kpi",     "icon": "🎯", "title": "Target & KPI",
+        {"key": "kpi",     "icon": "ðŸŽ¯", "title": "Target & KPI",
             "sub": "Checklist team & individu"},
-        {"key": "closing", "icon": "🤝", "title": "Closing Deal",
+        {"key": "closing", "icon": "ðŸ¤", "title": "Closing Deal",
             "sub": "Catat deal + export"},
-        {"key": "payment", "icon": "💳", "title": "Pembayaran",
+        {"key": "payment", "icon": "ðŸ’³", "title": "Pembayaran",
             "sub": "DP/Termin/Pelunasan + jatuh tempo"},
-        {"key": "log",     "icon": "📜", "title": "Global Audit Log",
+        {"key": "log",     "icon": "ðŸ“œ", "title": "Global Audit Log",
             "sub": "Riwayat perubahan data (Super Admin)"},
-        {"key": "admin",   "icon": "🔐", "title": "Akses Admin",
+        {"key": "admin",   "icon": "ðŸ”", "title": "Akses Admin",
             "sub": "Dashboard + kontrol (butuh login)"},
     ]
 
@@ -3809,23 +3789,23 @@ if not KONEKSI_GSHEET_BERHASIL:
 
 # Small banner for Dropbox status
 if not KONEKSI_DROPBOX_BERHASIL:
-    st.warning("⚠️ Dropbox non-aktif. Fitur upload foto/bukti dimatikan.")
+    st.warning("âš ï¸ Dropbox non-aktif. Fitur upload foto/bukti dimatikan.")
 
 # =========================================================
 # ROUTER NAV (untuk mobile ala "Facebook shortcut")
 # =========================================================
-HOME_NAV = "🏠 Beranda"
+HOME_NAV = "ðŸ  Beranda"
 
 # Update: Menambahkan entry 'presensi' ke dalam Mapping
 NAV_MAP = {
     "home": HOME_NAV,
-    "presensi": "📅 Presensi",
-    "report": "📝 Laporan Harian",
-    "kpi": "🎯 Target & KPI",
-    "closing": "🤝 Closing Deal",
-    "payment": "💳 Pembayaran",
-    "log": "📜 Global Audit Log",
-    "admin": "📊 Dashboard Admin",
+    "presensi": "ðŸ“… Presensi",
+    "report": "ðŸ“ Laporan Harian",
+    "kpi": "ðŸŽ¯ Target & KPI",
+    "closing": "ðŸ¤ Closing Deal",
+    "payment": "ðŸ’³ Pembayaran",
+    "log": "ðŸ“œ Global Audit Log",
+    "admin": "ðŸ“Š Dashboard Admin",
 }
 
 
@@ -3863,7 +3843,7 @@ if "is_admin" not in st.session_state:
 
 if "menu_nav" not in st.session_state:
     # Mobile masuk Beranda, Desktop tetap ke Laporan Harian
-    st.session_state["menu_nav"] = HOME_NAV if IS_MOBILE else "📝 Laporan Harian"
+    st.session_state["menu_nav"] = HOME_NAV if IS_MOBILE else "ðŸ“ Laporan Harian"
 
 # Sinkronkan kalau URL ada ?nav=...
 nav_from_url = _get_query_nav()
@@ -3873,12 +3853,9 @@ if nav_from_url in NAV_MAP:
 # Render header
 render_header()
 
-if st.session_state.get("logged_in"):
-    prefetch_all_data() # Pastikan data siap di RAM
-
 # MOBILE: tampilkan Beranda sebagai landing page
 menu_nav = st.session_state.get(
-    "menu_nav", HOME_NAV if IS_MOBILE else "📝 Laporan Harian")
+    "menu_nav", HOME_NAV if IS_MOBILE else "ðŸ“ Laporan Harian")
 
 if IS_MOBILE and menu_nav == HOME_NAV:
     render_home_mobile()
@@ -3888,25 +3865,25 @@ if IS_MOBILE and menu_nav == HOME_NAV:
 # SIDEBAR (SpaceX-inspired)
 # =========================================================
 with st.sidebar:
-    if st.button("🔄 Refresh Data", type="primary", use_container_width=True):
+    if st.button("ðŸ”„ Refresh Data", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
     st.markdown("<div class='sx-section-title'>Navigation</div>",
                 unsafe_allow_html=True)
 
-    # Daftar menu utama sidebar
+    # Update: Menambahkan "ðŸ“… Presensi" di daftar menu utama sidebar
     menu_items = [
-        "📅 Presensi",
-        "📝 Laporan Harian",
-        "🎯 Target & KPI",
-        "🤝 Closing Deal",
-        "💳 Pembayaran",
-        "📜 Global Audit Log",
+        "ðŸ“… Presensi",
+        "ðŸ“ Laporan Harian",
+        "ðŸŽ¯ Target & KPI",
+        "ðŸ¤ Closing Deal",
+        "ðŸ’³ Pembayaran",
+        "ðŸ“œ Global Audit Log",
     ]
 
     if st.session_state.get("is_admin"):
-        menu_items.append("📊 Dashboard Admin")
+        menu_items.append("ðŸ“Š Dashboard Admin")
 
     # SpaceX-like nav buttons
     st.markdown("<div class='sx-nav'>", unsafe_allow_html=True)
@@ -3927,94 +3904,82 @@ with st.sidebar:
                     pass
             st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
-
     # -----------------------------------------------------------
-    # PROFIL USER (DIPERBAIKI UNTUK MENCEGAH ERROR 'NoneType')
+    # PROFIL USER (OTP LOGIN)
     # -----------------------------------------------------------
-    # Hanya muncul jika user sedang login
-# -----------------------------------------------------------
-    # PROFIL USER (SIDEBAR) - VERSI AMAN ANTI-CRASH
-    # -----------------------------------------------------------
-    # Kita hanya menampilkan bagian ini jika user benar-benar sudah login
-    if st.session_state.get("logged_in"):
-        st.divider()
-        col_p1, col_p2 = st.columns([1, 3])
+    st.divider()
 
-        with col_p1:
-            # Menampilkan icon profil
-            st.markdown("👤")
+    col_p1, col_p2 = st.columns([1, 3])
 
-        with col_p2:
-            st.caption("Login sebagai:")
-            
-            # 1. Ambil Nama secara aman (fallback ke "User" jika None)
-            u_name = st.session_state.get('user_name') or "User"
-            st.markdown(f"**{u_name}**")
+    with col_p1:
+        # Icon default karena OTP tidak ambil foto profil Google
+        st.markdown("ðŸ‘¤")
 
-            # 2. Proteksi Role agar tidak None saat fungsi .upper() dipanggil
-            # Kita berikan default "staff" jika data tidak ditemukan
-            role_raw = st.session_state.get("user_role") or "staff"
-            
-            # Pastikan diproses sebagai string dan huruf kecil untuk logika warna
-            role_now = str(role_raw).lower()
-            role_color = "red" if role_now == "admin" else "blue"
-            
-            # Sekarang .upper() aman digunakan karena role_now pasti string
-            st.markdown(f":{role_color}[{role_now.upper()}]")
+    with col_p2:
+        st.caption("Login sebagai:")
+        st.markdown(f"**{st.session_state.get('user_name', 'User')}**")
 
-        # 3. Tombol Logout dengan Reset State yang bersih
-        if st.button("🚪 Sign Out / Logout", use_container_width=True):
-            # Ubah status login
-            st.session_state["logged_in"] = False
-            
-            # PENTING: Jangan set role ke None. Set ke string default 
-            # agar komponen UI yang masih sempat 'merender' tidak crash.
-            st.session_state["user_role"] = "staff"
-            st.session_state["user_name"] = "User"
-            
-            # Kembalikan alur OTP ke langkah awal
-            st.session_state["otp_step"] = 1
-            
-            # Paksa aplikasi memuat ulang ke halaman login
-            st.rerun()
+        role_now = st.session_state.get("user_role", "user")
+        role_color = "red" if role_now == "admin" else "blue"
+        st.markdown(f":{role_color}[{role_now.upper()}]")
+
+    # Tombol Logout Manual (Reset State)
+    if st.button("ðŸšª Sign Out / Logout", use_container_width=True):
+        # Reset semua variabel sesi yang penting
+        st.session_state["logged_in"] = False
+        st.session_state["user_email"] = None
+        st.session_state["user_name"] = None
+        st.session_state["user_role"] = None
+        st.session_state["is_admin"] = False
+
+        # Reset step OTP agar kembali ke input email saat login ulang
+        st.session_state["otp_step"] = 1
+        st.session_state["temp_email"] = ""
+        st.session_state["generated_otp"] = ""
+
+        st.rerun()
 
     st.divider()
 
     # Quick stats (lightweight)
-    if st.session_state.get("logged_in"):
-        try:
-            df_pay_sidebar = load_pembayaran_dp()
-            overdue_s, due_soon_s = build_alert_pembayaran(
-                df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
-            st.markdown("<div class='sx-section-title'>Quick Stats</div>",
-                        unsafe_allow_html=True)
-            st.metric("Overdue Payment", int(len(overdue_s)) if overdue_s is not None else 0)
-            st.metric("Due ≤ 3 hari", int(len(due_soon_s)) if due_soon_s is not None else 0)
-        except Exception:
-            pass
+    try:
+        df_pay_sidebar = load_pembayaran_dp()
+        overdue_s, due_soon_s = build_alert_pembayaran(
+            df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
+        st.markdown("<div class='sx-section-title'>Quick Stats</div>",
+                    unsafe_allow_html=True)
+        st.metric("Overdue Payment", int(len(overdue_s))
+                  if overdue_s is not None else 0)
+        st.metric("Due â‰¤ 3 hari", int(len(due_soon_s))
+                  if due_soon_s is not None else 0)
+    except Exception:
+        pass
 
     st.divider()
-    st.caption("Tip: navigasi ala SpaceX → ringkas, jelas, fokus.")
+    st.caption("Tip: navigasi ala SpaceX â†’ ringkas, jelas, fokus.")
 
-menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
+
+menu_nav = st.session_state.get("menu_nav", "ðŸ“ Laporan Harian")
+
+menu_nav = st.session_state.get("menu_nav", "ðŸ“ Laporan Harian")
 
 # [MULAI KODE TAMBAHAN: FIX NAVIGASI MOBILE]
 # Ini akan memunculkan tombol Back & Menu Bawah untuk Closing, KPI, Payment, dll.
-if IS_MOBILE and menu_nav != "📝 Laporan Harian":
+if IS_MOBILE and menu_nav != "ðŸ“ Laporan Harian":
     # 1. Tombol Kembali ke Beranda
-    if st.button("⬅️ Kembali ke Beranda", use_container_width=True, key="global_mobile_back"):
+    if st.button("â¬…ï¸ Kembali ke Beranda", use_container_width=True, key="global_mobile_back"):
         set_nav("home")
 
     # 2. Bottom Navigation Bar (Menu Bawah)
     # Perbaikan: Menambahkan link nav=log dan merapikan tag HTML
     st.markdown("""
     <div class="mobile-bottom-nav">
-      <a href="?nav=home">🏠</a>
-      <a href="?nav=report">📝</a>
-      <a href="?nav=kpi">🎯</a>
-      <a href="?nav=closing">🤝</a>
-      <a href="?nav=payment">💳</a>
-      <a href="?nav=log">📜</a>
+      <a href="?nav=home">ðŸ </a>
+      <a href="?nav=report">ðŸ“</a>
+      <a href="?nav=kpi">ðŸŽ¯</a>
+      <a href="?nav=closing">ðŸ¤</a>
+      <a href="?nav=payment">ðŸ’³</a>
+      <a href="?nav=log">ðŸ“œ</a>
     </div>
     """, unsafe_allow_html=True)
 
@@ -4024,11 +3989,12 @@ if IS_MOBILE and menu_nav != "📝 Laporan Harian":
 # =========================================================
 # FUNGSI RENDER MOBILE PER FITUR (BARU)
 # =========================================================
+@st.fragment
 def render_kpi_mobile():
-    st.markdown("### 🎯 Target & KPI (Full Mobile)")
+    st.markdown("### ðŸŽ¯ Target & KPI (Full Mobile)")
 
     # Gunakan Tabs seperti Desktop agar fitur lengkap
-    tab1, tab2, tab3 = st.tabs(["🏆 Team", "⚡ Individu", "⚙️ Admin"])
+    tab1, tab2, tab3 = st.tabs(["ðŸ† Team", "âš¡ Individu", "âš™ï¸ Admin"])
 
     # --- TAB 1: TEAM ---
     with tab1:
@@ -4040,7 +4006,7 @@ def render_kpi_mobile():
             edited_team = render_hybrid_table(df_team, "mob_team_tbl", "Misi")
 
             # Tombol Simpan
-            if st.button("💾 Simpan Perubahan (Team)", use_container_width=True, key="mob_btn_save_team"):
+            if st.button("ðŸ’¾ Simpan Perubahan (Team)", use_container_width=True, key="mob_btn_save_team"):
                 actor = get_actor_fallback(default="Admin")
                 final_df = apply_audit_checklist_changes(
                     df_team, edited_team, ["Misi"], actor)
@@ -4051,7 +4017,7 @@ def render_kpi_mobile():
             st.divider()
 
             # 2. Upload Bukti (Fitur Desktop dibawa ke HP)
-            with st.expander("📂 Upload Bukti / Catatan"):
+            with st.expander("ðŸ“‚ Upload Bukti / Catatan"):
                 sel_misi = st.selectbox(
                     "Pilih Misi", df_team["Misi"].unique(), key="mob_sel_misi")
                 note_misi = st.text_area("Catatan", key="mob_note_misi")
@@ -4073,30 +4039,35 @@ def render_kpi_mobile():
     with tab2:
         st.caption("Target Individu")
         staff = get_daftar_staf_terbaru()
-        filter_nama = st.selectbox("Filter Nama:", staff, key="mob_indiv_filter")
+        filter_nama = st.selectbox(
+            "Filter Nama:", staff, key="mob_indiv_filter")
 
-        df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
+        df_indiv_all = load_checklist(
+            SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
         df_user = df_indiv_all[df_indiv_all["Nama"] == filter_nama]
 
         if not df_user.empty:
             # --- TAMBAHKAN LOGIKA PROGRES DI SINI ---
             total_target = len(df_user)
             # Menghitung jumlah 'TRUE' pada kolom Status
-            jumlah_selesai = df_user["Status"].sum() 
-            
+            jumlah_selesai = df_user["Status"].sum()
+
             # Hitung persentase
-            persentase = (jumlah_selesai / total_target) if total_target > 0 else 0
-            
+            persentase = (jumlah_selesai /
+                          total_target) if total_target > 0 else 0
+
             # Tampilkan Progress Bar yang Estetik
-            st.markdown(f"### 📈 Progres Kerja: {int(persentase * 100)}%")
+            st.markdown(f"### ðŸ“ˆ Progres Kerja: {int(persentase * 100)}%")
             st.progress(persentase)
-            st.write(f"Selesai: **{jumlah_selesai}** dari **{total_target}** tugas.")
+            st.write(
+                f"Selesai: **{jumlah_selesai}** dari **{total_target}** tugas.")
             st.divider()
             # --- END LOGIKA PROGRES ---
 
-            edited_indiv = render_hybrid_table(df_user, f"mob_indiv_{filter_nama}", "Target")
+            edited_indiv = render_hybrid_table(
+                df_user, f"mob_indiv_{filter_nama}", "Target")
 
-            if st.button(f"💾 Simpan ({filter_nama})", use_container_width=True, key="mob_save_indiv"):
+            if st.button(f"ðŸ’¾ Simpan ({filter_nama})", use_container_width=True, key="mob_save_indiv"):
                 df_merged = df_indiv_all.copy()
                 df_merged.update(edited_indiv)
                 final_df = apply_audit_checklist_changes(
@@ -4107,7 +4078,7 @@ def render_kpi_mobile():
                 st.rerun()
 
             # Upload Bukti Individu
-            with st.expander(f"📂 Update Bukti ({filter_nama})"):
+            with st.expander(f"ðŸ“‚ Update Bukti ({filter_nama})"):
                 pilih_target = st.selectbox(
                     "Target:", df_user["Target"].tolist(), key="mob_sel_indiv")
                 note_target = st.text_area("Catatan", key="mob_note_indiv")
@@ -4125,7 +4096,7 @@ def render_kpi_mobile():
 
     # --- TAB 3: ADMIN (Fitur Tambah Target) ---
     with tab3:
-        st.markdown("#### ➕ Tambah Target Baru")
+        st.markdown("#### âž• Tambah Target Baru")
         jenis_t = st.radio(
             "Jenis", ["Team", "Individu"], horizontal=True, key="mob_jenis_target")
 
@@ -4154,12 +4125,12 @@ def render_kpi_mobile():
                 else:
                     st.error("Gagal.")
 
-
+@st.fragment
 def render_closing_mobile():
-    st.markdown("### 🤝 Closing Deal (Full Mobile)")
+    st.markdown("### ðŸ¤ Closing Deal (Full Mobile)")
 
     # Form Input Tetap Sama
-    with st.expander("➕ Input Deal Baru", expanded=False):
+    with st.expander("âž• Input Deal Baru", expanded=False):
         with st.form("mob_form_closing"):
             cd_group = st.text_input("Nama Group (Opsional)")
             cd_marketing = st.selectbox(
@@ -4180,7 +4151,7 @@ def render_closing_mobile():
                     st.error(msg)
 
     st.divider()
-    st.markdown("#### 📋 Riwayat Lengkap & Download")
+    st.markdown("#### ðŸ“‹ Riwayat Lengkap & Download")
 
     df_cd = load_closing_deal()
 
@@ -4199,17 +4170,17 @@ def render_closing_mobile():
             if HAS_OPENPYXL:
                 xb = df_to_excel_bytes(df_cd, sheet_name="Closing")
                 if xb:
-                    st.download_button("⬇️ Excel", data=xb, file_name="closing_mob.xlsx",
+                    st.download_button("â¬‡ï¸ Excel", data=xb, file_name="closing_mob.xlsx",
                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                        use_container_width=True)
         with c2:
             csv = df_cd.to_csv(index=False).encode('utf-8')
-            st.download_button("⬇️ CSV", data=csv, file_name="closing_mob.csv",
+            st.download_button("â¬‡ï¸ CSV", data=csv, file_name="closing_mob.csv",
                                mime="text/csv", use_container_width=True)
 
         # 4. Grafik (Jika ada Plotly)
         if HAS_PLOTLY:
-            with st.expander("📊 Lihat Grafik Performance"):
+            with st.expander("ðŸ“Š Lihat Grafik Performance"):
                 try:
                     df_plot = df_cd.copy()
                     df_plot[COL_NILAI_KONTRAK] = df_plot[COL_NILAI_KONTRAK].fillna(
@@ -4222,50 +4193,37 @@ def render_closing_mobile():
     else:
         st.info("Belum ada data.")
 
-
+@st.fragment
 def render_payment_mobile():
-    st.markdown("### 💳 Pembayaran (Full Mobile)")
-    
-    # =========================================================
-    # 1. INITIALIZATION & REFRESH SYSTEM (Integrasi Kode Kedua)
-    # =========================================================
-    if "buffer_pay_data" not in st.session_state:
-        with st.spinner("Memuat data dari server..."):
-            # Load awal dari GSheet -> Masuk ke RAM (Session State)
-            st.session_state["buffer_pay_data"] = load_pembayaran_dp()
-
-    # Tombol Refresh untuk menarik data terbaru dari Google Sheets
-    if st.button("🔄 Refresh Data Server", use_container_width=True):
-        st.cache_data.clear()
-        st.session_state["buffer_pay_data"] = load_pembayaran_dp()
-        st.success("Data diperbarui dari server!")
-        time.sleep(0.5)
-        st.rerun()
+    st.markdown("### ðŸ’³ Pembayaran (Full Mobile)")
 
     # =========================================================
-    # 2. FORM INPUT BARU
+    # 1. FORM INPUT BARU
     # =========================================================
-    with st.expander("➕ Input Pembayaran Baru", expanded=False):
+    with st.expander("âž• Input Pembayaran Baru", expanded=False):
         with st.form("mob_form_pay"):
             p_group = st.text_input("Group (Opsional)")
+            # Menggunakan daftar staf terbaru agar konsisten dengan Config_Staf
             p_marketing = st.selectbox("Marketing", get_daftar_staf_terbaru())
-            p_nominal = st.text_input("Nominal (Rp)", placeholder="Contoh: 15.000.000 atau 15jt")
-            p_jenis = st.selectbox("Jenis", ["Down Payment (DP)", "Termin", "Pelunasan"])
-            p_jatuh_tempo = st.date_input("Batas Waktu Bayar", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7))
+            p_nominal = st.text_input(
+                "Nominal (Rp)", placeholder="Contoh: 15.000.000 atau 15jt")
+            p_jenis = st.selectbox(
+                "Jenis", ["Down Payment (DP)", "Termin", "Pelunasan"])
+            p_jatuh_tempo = st.date_input("Batas Waktu Bayar", value=datetime.now(
+                tz=TZ_JKT).date() + timedelta(days=7))
             p_status = st.checkbox("Sudah Dibayar?")
-            p_bukti = st.file_uploader("Upload Bukti Transfer", disabled=not KONEKSI_DROPBOX_BERHASIL)
-            
+            p_bukti = st.file_uploader(
+                "Upload Bukti Transfer", disabled=not KONEKSI_DROPBOX_BERHASIL)
+
             if st.form_submit_button("Simpan Pembayaran", type="primary", use_container_width=True):
                 with st.spinner("Menyimpan data..."):
                     res, msg = tambah_pembayaran_dp(
-                        p_group, p_marketing, datetime.now(tz=TZ_JKT), 
+                        p_group, p_marketing, datetime.now(tz=TZ_JKT),
                         p_jenis, p_nominal, p_jatuh_tempo, p_status, p_bukti, "-"
                     )
                     if res:
                         st.success(msg)
-                        # Update Buffer RAM agar data baru langsung muncul setelah rerun
                         st.cache_data.clear()
-                        st.session_state["buffer_pay_data"] = load_pembayaran_dp()
                         time.sleep(1)
                         st.rerun()
                     else:
@@ -4274,32 +4232,31 @@ def render_payment_mobile():
     st.divider()
 
     # =========================================================
-    # 3. LOAD DATA DARI BUFFER & SISTEM ALERT
+    # 2. LOAD DATA & SISTEM ALERT
     # =========================================================
-    # Gunakan data dari RAM (Session State)
-    df_pay = st.session_state["buffer_pay_data"]
+    df_pay = load_pembayaran_dp()
 
     if not df_pay.empty:
         # Sistem Peringatan (Overdue & Due Soon)
         overdue, due_soon = build_alert_pembayaran(df_pay)
         if not overdue.empty:
-            st.error(f"⛔ **{len(overdue)} Data Overdue!** Segera follow up pembayaran yang terlambat.")
+            st.error(
+                f"â›” **{len(overdue)} Data Overdue!** Segera follow up pembayaran yang terlambat.")
         if not due_soon.empty:
-            st.warning(f"⚠️ **{len(due_soon)} Jatuh Tempo Dekat.** Batas bayar dalam 3 hari ke depan.")
+            st.warning(
+                f"âš ï¸ **{len(due_soon)} Jatuh Tempo Dekat.** Batas bayar dalam 3 hari ke depan.")
 
         # =========================================================
-        # 4. EDITOR DATA (Audit Log & Dynamic Cleaning)
+        # 3. EDITOR DATA (Audit Log Otomatis)
         # =========================================================
-        st.markdown("#### 📋 Edit Data & Cek Status")
-        st.caption("Ubah status 'Lunas' atau 'Jatuh Tempo' langsung di tabel bawah ini.")
+        st.markdown("#### ðŸ“‹ Edit Data & Cek Status")
+        st.caption(
+            "Ubah status 'Lunas' atau 'Jatuh Tempo' langsung di tabel bawah ini.")
 
-        # Bersihkan tipe data secara dinamis sebelum masuk ke editor (Integrasi Kode Kedua)
-        df_editor_source = clean_df_types_dynamically(df_pay)
-        
-        # Sesuai Code Pertama: Batasi kolom yang boleh diubah staf via HP
-        # Kita gunakan display wrapper untuk tampilan rupiah yang cantik
-        df_view = payment_df_for_display(df_editor_source)
-        
+        # Formatting Rupiah untuk tampilan editor (hanya visual)
+        df_view = payment_df_for_display(df_pay)
+
+        # Sesuai Code Kedua: Batasi kolom yang boleh diubah staf via HP
         editable_cols = [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR]
         disabled_cols = [c for c in df_view.columns if c not in editable_cols]
 
@@ -4310,61 +4267,66 @@ def render_payment_mobile():
                 COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", format="DD/MM/YYYY"),
                 COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True),
                 COL_BUKTI_BAYAR: st.column_config.LinkColumn("Bukti"),
-                COL_TS_UPDATE: st.column_config.TextColumn("Riwayat Perubahan (Log)", disabled=True)
+                COL_TS_UPDATE: st.column_config.TextColumn(
+                    "Riwayat Perubahan (Log)", disabled=True)
             },
             disabled=disabled_cols,
             hide_index=True,
             use_container_width=True,
-            key="smart_payment_editor_mobile_v3"
+            key="editor_pay_mobile_final"
         )
 
-        # Tombol Simpan Perubahan
-        if st.button("💾 Simpan Perubahan Data", type="primary", use_container_width=True):
+        # Tombol Simpan Perubahan dengan Logic Deteksi Perubahan (Diff)
+        if st.button("ðŸ’¾ Simpan Perubahan Data", type="primary", use_container_width=True):
             with st.spinner("Memproses perubahan & mencatat audit log..."):
+                # Actor diambil dari sesi login (Staff/Admin)
                 actor_name = st.session_state.get("user_name", "Mobile User")
-                
-                # Proses deteksi perubahan
-                final_df = apply_audit_payments_changes(df_pay, edited_pay_mob, actor=actor_name)
-                
+
+                # Membandingkan data lama vs baru untuk membuat catatan log otomatis
+                # Menggunakan helper apply_audit_payments_changes dari migrasi sebelumnya
+                final_df = apply_audit_payments_changes(
+                    df_pay, edited_pay_mob, actor=actor_name)
+
                 if save_pembayaran_dp(final_df):
-                    # Update RAM lokal agar UI langsung sinkron (Integrasi Kode Kedua)
-                    st.session_state["buffer_pay_data"] = final_df
-                    st.success("✅ Perubahan database berhasil disimpan!")
+                    st.success("âœ… Perubahan database berhasil disimpan!")
                     st.cache_data.clear()
                     time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("❌ Gagal menyimpan ke Database GSheet.")
+                    st.error("âŒ Gagal menyimpan ke Database GSheet.")
 
         st.divider()
 
         # =========================================================
-        # 5. FITUR UPLOAD BUKTI SUSULAN
+        # 4. FITUR UPLOAD BUKTI SUSULAN
         # =========================================================
-        with st.expander("📎 Upload Bukti (Susulan)", expanded=False):
-            st.caption("Gunakan ini untuk menambah/mengganti foto bukti transfer.")
+        with st.expander("ðŸ“Ž Upload Bukti (Susulan)", expanded=False):
+            st.caption(
+                "Gunakan ini untuk menambah/mengganti foto bukti transfer.")
             df_pay_reset = df_pay.reset_index(drop=True)
-            
+
+            # Membuat list pilihan data agar user tidak salah pilih baris
             options = [
-                f"{i+1}. {r[COL_MARKETING]} | {r[COL_GROUP]} ({format_rupiah_display(r[COL_NOMINAL_BAYAR])})" 
+                f"{i+1}. {r[COL_MARKETING]} | {r[COL_GROUP]} ({format_rupiah_display(r[COL_NOMINAL_BAYAR])})"
                 for i, r in df_pay_reset.iterrows()
             ]
-            
-            sel_idx = st.selectbox("Pilih Data Pembayaran:", range(len(options)), 
-                                  format_func=lambda x: options[x], key="mob_sel_susulan")
 
-            file_susulan = st.file_uploader("Pilih File Bukti Baru", key="mob_file_susulan")
+            sel_idx = st.selectbox("Pilih Data Pembayaran:", range(len(options)),
+                                   format_func=lambda x: options[x], key="mob_sel_susulan")
 
-            if st.button("⬆️ Update Foto Bukti", use_container_width=True):
+            file_susulan = st.file_uploader(
+                "Pilih File Bukti Baru", key="mob_file_susulan")
+
+            if st.button("â¬†ï¸ Update Foto Bukti", use_container_width=True):
                 if file_susulan:
                     marketing_name = df_pay_reset.iloc[sel_idx][COL_MARKETING]
-                    actor_now = st.session_state.get("user_name", "Mobile User")
-                    
-                    ok, msg = update_bukti_pembayaran_by_index(sel_idx, file_susulan, marketing_name, actor=actor_now)
+                    actor_now = st.session_state.get(
+                        "user_name", "Mobile User")
+
+                    ok, msg = update_bukti_pembayaran_by_index(
+                        sel_idx, file_susulan, marketing_name, actor=actor_now)
                     if ok:
-                        st.success("✅ Bukti berhasil di-update!")
-                        # Refresh buffer setelah upload file
-                        st.session_state["buffer_pay_data"] = load_pembayaran_dp()
+                        st.success("âœ… Bukti berhasil di-update!")
                         st.cache_data.clear()
                         time.sleep(1)
                         st.rerun()
@@ -4375,9 +4337,9 @@ def render_payment_mobile():
     else:
         st.info("Belum ada data pembayaran yang tercatat.")
 
-
+@st.fragment
 def render_admin_mobile():
-    st.markdown("### 🔐 Admin Dashboard (Full Mobile)")
+    st.markdown("### ðŸ” Admin Dashboard (Full Mobile)")
 
     # 1. Cek Login
     if not st.session_state["is_admin"]:
@@ -4392,7 +4354,7 @@ def render_admin_mobile():
         return  # Stop disini kalau belum login
 
     # 2. Jika Sudah Login -> Tampilkan Dashboard Penuh
-    if st.button("🔓 Logout", use_container_width=True, key="mob_adm_logout"):
+    if st.button("ðŸ”“ Logout", use_container_width=True, key="mob_adm_logout"):
         st.session_state["is_admin"] = False
         st.rerun()
 
@@ -4412,27 +4374,30 @@ def render_admin_mobile():
             pass
 
 # TABS NAVIGATION MOBILE
-    tab_prod, tab_leads, tab_data, tab_cfg = st.tabs(["📈 Grafik", "🧲 Leads", "📦 Data", "⚙️ Config"])
+    tab_prod, tab_leads, tab_data, tab_cfg = st.tabs(
+        ["ðŸ“ˆ Grafik", "ðŸ§² Leads", "ðŸ“¦ Data", "âš™ï¸ Config"])
 
     with tab_prod:
         st.caption("Analisa Kinerja")
         if not df_all.empty:
-            days = st.selectbox("Hari Terakhir:", [7, 30, 90], key="mob_adm_days")
+            days = st.selectbox("Hari Terakhir:", [
+                                7, 30, 90], key="mob_adm_days")
             start_d = datetime.now(tz=TZ_JKT).date() - timedelta(days=days)
             df_f = df_all[df_all["Tgl"] >= start_d].copy()
             st.metric("Total Laporan", len(df_f))
-            
+
             report_counts = df_f[COL_NAMA].value_counts()
             st.bar_chart(report_counts)
 
             st.divider()
-            st.markdown("#### 🤖 AI Management Insight")
-            
+            st.markdown("#### ðŸ¤– AI Management Insight")
+
             with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
                 try:
                     # Penyiapan Data
-                    staf_stats_str = json.dumps(report_counts.to_dict(), indent=2)
-                    
+                    staf_stats_str = json.dumps(
+                        report_counts.to_dict(), indent=2)
+
                     full_prompt = f"""
                     [CONTEXT_DATA]
                     Nama Pemimpin: Pak Nugroho
@@ -4460,13 +4425,16 @@ def render_admin_mobile():
                     for model_name in MODEL_FALLBACKS:
                         try:
                             if SDK == "new":
-                                resp = client_ai.models.generate_content(model=model_name, contents=full_prompt)
+                                resp = client_ai.models.generate_content(
+                                    model=model_name, contents=full_prompt)
                                 ai_reply = resp.text
                             else:
-                                model = genai_legacy.GenerativeModel(model_name)
+                                model = genai_legacy.GenerativeModel(
+                                    model_name)
                                 resp = model.generate_content(full_prompt)
                                 ai_reply = resp.text
-                            if ai_reply: break
+                            if ai_reply:
+                                break
                         except:
                             continue
 
@@ -4474,22 +4442,26 @@ def render_admin_mobile():
                         st.info(ai_reply)
                     else:
                         st.warning("Insight tidak tersedia sementara waktu.")
-                        
+
                 except Exception as e:
-                    st.error(f"⚠️ DEBUG ERROR MOBILE: {str(e)}")
+                    st.error(f"âš ï¸ DEBUG ERROR MOBILE: {str(e)}")
         else:
             st.info("Belum ada data laporan.")
 
     with tab_leads:
         st.caption("Filter & Download Leads")
-        sel_int = st.selectbox("Interest:", ["Under 50% (A)", "50-75% (B)", "75%-100%"], key="mob_adm_int")
+        sel_int = st.selectbox(
+            "Interest:", ["Under 50% (A)", "50-75% (B)", "75%-100%"], key="mob_adm_int")
         if not df_all.empty and COL_INTEREST in df_all.columns:
-            df_leads = df_all[df_all[COL_INTEREST].astype(str).str.strip() == sel_int]
-            st.dataframe(df_leads[[COL_NAMA_KLIEN, COL_KONTAK_KLIEN]], use_container_width=True)
+            df_leads = df_all[df_all[COL_INTEREST].astype(
+                str).str.strip() == sel_int]
+            st.dataframe(
+                df_leads[[COL_NAMA_KLIEN, COL_KONTAK_KLIEN]], use_container_width=True)
             if HAS_OPENPYXL:
                 xb = df_to_excel_bytes(df_leads, sheet_name="Leads")
                 if xb:
-                    st.download_button("⬇️ Excel Leads", data=xb, file_name=f"leads_{sel_int}.xlsx", use_container_width=True)
+                    st.download_button(
+                        "â¬‡ï¸ Excel Leads", data=xb, file_name=f"leads_{sel_int}.xlsx", use_container_width=True)
 
     with tab_data:
         st.caption("Master Data Laporan")
@@ -4499,10 +4471,11 @@ def render_admin_mobile():
         st.dataframe(df_all, use_container_width=True)
 
     with tab_cfg:
-        st.markdown("#### 👥 Kelola Personel (Staf)")
+        st.markdown("#### ðŸ‘¥ Kelola Personel (Staf)")
         with st.form("mob_add_staff"):
-            st.markdown("➕ **Tambah Staf Baru**")
-            new_st = st.text_input("Nama Staf", placeholder="Ketik nama baru...")
+            st.markdown("âž• **Tambah Staf Baru**")
+            new_st = st.text_input(
+                "Nama Staf", placeholder="Ketik nama baru...")
             if st.form_submit_button("Simpan Staf", use_container_width=True):
                 if new_st.strip():
                     ok, msg = tambah_staf_baru(new_st)
@@ -4515,13 +4488,15 @@ def render_admin_mobile():
                         st.error(msg)
                 else:
                     st.error("Nama tidak boleh kosong.")
-        st.markdown("---") 
-        st.markdown("#### 🗑️ Hapus Staf")
+        st.markdown("---")
+        st.markdown("#### ðŸ—‘ï¸ Hapus Staf")
         st.caption("Menghapus nama dari daftar pelapor.")
         staff_now = get_daftar_staf_terbaru()
-        hapus_select = st.selectbox("Pilih staf yang akan dihapus:", ["-- Pilih Staf --"] + staff_now, key="mob_del_st")
-        confirm_del = st.checkbox("Konfirmasi penghapusan permanen", key="mob_del_confirm")
-        if st.button("🔥 Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
+        hapus_select = st.selectbox("Pilih staf yang akan dihapus:", [
+                                    "-- Pilih Staf --"] + staff_now, key="mob_del_st")
+        confirm_del = st.checkbox(
+            "Konfirmasi penghapusan permanen", key="mob_del_confirm")
+        if st.button("ðŸ”¥ Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
             if hapus_select == "-- Pilih Staf --":
                 st.error("Pilih nama staf terlebih dahulu!")
             elif not confirm_del:
@@ -4530,7 +4505,8 @@ def render_admin_mobile():
                 with st.spinner("Menghapus..."):
                     ok, m = hapus_staf_by_name(hapus_select)
                     if ok:
-                        force_audit_log(actor=st.session_state.get("user_name", "Admin Mobile"), action="❌ DELETE USER", target_sheet="Config_Staf", chat_msg=f"Menghapus staf via HP: {hapus_select}", details_input=f"User {hapus_select} telah dihapus dari sistem mobile.")
+                        force_audit_log(actor=st.session_state.get("user_name", "Admin Mobile"), action="âŒ DELETE USER", target_sheet="Config_Staf",
+                                        chat_msg=f"Menghapus staf via HP: {hapus_select}", details_input=f"User {hapus_select} telah dihapus dari sistem mobile.")
                         st.success(f"Staf {hapus_select} Berhasil dihapus!")
                         st.cache_data.clear()
                         time.sleep(1.5)
@@ -4539,7 +4515,7 @@ def render_admin_mobile():
                         st.error(m)
 
             # --- SUB-BAGIAN: HAPUS STAF ---
-            st.markdown("#### 🗑️ Hapus Staf")
+            st.markdown("#### ðŸ—‘ï¸ Hapus Staf")
             st.caption("Menghapus nama dari daftar pelapor.")
 
             staff_now = get_daftar_staf_terbaru()
@@ -4549,7 +4525,7 @@ def render_admin_mobile():
             confirm_del = st.checkbox(
                 "Konfirmasi penghapusan permanen", key="mob_del_confirm")
 
-            if st.button("🔥 Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
+            if st.button("ðŸ”¥ Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
                 if hapus_select == "-- Pilih Staf --":
                     st.error("Pilih nama staf terlebih dahulu!")
                 elif not confirm_del:
@@ -4561,26 +4537,27 @@ def render_admin_mobile():
                             force_audit_log(
                                 actor=st.session_state.get(
                                     "user_name", "Admin Mobile"),
-                                action="❌ DELETE USER",
+                                action="âŒ DELETE USER",
                                 target_sheet="Config_Staf",
                                 chat_msg=f"Menghapus staf via HP: {hapus_select}",
                                 details_input=f"User {hapus_select} telah dihapus dari sistem mobile."
                             )
-                            st.success(f"Staf {hapus_select} Berhasil dihapus!")
+                            st.success(
+                                f"Staf {hapus_select} Berhasil dihapus!")
                             st.cache_data.clear()
                             time.sleep(1.5)
                             st.rerun()
                         else:
                             st.error(m)
 
-
+@st.fragment
 def render_audit_mobile():
-    st.markdown("### 📜 Global Audit Log (Mobile)")
+    st.markdown("### ðŸ“œ Global Audit Log (Mobile)")
     st.caption("Rekaman jejak perubahan data admin.")
 
     from audit_service import load_audit_log
 
-    if st.button("🔄 Refresh", use_container_width=True, key="mob_refresh_log"):
+    if st.button("ðŸ”„ Refresh", use_container_width=True, key="mob_refresh_log"):
         st.cache_data.clear()
         st.rerun()
 
@@ -4597,19 +4574,19 @@ def render_audit_mobile():
         except:
             pass
 
-        st.markdown("#### 🕒 10 Aktivitas Terakhir")
+        st.markdown("#### ðŸ•’ 10 Aktivitas Terakhir")
 
         for i, row in df_log.head(10).iterrows():
             with st.container(border=True):
                 # Gunakan .get() agar aman jika kolom tetap tidak terdeteksi
                 st.markdown(f"**{row.get('User', '-')}**")
                 st.caption(
-                    f"📅 {row.get('Waktu', '-')} | Status: {row.get('Status', '-')}")
+                    f"ðŸ“… {row.get('Waktu', '-')} | Status: {row.get('Status', '-')}")
                 st.text(f"Data: {row.get('Target Data', '-')}")
 
                 chat_val = row.get('Chat & Catatan', '-')
                 if chat_val not in ["-", ""]:
-                    st.info(f"📝 {chat_val}")
+                    st.info(f"ðŸ“ {chat_val}")
 
                 with st.expander("Lihat Detail"):
                     st.code(row.get('Detail Perubahan', '-'), language="text")
@@ -4626,8 +4603,8 @@ def render_audit_mobile():
 # =========================================================
 
 # --- 1. HALAMAN PRESENSI (REAL-TIME & NO-EDIT) ---
-if menu_nav == "📅 Presensi":
-    st.markdown("## 📅 Presensi Kehadiran Real-Time")
+if menu_nav == "ðŸ“… Presensi":
+    st.markdown("## ðŸ“… Presensi Kehadiran Real-Time")
     st.caption(
         "Silakan pilih nama Anda. Waktu, hari, dan tanggal akan tercatat otomatis oleh sistem (WIB).")
 
@@ -4638,9 +4615,9 @@ if menu_nav == "📅 Presensi":
 
         waktu_skrg = datetime.now(TZ_JKT)
         st.info(
-            f"🕒 Waktu Sistem Saat Ini: **{waktu_skrg.strftime('%A, %d %B %Y - %H:%M:%S')} WIB**")
+            f"ðŸ•’ Waktu Sistem Saat Ini: **{waktu_skrg.strftime('%A, %d %B %Y - %H:%M:%S')} WIB**")
 
-        if st.button("✅ Kirim Presensi Sekarang", type="primary", use_container_width=True):
+        if st.button("âœ… Kirim Presensi Sekarang", type="primary", use_container_width=True):
             if pilih_nama == "-- Pilih Nama --":
                 st.error("Silakan pilih nama terlebih dahulu!")
             else:
@@ -4650,7 +4627,7 @@ if menu_nav == "📅 Presensi":
                         st.success(msg)
                         force_audit_log(
                             actor=pilih_nama,
-                            action="✅ PRESENSI",
+                            action="âœ… PRESENSI",
                             target_sheet="Presensi_Kehadiran",
                             chat_msg="Absensi Masuk Real-time",
                             details_input=f"Presensi sukses pukul {waktu_skrg.strftime('%H:%M:%S')}"
@@ -4661,7 +4638,7 @@ if menu_nav == "📅 Presensi":
                         st.warning(msg)
 
     st.divider()
-    st.markdown("### 📋 Kehadiran Hari Ini")
+    st.markdown("### ðŸ“‹ Kehadiran Hari Ini")
     ws_p = init_presensi_db()
     if ws_p:
         data_p = ws_p.get_all_records()
@@ -4678,11 +4655,11 @@ if menu_nav == "📅 Presensi":
                 st.info("Belum ada data kehadiran hari ini.")
 
 # --- 2. HALAMAN LAPORAN HARIAN ---
-elif menu_nav == "📝 Laporan Harian":
+elif menu_nav == "ðŸ“ Laporan Harian":
     if IS_MOBILE:
         render_laporan_harian_mobile()
     else:
-        st.markdown("## 📝 Laporan Kegiatan Harian")
+        st.markdown("## ðŸ“ Laporan Kegiatan Harian")
         c1, c2 = st.columns([1, 2])
         with c1:
             pelapor = st.selectbox(
@@ -4690,33 +4667,33 @@ elif menu_nav == "📝 Laporan Harian":
         with c2:
             pending = get_reminder_pending(pelapor)
             if pending:
-                st.warning(f"🔔 Reminder Pending: {pending}")
+                st.warning(f"ðŸ”” Reminder Pending: {pending}")
 
         with st.container(border=True):
             with st.form("daily_report_desk", clear_on_submit=False):
-                st.markdown("### 📌 Detail Aktivitas")
+                st.markdown("### ðŸ“Œ Detail Aktivitas")
                 col_kiri, col_kanan = st.columns(2)
                 with col_kiri:
                     kategori = st.radio(
-                        "Kategori", ["🚗 Sales Lapangan", "💻 Digital/Kantor", "📞 Telesales", "🏢 Lainnya"])
+                        "Kategori", ["ðŸš— Sales Lapangan", "ðŸ’» Digital/Kantor", "ðŸ“ž Telesales", "ðŸ¢ Lainnya"])
                     lokasi = st.text_input(
                         "Lokasi / Nama Klien / Jenis Tugas", placeholder="Wajib diisi...")
                     deskripsi = st.text_area("Deskripsi Detail", height=150)
                     foto = st.file_uploader(
                         "Upload Bukti", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
                 with col_kanan:
-                    st.markdown("### 📊 Hasil & Follow Up")
+                    st.markdown("### ðŸ“Š Hasil & Follow Up")
                     kesimpulan = st.text_area("Kesimpulan / Hasil", height=80)
                     kendala = st.text_area(
                         "Kendala Internal/Lapangan", height=60)
                     next_plan = st.text_input("Next Plan / Pending (Reminder)")
-                    st.markdown("### 👤 Data Klien")
+                    st.markdown("### ðŸ‘¤ Data Klien")
                     cl_nama = st.text_input("Nama Klien")
                     cl_kontak = st.text_input("No HP/WA")
                     cl_interest = st.selectbox(
                         "Interest Level", ["-", "Under 50%", "50-75%", "75-100%"])
                 st.divider()
-                if st.form_submit_button("✅ KIRIM LAPORAN", type="primary", use_container_width=True):
+                if st.form_submit_button("âœ… KIRIM LAPORAN", type="primary", use_container_width=True):
                     if not lokasi or not deskripsi:
                         st.error("Lokasi dan Deskripsi wajib diisi!")
                     else:
@@ -4738,18 +4715,18 @@ elif menu_nav == "📝 Laporan Harian":
                                 st.error("Gagal simpan ke GSheet.")
 
 # --- 3. TARGET & KPI ---
-elif menu_nav == "🎯 Target & KPI":
+elif menu_nav == "ðŸŽ¯ Target & KPI":
     if IS_MOBILE:
         render_kpi_mobile()
     else:
-        st.markdown("## 🎯 Manajemen Target & KPI")
+        st.markdown("## ðŸŽ¯ Manajemen Target & KPI")
         tab1, tab2, tab3 = st.tabs(
-            ["🏆 Target Team", "⚡ Target Individu", "⚙️ Admin Setup"])
+            ["ðŸ† Target Team", "âš¡ Target Individu", "âš™ï¸ Admin Setup"])
         with tab1:
             df_team = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
             if not df_team.empty:
                 edited_team = render_hybrid_table(df_team, "team_desk", "Misi")
-                if st.button("💾 Simpan Perubahan Team"):
+                if st.button("ðŸ’¾ Simpan Perubahan Team"):
                     final_df = apply_audit_checklist_changes(
                         df_team, edited_team, ["Misi"], get_actor_fallback())
                     save_checklist(SHEET_TARGET_TEAM, final_df,
@@ -4761,40 +4738,42 @@ elif menu_nav == "🎯 Target & KPI":
             st.caption("Monitoring target perorangan.")
             pilih_staf = st.selectbox(
                 "Pilih Nama Staf:", get_daftar_staf_terbaru())
-            
+
             df_indiv_all = load_checklist(
                 SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
             df_user = df_indiv_all[df_indiv_all["Nama"] == pilih_staf]
-            
+
             if not df_user.empty:
                 # ==========================================
                 # ANCHOR: LOGIKA PROGRESS BAR (PENTING)
                 # ==========================================
                 total_target = len(df_user)
                 # Menghitung jumlah baris yang statusnya dicentang (True)
-                jumlah_selesai = df_user["Status"].sum() 
+                jumlah_selesai = df_user["Status"].sum()
                 persentase = jumlah_selesai / total_target if total_target > 0 else 0
-                
+
                 # Tampilan Visual Progres
-                st.markdown(f"### 📈 Progres {pilih_staf}: {int(persentase * 100)}%")
+                st.markdown(
+                    f"### ðŸ“ˆ Progres {pilih_staf}: {int(persentase * 100)}%")
                 st.progress(persentase)
-                st.write(f"✅ **{jumlah_selesai}** selesai dari **{total_target}** target.")
+                st.write(
+                    f"âœ… **{jumlah_selesai}** selesai dari **{total_target}** target.")
                 st.divider()
                 # ==========================================
 
                 # Tabel editor untuk mencentang target
                 edited_indiv = render_hybrid_table(
                     df_user, f"indiv_{pilih_staf}", "Target")
-                
-                if st.button(f"💾 Simpan Target {pilih_staf}", use_container_width=True):
+
+                if st.button(f"ðŸ’¾ Simpan Target {pilih_staf}", use_container_width=True):
                     df_merged = df_indiv_all.copy()
-                    
+
                     # Update data lama dengan data hasil editan tabel
                     df_merged.update(edited_indiv)
-                    
+
                     final_df = apply_audit_checklist_changes(
                         df_indiv_all, df_merged, ["Nama", "Target"], pilih_staf)
-                    
+
                     if save_checklist(SHEET_TARGET_INDIVIDU, final_df, INDIV_CHECKLIST_COLUMNS):
                         st.success(f"Berhasil menyimpan progres {pilih_staf}!")
                         st.cache_data.clear()
@@ -4803,9 +4782,10 @@ elif menu_nav == "🎯 Target & KPI":
                     else:
                         st.error("Gagal menyimpan ke database.")
             else:
-                st.info(f"Belum ada target yang ditugaskan untuk {pilih_staf}.")
+                st.info(
+                    f"Belum ada target yang ditugaskan untuk {pilih_staf}.")
         with tab3:
-            st.markdown("### ➕ Tambah Target Baru")
+            st.markdown("### âž• Tambah Target Baru")
             jenis_t = st.radio(
                 "Jenis Target", ["Team", "Individu"], horizontal=True)
             with st.form("add_kpi_desk"):
@@ -4827,11 +4807,11 @@ elif menu_nav == "🎯 Target & KPI":
                         st.rerun()
 
 # --- 4. CLOSING DEAL ---
-elif menu_nav == "🤝 Closing Deal":
+elif menu_nav == "ðŸ¤ Closing Deal":
     if IS_MOBILE:
         render_closing_mobile()
     else:
-        st.markdown("## 🤝 Closing Deal")
+        st.markdown("## ðŸ¤ Closing Deal")
         with st.container(border=True):
             with st.form("form_closing_desk_full", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
@@ -4841,7 +4821,7 @@ elif menu_nav == "🤝 Closing Deal":
                     "Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
                 inp_bidang = st.text_input("Bidang / Jenis Event")
                 inp_nilai = st.text_input("Nilai Kontrak (Rupiah)")
-                if st.form_submit_button("✅ Simpan Closing Deal", type="primary", use_container_width=True):
+                if st.form_submit_button("âœ… Simpan Closing Deal", type="primary", use_container_width=True):
                     res, msg = tambah_closing_deal(
                         inp_group, inp_marketing, inp_tgl_event, inp_bidang, inp_nilai)
                     if res:
@@ -4857,82 +4837,62 @@ elif menu_nav == "🤝 Closing Deal":
             st.dataframe(df_cd, use_container_width=True, hide_index=True)
 
 # --- 5. PEMBAYARAN ---
-elif menu_nav == "💳 Pembayaran":
-    # 1. Cek Buffer (Jika sudah login dan prefetch jalan, ini harusnya sudah ada)
-    if "buffer_pay_data" not in st.session_state:
-        with st.spinner("🚀 Inisialisasi Database..."):
-            st.session_state["buffer_pay_data"] = load_pembayaran_dp()
-
-    # Ambil dataframe utama langsung dari RAM (0 detik delay)
-    df_pay = st.session_state["buffer_pay_data"]
-
+elif menu_nav == "ðŸ’³ Pembayaran":
     if IS_MOBILE:
-        render_payment_mobile() # #sisanyatetapsama (Pastikan fungsi mobile juga membaca buffer jika ingin cepat)
+        render_payment_mobile()
     else:
-        st.markdown("## 💳 Smart Payment Action Center")
-        
-        # Layout Header + Tombol Sync Manual
-        col_title, col_sync = st.columns([5, 1])
-        with col_title:
-            st.caption("Manajemen pembayaran terpadu (Mode Cepat: Data berjalan di RAM).")
-        with col_sync:
-            # Tombol ini hanya diklik jika ingin menarik data terbaru dari inputan orang lain
-            if st.button("🔄 Sync Server", help="Paksa tarik data baru dari Cloud", use_container_width=True):
-                st.cache_data.clear()
-                st.session_state["buffer_pay_data"] = load_pembayaran_dp() # Update RAM
-                st.success("Data Sinkron!")
-                time.sleep(0.5)
-                st.rerun()
+        st.markdown("## ðŸ’³ Smart Payment Action Center")
+        st.caption(
+            "Manajemen pembayaran terpadu dengan kalkulator sisa tagihan dan pelacakan cicilan.")
 
         # =========================================================
         # 1. SEKSI INPUT: KALKULATOR PEMBAYARAN PINTAR
         # =========================================================
         with st.container(border=True):
-            st.markdown("### ➕ Input Pembayaran & Kalkulator Sisa")
-            
-            # [OPTIMASI CRITICAL] Menggunakan st.form agar TIDAK reload saat mengetik huruf
-            with st.form("form_smart_pay_ram", clear_on_submit=True):
+            st.markdown("### âž• Input Pembayaran & Kalkulator Sisa")
+            with st.form("form_smart_pay", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
-                
                 with c1:
-                    # #logikasama: Menggunakan cache function untuk list staf agar cepat
-                    p_marketing = st.selectbox("Nama Marketing", get_daftar_staf_terbaru())
-                    p_group = st.text_input("Nama Group / Klien", placeholder="Masukkan nama entitas...")
-                    p_total_sepakat = st.text_input("Total Nilai Kesepakatan (Rp)", placeholder="Contoh: 100.000.000")
-                
-                with c2:
-                    # #sisanyatetapsama
-                    p_jenis = st.selectbox("Mekanisme Pembayaran", ["Down Payment (DP)", "Cicilan", "Cash"])
-                    p_nom_bayar = st.text_input("Nominal yang Dibayar Sekarang (Rp)")
-                    p_tenor = st.number_input("Tenor Cicilan (Bulan)", min_value=0, step=1, help="Isi 0 jika Cash/DP")
-                
-                with c3:
-                    # #sisanyatetapsama
-                    p_tgl_event = st.date_input("Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
-                    p_due = st.date_input("Batas Waktu Bayar (Jatuh Tempo)", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7))
-                    p_bukti = st.file_uploader("Upload Bukti Transfer (Foto/PDF)")
+                    p_marketing = st.selectbox(
+                        "Nama Marketing", get_daftar_staf_terbaru())
+                    p_group = st.text_input(
+                        "Nama Group / Klien", placeholder="Masukkan nama entitas...")
+                    p_total_sepakat = st.text_input(
+                        "Total Nilai Kesepakatan (Rp)", placeholder="Contoh: 100.000.000")
 
-                p_note = st.text_area("Catatan Tambahan (Opsional)", placeholder="Keterangan bank, nomor referensi, dll.")
-                
-                # Tombol Submit WAJIB di dalam form
-                submitted = st.form_submit_button("✅ Simpan & Hitung Sisa", type="primary", use_container_width=True)
-                
-                if submitted:
+                with c2:
+                    p_jenis = st.selectbox("Mekanisme Pembayaran", [
+                                           "Down Payment (DP)", "Cicilan", "Cash"])
+                    p_nom_bayar = st.text_input(
+                        "Nominal yang Dibayar Sekarang (Rp)")
+                    p_tenor = st.number_input(
+                        "Tenor Cicilan (Bulan)", min_value=0, step=1, help="Isi 0 jika pembayaran Cash/DP sekali bayar")
+
+                with c3:
+                    p_tgl_event = st.date_input(
+                        "Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
+                    p_due = st.date_input("Batas Waktu Bayar (Jatuh Tempo)", value=datetime.now(
+                        tz=TZ_JKT).date() + timedelta(days=7))
+                    p_bukti = st.file_uploader(
+                        "Upload Bukti Transfer (Foto/PDF)")
+
+                p_note = st.text_area(
+                    "Catatan Tambahan (Opsional)", placeholder="Keterangan bank, nomor referensi, dll.")
+
+                if st.form_submit_button("âœ… Simpan & Hitung Sisa", type="primary", use_container_width=True):
                     if not p_total_sepakat or not p_nom_bayar:
-                        st.error("Gagal: Nilai Kesepakatan dan Nominal Bayar wajib diisi!")
+                        st.error(
+                            "Gagal: Nilai Kesepakatan dan Nominal Bayar wajib diisi!")
                     else:
-                        with st.spinner("Menyimpan ke Database..."):
-                            # #logikasama: Memanggil fungsi simpan database
+                        with st.spinner("Memproses transaksi..."):
                             ok, msg = tambah_pembayaran_dp(
-                                p_group, p_marketing, p_tgl_event, p_jenis, 
+                                p_group, p_marketing, p_tgl_event, p_jenis,
                                 p_nom_bayar, p_total_sepakat, p_tenor, p_due, p_bukti, p_note
                             )
                             if ok:
                                 st.success(msg)
                                 st.cache_data.clear()
-                                # [OPTIMASI] Update Buffer RAM agar data baru langsung muncul di tabel bawah tanpa fetch ulang
-                                st.session_state["buffer_pay_data"] = load_pembayaran_dp() 
-                                time.sleep(1)
+                                time.sleep(2)
                                 st.rerun()
                             else:
                                 st.error(msg)
@@ -4940,40 +4900,49 @@ elif menu_nav == "💳 Pembayaran":
         st.divider()
 
         # =========================================================
-        # 2. SEKSI MONITORING: ALERT & DATA EDITOR (RAM BASED)
+        # 2. SEKSI MONITORING: ALERT & DATA EDITOR DINAMIS
         # =========================================================
-        st.markdown("### 📋 Monitoring & Riwayat Pembayaran")
-        
-        # [OPTIMASI] Menggunakan data dari RAM (df_pay) -> Instan
+        st.markdown("### ðŸ“‹ Monitoring & Riwayat Pembayaran")
+        df_pay = load_pembayaran_dp()
+
         if df_pay.empty:
             st.info("Belum ada data pembayaran yang tersimpan.")
         else:
-            # --- Sistem Alert Pintar (Hitung di RAM) ---
-            # #logikasama: Logika overdue/due soon
+            # --- Sistem Alert Pintar (Berdasarkan Sisa Bayar) ---
             overdue, due_soon = build_alert_pembayaran(df_pay)
             col_stat1, col_stat2 = st.columns(2)
             with col_stat1:
-                st.metric("⛔ Overdue (Belum Lunas)", len(overdue))
-                if not overdue.empty: st.error("Ada tagihan overdue!")
+                st.metric("â›” Overdue (Belum Lunas)", len(overdue))
+                if not overdue.empty:
+                    st.error("Ada tagihan yang melewati jatuh tempo!")
             with col_stat2:
-                st.metric("⚠️ Jatuh Tempo Dekat (≤ 3 Hari)", len(due_soon))
-                if not due_soon.empty: st.warning("Segera lakukan penagihan ulang.")
+                st.metric("âš ï¸ Jatuh Tempo Dekat (â‰¤ 3 Hari)",
+                          len(due_soon))
+                if not due_soon.empty:
+                    st.warning("Segera lakukan penagihan ulang.")
 
-            st.caption("Klik dua kali pada sel untuk mengedit. Data diload dari RAM (High Speed).")
+            st.caption(
+                "Klik dua kali pada sel untuk mengedit. Kolom Log & Timestamp otomatis terkunci.")
 
-            # --- CLEANING DATA (Di RAM) ---
-            # #logikasama: Membersihkan tipe data agar editor tidak error
+            # --- 1. PROSES DATA SECARA DINAMIS (Normalisasi Tipe Data) ---
             df_ready = clean_df_types_dynamically(df_pay)
-            
-            # #logikasama: Generate config kolom otomatis
-            auto_config = generate_dynamic_column_config(df_ready)
-            
-            # #logikasama: Kunci kolom log/timestamp
-            locked_keywords = ["timestamp", "updated by", "log", "pelaku", "waktu", "input"]
-            disabled_list = [c for c in df_ready.columns if any(k in c.lower() for k in locked_keywords)]
 
-            # --- RENDER DATA EDITOR ---
-            # [OPTIMASI] Key editor dibuat statis ('ram_optimized') agar tidak reset saat user mengetik
+            # --- 2. GENERATE CONFIG SECARA OTOMATIS (Mencegah Error Tipe Data) ---
+            auto_config = generate_dynamic_column_config(df_ready)
+
+            # --- 3. LOGIKA PENGUNCIAN KOLOM OTOMATIS ---
+            locked_keywords = ["timestamp", "updated by",
+                               "log", "pelaku", "waktu", "input"]
+            disabled_list = [c for c in df_ready.columns if any(
+                k in c.lower() for k in locked_keywords)]
+
+            edited_pay = st.data_editor(
+                df_ready,
+                column_config=auto_config,
+                # ... sisanya tetap
+            )
+
+            # --- 4. RENDER DATA EDITOR ---
             edited_pay = st.data_editor(
                 df_ready,
                 column_config=auto_config,
@@ -4981,25 +4950,23 @@ elif menu_nav == "💳 Pembayaran":
                 hide_index=True,
                 use_container_width=True,
                 num_rows="dynamic",
-                key="smart_payment_editor_ram_optimized" 
+                key="smart_payment_editor_v3"
             )
 
-            # --- SIMPAN PERUBAHAN (WRITE-THROUGH CACHE) ---
-            if st.button("💾 Simpan Perubahan Riwayat", use_container_width=True):
-                with st.spinner("Sinkronisasi RAM & Cloud..."):
-                    current_user = st.session_state.get("user_name", "Admin Desktop")
-                    
-                    # #logikasama: Bandingkan data RAM vs Editor untuk Log Audit
-                    final_df = apply_audit_payments_changes(df_pay, edited_pay, actor=current_user)
-                    
+            # --- 5. LOGIKA SIMPAN PERUBAHAN ---
+            if st.button("ðŸ’¾ Simpan Perubahan Riwayat", use_container_width=True):
+                with st.spinner("Memproses audit log dan menyimpan data..."):
+                    current_user = st.session_state.get(
+                        "user_name", "Admin Desktop")
+
+                    # Bandingkan data lama (df_pay) dengan data yang diedit (edited_pay)
+                    final_df = apply_audit_payments_changes(
+                        df_pay, edited_pay, actor=current_user)
+
                     if save_pembayaran_dp(final_df):
-                        # [OPTIMASI SUPER] Update RAM lokal langsung!
-                        # Ini membuat UI langsung berubah tanpa perlu download ulang dari GSheet (Hemat 3-5 detik)
-                        st.session_state["buffer_pay_data"] = final_df 
-                        
-                        st.success("✅ Tersimpan! (RAM Updated)")
+                        st.success("âœ… Perubahan database berhasil disimpan!")
                         st.cache_data.clear()
-                        time.sleep(0.5) # Jeda dipercepat karena tidak perlu loading berat
+                        time.sleep(1.5)
                         st.rerun()
                     else:
                         st.error("Gagal menyimpan ke Google Sheets.")
@@ -5009,35 +4976,30 @@ elif menu_nav == "💳 Pembayaran":
             # =========================================================
             # 3. FITUR TAMBAHAN: UPDATE FOTO BUKTI SUSULAN
             # =========================================================
-            with st.expander("📎 Update Bukti Pembayaran (Susulan)", expanded=False):
-                st.info("Fitur ini langsung update ke cloud dan sinkronisasi RAM.")
-                
-                # [OPTIMASI] Reset index dari data RAM untuk dropdown (Cepat)
+            with st.expander("ðŸ“Ž Update Bukti Pembayaran (Susulan)", expanded=False):
+                st.info(
+                    "Gunakan fitur ini jika ingin menambahkan atau mengganti foto bukti transfer tanpa mengubah data lainnya.")
                 df_pay_reset = df_pay.reset_index(drop=True)
-                
-                # #logikasama: Membuat list opsi dropdown
+
                 pay_options = [
-                    f"{i+1}. {r.get(COL_MARKETING,'-')} | {r.get(COL_GROUP,'-')} | Sisa: {format_rupiah_display(r.get(COL_SISA_BAYAR,0))}" 
+                    f"{i+1}. {r[COL_MARKETING]} | {r[COL_GROUP]} | Sisa: {format_rupiah_display(r[COL_SISA_BAYAR])}"
                     for i, r in df_pay_reset.iterrows()
                 ]
-                
-                sel_idx_upd = st.selectbox("Pilih Record Pembayaran:", range(len(pay_options)), 
-                                         format_func=lambda x: pay_options[x], key="desk_sel_susulan")
-                
-                file_susulan = st.file_uploader("Upload File Bukti Baru", key="desk_file_susulan")
-                
-                if st.button("⬆️ Upload Foto Sekarang", use_container_width=True):
+
+                sel_idx_upd = st.selectbox("Pilih Record Pembayaran:", range(len(pay_options)),
+                                           format_func=lambda x: pay_options[x], key="desk_sel_susulan")
+
+                file_susulan = st.file_uploader(
+                    "Upload File Bukti Baru", key="desk_file_susulan")
+
+                if st.button("â¬†ï¸ Upload Foto Sekarang", use_container_width=True):
                     if file_susulan:
                         mkt_name = df_pay_reset.iloc[sel_idx_upd][COL_MARKETING]
-                        # #logikasama: Upload ke Dropbox & Update Sheet
-                        ok, msg = update_bukti_pembayaran_by_index(sel_idx_upd, file_susulan, mkt_name, actor="Admin")
+                        ok, msg = update_bukti_pembayaran_by_index(
+                            sel_idx_upd, file_susulan, mkt_name, actor="Admin")
                         if ok:
                             st.success("Foto bukti berhasil ditambahkan!")
-                            
-                            # [OPTIMASI] Force refresh RAM karena link bukti berubah di server
                             st.cache_data.clear()
-                            st.session_state["buffer_pay_data"] = load_pembayaran_dp()
-                            
                             time.sleep(1)
                             st.rerun()
                         else:
@@ -5047,12 +5009,12 @@ elif menu_nav == "💳 Pembayaran":
 
         render_section_watermark()
 
-elif menu_nav == "📜 Global Audit Log":
+elif menu_nav == "ðŸ“œ Global Audit Log":
     if IS_MOBILE:
         render_audit_mobile()
     else:
         # --- LOGIC DESKTOP ---
-        st.markdown("## 📜 Global Audit Log")
+        st.markdown("## ðŸ“œ Global Audit Log")
         st.caption(
             "Rekaman jejak perubahan data. Transparansi data Admin & Manager.")
 
@@ -5060,7 +5022,7 @@ elif menu_nav == "📜 Global Audit Log":
         from audit_service import load_audit_log
 
         # Tombol Refresh
-        if st.button("🔄 Refresh Log", use_container_width=True):
+        if st.button("ðŸ”„ Refresh Log", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
@@ -5087,7 +5049,7 @@ elif menu_nav == "📜 Global Audit Log":
                 pass
 
             # --- FITUR FILTERING ---
-            with st.expander("🔍 Filter Pencarian"):
+            with st.expander("ðŸ” Filter Pencarian"):
                 c1, c2 = st.columns(2)
                 # Ambil list unik untuk filter
                 all_users = df_log["User"].unique().tolist()
@@ -5117,14 +5079,14 @@ elif menu_nav == "📜 Global Audit Log":
                 hide_index=True,
                 column_config={
                     "Waktu": st.column_config.DatetimeColumn(
-                        "🕒 Waktu",
+                        "ðŸ•’ Waktu",
                         format="D MMM YYYY, HH:mm",
                         width="small"
                     ),
                     "Target Data": st.column_config.TextColumn("Data"),
-                    "Chat & Catatan": st.column_config.TextColumn("💬 Catatan / Chat", width="medium"),
+                    "Chat & Catatan": st.column_config.TextColumn("ðŸ’¬ Catatan / Chat", width="medium"),
                     "Detail Perubahan": st.column_config.TextColumn(
-                        "📄 Detail Perubahan",
+                        "ðŸ“„ Detail Perubahan",
                         width="large",
                         help="Menampilkan detail perubahan data"
                     )
@@ -5136,7 +5098,7 @@ elif menu_nav == "📜 Global Audit Log":
                 xb = df_to_excel_bytes(df_show, sheet_name="Audit_Log")
                 if xb:
                     st.download_button(
-                        "⬇️ Download Log (Excel)",
+                        "â¬‡ï¸ Download Log (Excel)",
                         data=xb,
                         file_name="global_audit_log.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -5147,19 +5109,19 @@ elif menu_nav == "📜 Global Audit Log":
         # Watermark
         render_section_watermark()
 
-elif menu_nav == "📊 Dashboard Admin":
+elif menu_nav == "ðŸ“Š Dashboard Admin":
     if IS_MOBILE:
         render_admin_mobile()
     else:
         # --- LOGIC DESKTOP (PC/LAPTOP) ---
-        st.markdown("## 📊 Dashboard Admin & Analytics")
+        st.markdown("## ðŸ“Š Dashboard Admin & Analytics")
 
         # 1. Verifikasi Akses Admin
         if not st.session_state.get("is_admin"):
             col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
             with col_l2:
                 with st.container(border=True):
-                    st.markdown("### 🔐 Login Dashboard")
+                    st.markdown("### ðŸ” Login Dashboard")
                     pwd_input = st.text_input(
                         "Masukkan Password Admin:", type="password", key="pwd_admin_desk")
                     if st.button("Masuk Ke Dashboard", use_container_width=True, type="primary"):
@@ -5192,17 +5154,17 @@ elif menu_nav == "📊 Dashboard Admin":
             # Susun Label Tab (Approval hanya muncul jika Manager)
             tabs_labels = []
             if is_manager:
-                tabs_labels.append("🔔 APPROVAL (ACC)")
+                tabs_labels.append("ðŸ”” APPROVAL (ACC)")
 
             tabs_labels.extend([
-                "📈 Produktivitas",
-                "🧲 Leads & Interest",
-                "💬 Review & Feedback",
-                "🖼️ Galeri Bukti",
-                "📦 Master Data",
-                "⚙️ Config Staff",
-                "🗑️ Hapus Akun",
-                "⚡ SUPER EDITOR"
+                "ðŸ“ˆ Produktivitas",
+                "ðŸ§² Leads & Interest",
+                "ðŸ’¬ Review & Feedback",
+                "ðŸ–¼ï¸ Galeri Bukti",
+                "ðŸ“¦ Master Data",
+                "âš™ï¸ Config Staff",
+                "ðŸ—‘ï¸ Hapus Akun",
+                "âš¡ SUPER EDITOR"
             ])
 
             all_tabs = st.tabs(tabs_labels)
@@ -5213,20 +5175,20 @@ elif menu_nav == "📊 Dashboard Admin":
             # -----------------------------------------------------------
             if is_manager:
                 with all_tabs[tab_ptr]:
-                    st.markdown("### 🔔 Pusat Persetujuan Manager")
+                    st.markdown("### ðŸ”” Pusat Persetujuan Manager")
                     pending_data = get_pending_approvals()
                     if not pending_data:
-                        st.info("✅ Tidak ada data yang menunggu persetujuan.")
+                        st.info("âœ… Tidak ada data yang menunggu persetujuan.")
                     else:
                         for i, req in enumerate(pending_data):
                             with st.container(border=True):
                                 c_h1, c_h2 = st.columns([3, 1])
                                 with c_h1:
                                     st.markdown(
-                                        f"👤 **{req['Requestor']}** mengajukan perubahan pada `{req['Target Sheet']}`")
-                                    st.info(f"📝 Alasan: {req['Reason']}")
+                                        f"ðŸ‘¤ **{req['Requestor']}** mengajukan perubahan pada `{req['Target Sheet']}`")
+                                    st.info(f"ðŸ“ Alasan: {req['Reason']}")
                                 with c_h2:
-                                    st.caption(f"📅 {req['Timestamp']}")
+                                    st.caption(f"ðŸ“… {req['Timestamp']}")
 
                                 # Tampilkan Perbandingan Data
                                 try:
@@ -5248,7 +5210,7 @@ elif menu_nav == "📊 Dashboard Admin":
 
                                 # Tombol Approve/Reject
                                 b1, b2 = st.columns(2)
-                                if b1.button("✅ SETUJUI SEKARANG", key=f"btn_acc_{i}", type="primary", use_container_width=True):
+                                if b1.button("âœ… SETUJUI SEKARANG", key=f"btn_acc_{i}", type="primary", use_container_width=True):
                                     ok, m = execute_approval(
                                         i, "APPROVE", st.session_state["user_name"])
                                     if ok:
@@ -5257,7 +5219,7 @@ elif menu_nav == "📊 Dashboard Admin":
                                         st.rerun()
 
                                 with b2:
-                                    with st.popover("❌ TOLAK REQUEST", use_container_width=True):
+                                    with st.popover("âŒ TOLAK REQUEST", use_container_width=True):
                                         alasan_t = st.text_area(
                                             "Berikan alasan penolakan:", key=f"t_area_{i}")
                                         if st.button("Konfirmasi Tolak", key=f"btn_rej_{i}", type="primary", use_container_width=True):
@@ -5269,12 +5231,11 @@ elif menu_nav == "📊 Dashboard Admin":
                                             st.rerun()
                 tab_ptr += 1
 
-
             # -----------------------------------------------------------
             # 2. TAB PRODUKTIVITAS (PLOTLY CHART + AI GEMINI)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### 🚀 Analisa Kinerja Tim")
+                st.markdown("### ðŸš€ Analisa Kinerja Tim")
                 if not df_all.empty:
                     d_opt = st.selectbox(
                         "Lihat Data:", [7, 14, 30, 90], index=2, key="d_opt_prod")
@@ -5295,11 +5256,12 @@ elif menu_nav == "📊 Dashboard Admin":
 
                     # --- INTEGRASI AI GEMINI UNTUK DESKTOP ---
                     st.divider()
-                    st.markdown("#### 🤖 AI Management Insight")
+                    st.markdown("#### ðŸ¤– AI Management Insight")
                     with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
                         # Penyiapan Data Non-Visual
-                        staf_stats_str = json.dumps(report_counts.to_dict(), indent=2)
-                        
+                        staf_stats_str = json.dumps(
+                            report_counts.to_dict(), indent=2)
+
                         # 1. Konstruksi Prompt Terstruktur (Meniru format [META], [SYSTEM], [TASK])
                         full_prompt = f"""
                         [CONTEXT_DATA]
@@ -5326,33 +5288,37 @@ elif menu_nav == "📊 Dashboard Admin":
                         # 2. Eksekusi Pemanggilan dengan Mekanisme Fallback (Anti-Gagal)
                         ai_reply = ""
                         last_error = ""
-                        
+
                         for model_name in MODEL_FALLBACKS:
                             try:
                                 if SDK == "new":
-                                    resp = client_ai.models.generate_content(model=model_name, contents=full_prompt)
+                                    resp = client_ai.models.generate_content(
+                                        model=model_name, contents=full_prompt)
                                     ai_reply = resp.text
                                 else:
-                                    model = genai_legacy.GenerativeModel(model_name)
+                                    model = genai_legacy.GenerativeModel(
+                                        model_name)
                                     resp = model.generate_content(full_prompt)
                                     ai_reply = resp.text
-                                
-                                if ai_reply: break # Jika berhasil, keluar dari perulangan model
+
+                                if ai_reply:
+                                    break  # Jika berhasil, keluar dari perulangan model
                             except Exception as e:
                                 last_error = str(e)
-                                continue # Coba model berikutnya jika model ini gagal
+                                continue  # Coba model berikutnya jika model ini gagal
 
                         # 3. Tampilkan Hasil
                         if ai_reply:
                             st.info(ai_reply)
                         else:
-                            st.error(f"⚠️ Gagal mendapatkan insight setelah mencoba semua model. Error terakhir: {last_error}")
+                            st.error(
+                                f"âš ï¸ Gagal mendapatkan insight setelah mencoba semua model. Error terakhir: {last_error}")
 
             # -----------------------------------------------------------
             # 3. TAB LEADS & INTEREST (EXPORT ENABLED)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### 🧲 Leads Management")
+                st.markdown("### ðŸ§² Leads Management")
                 if not df_all.empty and COL_INTEREST in df_all.columns:
                     sel_in = st.radio("Pilih Tingkat Interest:", [
                                       "Under 50% (A)", "50-75% (B)", "75%-100%"], horizontal=True)
@@ -5364,21 +5330,21 @@ elif menu_nav == "📊 Dashboard Admin":
                     if HAS_OPENPYXL and not df_leads.empty:
                         xb = df_to_excel_bytes(df_leads, sheet_name="Leads")
                         st.download_button(
-                            "⬇️ Download Leads (Excel)", data=xb, file_name=f"leads_{sel_in}.xlsx")
+                            "â¬‡ï¸ Download Leads (Excel)", data=xb, file_name=f"leads_{sel_in}.xlsx")
             tab_ptr += 1
 
             # -----------------------------------------------------------
             # 4. TAB REVIEW & FEEDBACK
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### 💬 Review & Beri Feedback")
+                st.markdown("### ðŸ’¬ Review & Beri Feedback")
                 if not df_all.empty:
                     # Ambil 10 laporan terbaru
                     for i, r in df_all.sort_values(by=COL_TIMESTAMP, ascending=False).head(10).iterrows():
                         with st.container(border=True):
                             st.markdown(
-                                f"**{r[COL_NAMA]}** | {r[COL_TIMESTAMP]} | 📍 {r[COL_TEMPAT]}")
-                            st.write(f"📝 {r[COL_DESKRIPSI]}")
+                                f"**{r[COL_NAMA]}** | {r[COL_TIMESTAMP]} | ðŸ“ {r[COL_TEMPAT]}")
+                            st.write(f"ðŸ“ {r[COL_DESKRIPSI]}")
                             f_input = st.text_input(
                                 "Kirim masukan ke staf:", key=f"f_in_{i}")
                             if st.button("Kirim Masukan", key=f"f_btn_{i}"):
@@ -5393,7 +5359,7 @@ elif menu_nav == "📊 Dashboard Admin":
             # 5. TAB GALERI BUKTI
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### 🖼️ Galeri Foto Aktivitas")
+                st.markdown("### ðŸ–¼ï¸ Galeri Foto Aktivitas")
                 if not df_all.empty:
                     df_img = df_all[df_all[COL_LINK_FOTO].str.contains(
                         "http", na=False)].head(12)
@@ -5410,7 +5376,7 @@ elif menu_nav == "📊 Dashboard Admin":
             # 6. TAB MASTER DATA
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### 📦 Database Utama")
+                st.markdown("### ðŸ“¦ Database Utama")
                 st.dataframe(df_all, use_container_width=True)
             tab_ptr += 1
 
@@ -5418,10 +5384,10 @@ elif menu_nav == "📊 Dashboard Admin":
             # 7. TAB CONFIG STAFF (TAMBAH STAF)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### 👥 Kelola Personel & Tim")
+                st.markdown("### ðŸ‘¥ Kelola Personel & Tim")
                 with st.form("form_add_staf_new"):
                     new_st_name = st.text_input("Nama Staf Baru:")
-                    if st.form_submit_button("➕ Tambahkan ke Sistem"):
+                    if st.form_submit_button("âž• Tambahkan ke Sistem"):
                         if new_st_name:
                             ok, msg = tambah_staf_baru(new_st_name)
                             if ok:
@@ -5432,7 +5398,7 @@ elif menu_nav == "📊 Dashboard Admin":
                                 st.error(msg)
 
                 st.divider()
-                st.markdown("#### ⚙️ Konfigurasi Tim (Departemen)")
+                st.markdown("#### âš™ï¸ Konfigurasi Tim (Departemen)")
                 df_tm = load_team_config()
                 st.dataframe(df_tm, use_container_width=True)
             tab_ptr += 1
@@ -5441,20 +5407,20 @@ elif menu_nav == "📊 Dashboard Admin":
             # 8. TAB HAPUS AKUN (FITUR KHUSUS DARI CODE PERTAMA)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### 🗑️ Hapus Personel")
+                st.markdown("### ðŸ—‘ï¸ Hapus Personel")
                 st.error(
-                    "⚠️ Tindakan ini permanen. Nama staf akan hilang dari daftar pelapor.")
+                    "âš ï¸ Tindakan ini permanen. Nama staf akan hilang dari daftar pelapor.")
                 list_staf_del = get_daftar_staf_terbaru()
                 nama_hapus = st.selectbox("Pilih nama yang akan dihapus:", [
                                           "-- Pilih --"] + list_staf_del, key="sb_del")
                 confirm_del = st.checkbox(
                     "Saya mengonfirmasi penghapusan ini.")
-                if st.button("🔥 HAPUS PERMANEN", type="primary", use_container_width=True):
+                if st.button("ðŸ”¥ HAPUS PERMANEN", type="primary", use_container_width=True):
                     if nama_hapus != "-- Pilih --" and confirm_del:
                         ok, m = hapus_staf_by_name(nama_hapus)
                         if ok:
                             force_audit_log(
-                                st.session_state["user_name"], "❌ DELETE USER", "Config_Staf", f"Menghapus staf: {nama_hapus}", "-")
+                                st.session_state["user_name"], "âŒ DELETE USER", "Config_Staf", f"Menghapus staf: {nama_hapus}", "-")
                             st.success(m)
                             st.cache_data.clear()
                             time.sleep(1)
@@ -5468,7 +5434,7 @@ elif menu_nav == "📊 Dashboard Admin":
             # 9. TAB SUPER EDITOR (THE MASTER KEY)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### ⚡ Super Admin Editor")
+                st.markdown("### âš¡ Super Admin Editor")
                 st.caption(
                     "Gunakan tab ini untuk memperbaiki data lama secara masal.")
                 map_s = {"Laporan": "Laporan Kegiatan Harian",
@@ -5477,7 +5443,7 @@ elif menu_nav == "📊 Dashboard Admin":
                     "Pilih Tabel Data:", list(map_s.keys()))
                 s_target_name = map_s[s_target_label]
 
-                if st.button("📂 Ambil Data"):
+                if st.button("ðŸ“‚ Ambil Data"):
                     try:
                         ws_edit = spreadsheet.worksheet(s_target_name)
                         st.session_state["df_editor_raw"] = pd.DataFrame(
@@ -5490,14 +5456,14 @@ elif menu_nav == "📊 Dashboard Admin":
                     st.info(
                         f"Sedang mengedit: **{st.session_state['df_editor_name']}**")
                     alasan_edit = st.text_input(
-                        "📝 Alasan Edit (Wajib):", key="alasan_super_desk")
+                        "ðŸ“ Alasan Edit (Wajib):", key="alasan_super_desk")
 
                     # Data Editor
                     edited_result = st.data_editor(
                         st.session_state["df_editor_raw"], use_container_width=True, num_rows="dynamic")
 
                     if is_manager:
-                        if st.button("💾 SIMPAN PERUBAHAN (Manager Direct)", type="primary", use_container_width=True):
+                        if st.button("ðŸ’¾ SIMPAN PERUBAHAN (Manager Direct)", type="primary", use_container_width=True):
                             if alasan_edit:
                                 ws_final = spreadsheet.worksheet(
                                     st.session_state["df_editor_name"])
@@ -5506,7 +5472,7 @@ elif menu_nav == "📊 Dashboard Admin":
                                 )] + edited_result.astype(str).values.tolist()
                                 ws_final.update(
                                     range_name="A1", values=data_push, value_input_option="USER_ENTERED")
-                                force_audit_log(st.session_state["user_name"], "✅ SUPER UPDATE",
+                                force_audit_log(st.session_state["user_name"], "âœ… SUPER UPDATE",
                                                 st.session_state['df_editor_name'], alasan_edit, "Update masal")
                                 st.success("Database berhasil diperbarui!")
                                 time.sleep(1)
@@ -5514,7 +5480,7 @@ elif menu_nav == "📊 Dashboard Admin":
                             else:
                                 st.error("Alasan harus diisi.")
                     else:
-                        if st.button("📤 AJUKAN KE MANAGER (Admin Request)", type="primary", use_container_width=True):
+                        if st.button("ðŸ“¤ AJUKAN KE MANAGER (Admin Request)", type="primary", use_container_width=True):
                             if alasan_edit:
                                 changes_list = compare_and_get_changes(
                                     st.session_state["df_editor_raw"], edited_result)
@@ -5532,27 +5498,3 @@ elif menu_nav == "📊 Dashboard Admin":
                                 st.error("Alasan harus diisi.")
 
         render_section_watermark()
-
-# =========================================================
-# MAIN FLOW CHECK (Letakkan di Bagian Paling Bawah)
-# =========================================================
-
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-
-if not st.session_state["logged_in"]:
-    login_page()
-    st.stop() # Berhenti di sini jika belum login
-
-# --- JIKA SUDAH LOGIN, BARU JALANKAN INI ---
-# Ambil variabel secara aman setelah dipastikan login sukses
-user_email = st.session_state.get("user_email", "unknown")
-user_name = st.session_state.get("user_name", "User")
-user_role = st.session_state.get("user_role", "staff")
-
-# Kunci data ke RAM
-prefetch_all_data_to_state()  
-inject_global_css_fast()      
-render_header()               
-
-# Lanjutkan ke Router Menu/Sidebar...
