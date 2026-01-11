@@ -641,40 +641,95 @@ def delete_staff_account(username):
 
 
 # =========================================================
-# MAIN FLOW CHECK
+# 1. DEFINISI FUNGSI KONEKSI & ASSETS (TARUH PALING ATAS)
 # =========================================================
+
+@st.cache_resource(ttl=None, show_spinner=False)
+def init_connections():
+    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
+    gs_obj = None
+    dbx_obj = None
+    
+    # Setup Google Sheets
+    try:
+        if "gcp_service_account" in st.secrets:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(creds)
+            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
+    except Exception as e:
+        print(f"⚠️ GSheet Init Error: {e}")
+
+    # Setup Dropbox
+    try:
+        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
+            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
+            dbx_obj.users_get_current_account()
+    except Exception as e:
+        print(f"⚠️ Dropbox Init Error: {e}")
+        
+    return gs_obj, dbx_obj
+
+@st.cache_data(ttl=None, show_spinner=False)
+def load_data_ke_ram(sheet_name):
+    """Mengambil data dari GSheet dan menguncinya di RAM."""
+    try:
+        if spreadsheet:
+            ws = spreadsheet.worksheet(sheet_name)
+            return pd.DataFrame(ws.get_all_records())
+    except Exception as e:
+        print(f"Gagal Load {sheet_name} ke RAM: {e}")
+    return pd.DataFrame()
+
+def prefetch_all_data_to_state():
+    """Memindahkan data dari RAM ke Session State setelah login sukses."""
+    if "data_loaded" not in st.session_state:
+        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
+        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
+        st.session_state["df_staf"] = get_daftar_staf_terbaru()
+        st.session_state["data_loaded"] = True
+
+# =========================================================
+# 2. EKSEKUSI KONEKSI GLOBAL
+# =========================================================
+
+# Jalankan koneksi sekarang agar variabel 'spreadsheet' tersedia untuk fungsi lain
+spreadsheet, dbx = init_connections()
+KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
+KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
+
+# =========================================================
+# 3. LOGIKA LOGIN & ALUR UTAMA (MAIN FLOW)
+# =========================================================
+
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
+# Halaman Login
 if not st.session_state["logged_in"]:
     login_page()
     st.stop() 
 
-# --- [BARU] DISINI TEMPATNYA ---
-# Jika lolos dari st.stop(), berarti user sudah login.
-# Sekarang kita kunci semua data & asset ke RAM VPS sebelum UI muncul.
+# --- JIKA SUDAH LOGIN, KODE DI BAWAH INI AKAN BERJALAN ---
 
-prefetch_all_data_to_state()  # Ambil semua data GSheet ke RAM (Instan)
-inject_global_css_fast()      # Suntik CSS dari RAM (Instan)
-render_header()               # Gambar Header dari RAM (Instan)
+# 1. Kunci data ke RAM (Instan)
+prefetch_all_data_to_state()
 
-# -------------------------------
+# 2. Suntik CSS dan Tampilkan Header (Pastikan fungsi ini sudah didefinisikan di atas)
+inject_global_css_fast() 
+render_header()
 
-# Variabel Global (tetap seperti kode lama Anda)
+# 3. Inisialisasi Variabel User Global
 user_email = st.session_state["user_email"]
 user_name = st.session_state["user_name"]
 user_role = st.session_state["user_role"]
 
 # =========================================================
-# USER INFO SETELAH LOGIN (Variabel Global)
-# =========================================================
-# Variabel ini akan dipakai di seluruh aplikasi
-user_email = st.session_state["user_email"]
-user_name = st.session_state["user_name"]
-user_role = st.session_state["user_role"]
-
-# =========================================================
-# OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
+# 4. OPTIONAL LIBRARIES (LOAD SETELAH LOGIN AGAR RINGAN)
 # =========================================================
 try:
     from openpyxl import Workbook
@@ -690,12 +745,6 @@ try:
     HAS_AGGRID = True
 except ImportError:
     HAS_AGGRID = False
-
-try:
-    import plotly.express as px
-    HAS_PLOTLY = True
-except ImportError:
-    HAS_PLOTLY = False
 
 
 # =========================================================
@@ -1692,35 +1741,8 @@ def init_connections():
     return gs_obj, dbx_obj
 
 # Load Global Connections dari Cache
-spreadsheet, dbx = init_connections()
 KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
 KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
-
-@st.cache_data(ttl=None, show_spinner=False)
-def load_data_ke_ram(sheet_name):
-    """Mengambil data dari GSheet dan menguncinya di RAM VPS selamanya."""
-    try:
-        if spreadsheet:
-            ws = spreadsheet.worksheet(sheet_name)
-            return pd.DataFrame(ws.get_all_records())
-    except Exception as e:
-        print(f"Gagal Load {sheet_name} ke RAM: {e}")
-    return pd.DataFrame()
-
-def prefetch_all_data_to_state():
-    """
-    Memindahkan semua data dari RAM VPS ke dalam Session State.
-    Dijalankan hanya 1x saat login sukses.
-    """
-    if "data_loaded" not in st.session_state:
-        # Gunakan load_data_ke_ram yang punya @st.cache_data(ttl=None)
-        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
-        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
-        st.session_state["df_kpi_team"] = load_data_ke_ram(SHEET_TARGET_TEAM)
-        st.session_state["df_kpi_indiv"] = load_data_ke_ram(SHEET_TARGET_INDIVIDU)
-        st.session_state["df_staf"] = get_daftar_staf_terbaru() # Ini sudah cache data
-        
-        st.session_state["data_loaded"] = True
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
 SDK = "new"
@@ -4401,24 +4423,29 @@ def render_payment_mobile():
 def render_admin_mobile():
     st.markdown("### 🔐 Admin Dashboard (Full Mobile)")
 
-    # 1. Cek Login
-    if not st.session_state["is_admin"]:
-        pwd = st.text_input(
-            "Password Admin", type="password", key="mob_adm_pwd")
-        if st.button("Login", use_container_width=True, key="mob_adm_login"):
-            if verify_admin_password(pwd):
-                st.session_state["is_admin"] = True
-                st.rerun()
-            else:
-                st.error("Password salah.")
-        return  # Stop disini kalau belum login
+    # 1. VERIFIKASI LOGIN ADMIN
+    if not st.session_state.get("is_admin"):
+        with st.container(border=True):
+            st.warning("Akses Terbatas: Masukkan Password Admin")
+            pwd = st.text_input("Password", type="password", key="mob_adm_pwd")
+            if st.button("Masuk Ke Dashboard", use_container_width=True, type="primary"):
+                if verify_admin_password(pwd):
+                    st.session_state["is_admin"] = True
+                    st.rerun()
+                else:
+                    st.error("Password salah.")
+        return 
 
-    # 2. Jika Sudah Login -> Tampilkan Dashboard Penuh
-    if st.button("🔓 Logout", use_container_width=True, key="mob_adm_logout"):
+    # 2. TOMBOL LOGOUT & REFRESH
+    col_nav1, col_nav2 = st.columns(2)
+    if col_nav1.button("🔓 Logout Admin", use_container_width=True):
         st.session_state["is_admin"] = False
         st.rerun()
+    if col_nav2.button("🔄 Refresh Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
-    # --- LOADING DATA ---
+    # 3. LOADING DATA KE RAM VPS
     staff_list = get_daftar_staf_terbaru()
     df_all = load_all_reports(staff_list)
 
@@ -4427,57 +4454,82 @@ def render_admin_mobile():
             df_all[COL_TIMESTAMP] = pd.to_datetime(
                 df_all[COL_TIMESTAMP], format="%d-%m-%Y %H:%M:%S", errors="coerce")
             df_all["Tgl"] = df_all[COL_TIMESTAMP].dt.date
-            # Helper kategori sederhana
-            df_all["Kat"] = df_all[COL_TEMPAT].apply(lambda x: "Digital" if any(
-                k in str(x) for k in ["Digital", "Ads", "Konten"]) else "Sales")
-        except:
+            df_all["Kat"] = df_all[COL_TEMPAT].apply(lambda x: "Digital/Kantor" if any(
+                k in str(x) for k in ["Digital", "Ads", "Konten", "Telesales", "Marketing"]) else "Kunjungan Lapangan")
+        except Exception:
             pass
 
-# TABS NAVIGATION MOBILE
-    tab_prod, tab_leads, tab_data, tab_cfg = st.tabs(["📈 Grafik", "🧲 Leads", "📦 Data", "⚙️ Config"])
+    # 4. PENGATURAN TABS ADAPTIF
+    is_manager = (st.session_state.get("user_role") == "manager")
+    tab_labels = ["🔔 Approval"] if is_manager else []
+    tab_labels.extend(["📈 Grafik", "⚡ Quick Edit", "🧲 Leads", "📜 Log", "👥 Config"])
+    
+    all_tabs = st.tabs(tab_labels)
+    ptr = 0
 
-    with tab_prod:
-        st.caption("Analisa Kinerja")
+    # --- TAB 1: APPROVAL (KHUSUS MANAGER) ---
+    if is_manager:
+        with all_tabs[ptr]:
+            st.markdown("#### 🔔 Persetujuan Manager")
+            pending_requests = get_pending_approvals()
+            if not pending_requests:
+                st.info("Tidak ada data yang menunggu persetujuan.")
+            else:
+                for i, req in enumerate(pending_requests):
+                    with st.container(border=True):
+                        st.markdown(f"**Pengaju:** {req['Requestor']}")
+                        st.caption(f"Target: `{req['Target Sheet']}` | {req['Timestamp']}")
+                        st.warning(f"Alasan: {req['Reason']}")
+                        
+                        with st.expander("Lihat Perubahan Data"):
+                            try:
+                                old_json = json.loads(req.get("Old Data JSON", "{}"))
+                                new_json = json.loads(req.get("New Data JSON", "{}"))
+                                diff_list = []
+                                for col, val_new in new_json.items():
+                                    val_old = old_json.get(col, "")
+                                    if str(val_new).strip() != str(val_old).strip():
+                                        diff_list.append({"Kolom": col, "Lama": val_old, "Baru": val_new})
+                                if diff_list:
+                                    st.table(pd.DataFrame(diff_list))
+                                else:
+                                    st.write("Re-save data (Tidak ada perubahan nilai).")
+                            except:
+                                st.write("Gagal memproses detail JSON.")
+
+                        c_acc, c_rej = st.columns(2)
+                        if c_acc.button("✅ ACC", key=f"mob_acc_{i}", use_container_width=True, type="primary"):
+                            ok, msg = execute_approval(i, "APPROVE", st.session_state["user_name"])
+                            if ok: st.success("Berhasil di-ACC"); time.sleep(1); st.rerun()
+                        
+                        if c_rej.button("❌ Tolak", key=f"mob_rej_{i}", use_container_width=True):
+                            ok, msg = execute_approval(i, "REJECT", st.session_state["user_name"], "Ditolak via HP")
+                            if ok: st.warning("Request Ditolak"); time.sleep(1); st.rerun()
+        ptr += 1
+
+    # --- TAB 2: GRAFIK & AI INSIGHT ---
+    with all_tabs[ptr]:
+        st.markdown("#### 📈 Analisa Produktivitas")
         if not df_all.empty:
-            days = st.selectbox("Hari Terakhir:", [7, 30, 90], key="mob_adm_days")
-            start_d = datetime.now(tz=TZ_JKT).date() - timedelta(days=days)
-            df_f = df_all[df_all["Tgl"] >= start_d].copy()
-            st.metric("Total Laporan", len(df_f))
+            days = st.selectbox("Rentang Waktu:", [7, 30, 90], index=0, key="mob_days_filter")
+            cutoff = datetime.now(tz=TZ_JKT).date() - timedelta(days=days)
+            df_f = df_all[df_all["Tgl"] >= cutoff]
             
+            st.metric("Total Laporan", len(df_f))
             report_counts = df_f[COL_NAMA].value_counts()
             st.bar_chart(report_counts)
 
             st.divider()
-            st.markdown("#### 🤖 AI Management Insight")
-            
-            with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
+            st.markdown("#### 🤖 AI Assistant Analysis")
+            with st.spinner("Menganalisa data untuk Pak Nugroho..."):
                 try:
-                    # Penyiapan Data
                     staf_stats_str = json.dumps(report_counts.to_dict(), indent=2)
-                    
                     full_prompt = f"""
-                    [CONTEXT_DATA]
-                    Nama Pemimpin: Pak Nugroho
-                    Total Laporan Masuk: {len(df_f)}
-                    Statistik Per Staf: {staf_stats_str}
-
-                    [SYSTEM_INSTRUCTION]
-                    Kamu adalah asisten kepercayaan Pak Nugroho. Gunakan bahasa Indonesia yang santun, cerdas, namun tetap membumi agar mudah dipahami. 
-
-                    PANDUAN PENULISAN:
-                    1. Gunakan bahasa yang awam tapi berwibawa. Jangan gunakan istilah teknis yang terlalu berat dan jangan gunakan simbol em-dash atau sejenisnya.
-                    2. JANGAN pernah menyebutkan target angka spesifik seperti 48 kunjungan.
-                    3. Gunakan Analisis Perbandingan Kompetitor: Jelaskan bahwa saat sales di perusahaan lain mungkin hari ini masih sibuk di dalam kantor, terjebak urusan kertas, atau baru sekadar merencanakan jadwal, tim Pak Nugroho sudah mengambil langkah nyata di lapangan.
-                    4. Gunakan Teori Keunggulan Awal: Tekankan bahwa satu laporan di awal waktu jauh lebih berharga daripada banyak laporan yang terlambat, karena ini adalah data nyata tentang kondisi pasar saat ini yang bisa langsung Bapak ambil kebijakannya.
-                    5. Jika volume laporan sedikit, jelaskan dengan teori Kualitas di Atas Kuantitas: Sampaikan bahwa tim sedang melakukan pendekatan yang sangat mendalam ke klien besar, sehingga interaksinya lebih berkualitas daripada sekadar kunjungan formalitas.
-                    6. Berikan apresiasi kepada staf yang sudah mengirim laporan (sebutkan namanya) sebagai bukti bahwa mereka lebih tanggap dan gesit dibanding rata-rata sales di luar sana.
-                    7. JANGAN PERNAH mengaku sebagai AI atau Gemini. Tunjukkan empati dan semangat tinggi untuk mendukung visi Pak Nugroho.
-
-                    [TASK]
-                    Berikan analisis kinerja tim Sales kepada Pak Nugroho secara naratif dan kreatif berdasarkan data yang ada.
+                    [CONTEXT] Nama Pemimpin: Pak Nugroho. Total Laporan: {len(df_f)}. Statistik: {staf_stats_str}.
+                    [SYSTEM] Kamu asisten cerdas Pak Nugroho. Gunakan Bahasa Indonesia santun dan berwibawa.
+                    [INSTRUCTION] Bandingkan kecepatan tim dengan kompetitor secara naratif. Tekankan keunggulan data real-time.
+                    Apresiasi staf yang aktif. Jangan sebut angka target teknis. JANGAN mengaku sebagai AI.
                     """
-
-                    # Eksekusi Pemanggilan (Meniru logika Desktop)
                     ai_reply = ""
                     for model_name in MODEL_FALLBACKS:
                         try:
@@ -4489,111 +4541,120 @@ def render_admin_mobile():
                                 resp = model.generate_content(full_prompt)
                                 ai_reply = resp.text
                             if ai_reply: break
-                        except:
-                            continue
-
-                    if ai_reply:
-                        st.info(ai_reply)
-                    else:
-                        st.warning("Insight tidak tersedia sementara waktu.")
-                        
+                        except: continue
+                    if ai_reply: st.info(ai_reply)
                 except Exception as e:
-                    st.error(f"⚠️ DEBUG ERROR MOBILE: {str(e)}")
+                    st.error("Gagal memuat AI Insight.")
         else:
-            st.info("Belum ada data laporan.")
+            st.info("Belum ada data untuk dianalisa.")
+        ptr += 1
 
-    with tab_leads:
-        st.caption("Filter & Download Leads")
-        sel_int = st.selectbox("Interest:", ["Under 50% (A)", "50-75% (B)", "75%-100%"], key="mob_adm_int")
+    # --- TAB 3: QUICK EDIT (PENGGANTI SUPER EDITOR) ---
+    with all_tabs[ptr]:
+        st.markdown("#### ⚡ Quick Edit (Search-to-Edit)")
+        st.caption("Cari data spesifik untuk diperbaiki tanpa memuat tabel besar.")
+        
+        map_sheets = {"Laporan": "Laporan Kegiatan Harian", "Closing": SHEET_CLOSING_DEAL, "Payment": SHEET_PEMBAYARAN}
+        target_label = st.selectbox("Pilih Tabel:", list(map_sheets.keys()), key="mob_edit_target")
+        target_sheet_name = map_sheets[target_label]
+
+        try:
+            ws_edit = spreadsheet.worksheet(target_sheet_name)
+            df_edit = pd.DataFrame(ws_edit.get_all_records())
+            search_query = st.text_input("🔍 Cari Kata Kunci (Nama/Group):", key="mob_search_val")
+            
+            if search_query:
+                mask = df_edit.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
+                df_filtered = df_edit[mask]
+                
+                if not df_filtered.empty:
+                    options = [f"Baris {idx+2}: {row.iloc[0]} | {row.iloc[1]}" for idx, row in df_filtered.iterrows()]
+                    selected_row = st.selectbox("Pilih Baris yang Diedit:", options)
+                    row_idx_gsheet = int(selected_row.split(":")[0].replace("Baris ", ""))
+                    
+                    with st.form("mob_quick_edit_form"):
+                        st.info(f"Mengedit Baris {row_idx_gsheet}")
+                        current_row_data = df_edit.iloc[row_idx_gsheet-2].to_dict()
+                        updated_values = {}
+                        for col_name, col_val in current_row_data.items():
+                            updated_values[col_name] = st.text_input(f"Field: {col_name}", value=str(col_val))
+                        
+                        if st.form_submit_button("💾 Update Data", use_container_width=True):
+                            headers = ws_edit.row_values(1)
+                            new_row_list = [updated_values.get(h, "") for h in headers]
+                            ws_edit.update(range_name=f"A{row_idx_gsheet}", values=[new_row_list], value_input_option="USER_ENTERED")
+                            force_audit_log(st.session_state["user_name"], "⚡ QUICK EDIT", target_sheet_name, f"Edit Baris {row_idx_gsheet}", "Update via Mobile")
+                            st.success("Data berhasil diperbarui!"); time.sleep(1); st.rerun()
+                else:
+                    st.error("Data tidak ditemukan.")
+        except Exception as e:
+            st.error(f"Gagal memuat editor: {e}")
+        ptr += 1
+
+    # --- TAB 4: LEADS & INTEREST ---
+    with all_tabs[ptr]:
+        st.markdown("#### 🧲 Leads Management")
         if not df_all.empty and COL_INTEREST in df_all.columns:
+            sel_int = st.select_slider("Filter Interest:", options=["Under 50% (A)", "50-75% (B)", "75%-100%"])
             df_leads = df_all[df_all[COL_INTEREST].astype(str).str.strip() == sel_int]
-            st.dataframe(df_leads[[COL_NAMA_KLIEN, COL_KONTAK_KLIEN]], use_container_width=True)
-            if HAS_OPENPYXL:
+            
+            for _, row in df_leads.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"👤 **{row[COL_NAMA_KLIEN]}**")
+                    st.write(f"📞 {row[COL_KONTAK_KLIEN]}")
+                    st.caption(f"Marketing: {row[COL_NAMA]} | Hasil: {row[COL_KESIMPULAN]}")
+
+            if HAS_OPENPYXL and not df_leads.empty:
                 xb = df_to_excel_bytes(df_leads, sheet_name="Leads")
-                if xb:
-                    st.download_button("⬇️ Excel Leads", data=xb, file_name=f"leads_{sel_int}.xlsx", use_container_width=True)
+                st.download_button("⬇️ Download Leads (Excel)", data=xb, file_name=f"leads_{sel_int}.xlsx", use_container_width=True)
+        ptr += 1
 
-    with tab_data:
-        st.caption("Master Data Laporan")
-        if st.button("Refresh Data", use_container_width=True, key="mob_ref_data"):
-            st.cache_data.clear()
-            st.rerun()
-        st.dataframe(df_all, use_container_width=True)
+    # --- TAB 5: GLOBAL AUDIT LOG ---
+    with all_tabs[ptr]:
+        st.markdown("#### 📜 15 Aktivitas Terakhir")
+        from audit_service import load_audit_log
+        df_log_raw = load_audit_log(spreadsheet)
+        if not df_log_raw.empty:
+            df_log = dynamic_column_mapper(df_log_raw)
+            for _, row in df_log.head(15).iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**{row.get('User','-')}** ➡ `{row.get('Status','-')}`")
+                    st.caption(f"🕒 {row.get('Waktu','-')} | Data: {row.get('Target Data','-')}")
+                    chat = row.get('Chat & Catatan', '')
+                    if chat and chat != "-": st.info(chat)
+                    with st.expander("Detail Perubahan"):
+                        st.code(row.get('Detail Perubahan','-'), language="text")
+        else:
+            st.info("Belum ada log aktivitas.")
+        ptr += 1
 
-    with tab_cfg:
-        st.markdown("#### 👥 Kelola Personel (Staf)")
-        with st.form("mob_add_staff"):
-            st.markdown("➕ **Tambah Staf Baru**")
-            new_st = st.text_input("Nama Staf", placeholder="Ketik nama baru...")
-            if st.form_submit_button("Simpan Staf", use_container_width=True):
-                if new_st.strip():
-                    ok, msg = tambah_staf_baru(new_st)
-                    if ok:
-                        st.success("Berhasil ditambahkan!")
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-                else:
-                    st.error("Nama tidak boleh kosong.")
-        st.markdown("---") 
-        st.markdown("#### 🗑️ Hapus Staf")
-        st.caption("Menghapus nama dari daftar pelapor.")
-        staff_now = get_daftar_staf_terbaru()
-        hapus_select = st.selectbox("Pilih staf yang akan dihapus:", ["-- Pilih Staf --"] + staff_now, key="mob_del_st")
-        confirm_del = st.checkbox("Konfirmasi penghapusan permanen", key="mob_del_confirm")
-        if st.button("🔥 Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
-            if hapus_select == "-- Pilih Staf --":
-                st.error("Pilih nama staf terlebih dahulu!")
-            elif not confirm_del:
-                st.error("Silakan centang kotak konfirmasi penghapusan.")
-            else:
-                with st.spinner("Menghapus..."):
-                    ok, m = hapus_staf_by_name(hapus_select)
-                    if ok:
-                        force_audit_log(actor=st.session_state.get("user_name", "Admin Mobile"), action="❌ DELETE USER", target_sheet="Config_Staf", chat_msg=f"Menghapus staf via HP: {hapus_select}", details_input=f"User {hapus_select} telah dihapus dari sistem mobile.")
-                        st.success(f"Staf {hapus_select} Berhasil dihapus!")
-                        st.cache_data.clear()
-                        time.sleep(1.5)
-                        st.rerun()
-                    else:
-                        st.error(m)
+    # --- TAB 6: CONFIG STAFF & AKUN ---
+    with all_tabs[ptr]:
+        st.markdown("#### 👥 Kelola Tim")
+        with st.form("mob_add_staff_form"):
+            st.markdown("**Tambah Anggota Baru**")
+            new_st_name = st.text_input("Nama Lengkap Staf:")
+            if st.form_submit_button("➕ Tambah Staf", use_container_width=True):
+                if new_st_name:
+                    ok, msg = tambah_staf_baru(new_st_name)
+                    if ok: st.success("Staf ditambahkan"); st.cache_data.clear(); time.sleep(1); st.rerun()
+                    else: st.error(msg)
 
-            # --- SUB-BAGIAN: HAPUS STAF ---
-            st.markdown("#### 🗑️ Hapus Staf")
-            st.caption("Menghapus nama dari daftar pelapor.")
+        st.divider()
+        st.markdown("#### 🗑️ Hapus Akses")
+        st.error("Tindakan ini permanen.")
+        list_hapus = get_daftar_staf_terbaru()
+        nama_hapus = st.selectbox("Pilih Staf yang Dihapus:", ["-- Pilih --"] + list_hapus)
+        confirm = st.checkbox("Konfirmasi Penghapusan")
+        if st.button("🔥 Hapus Staf", type="primary", use_container_width=True):
+            if nama_hapus != "-- Pilih --" and confirm:
+                ok, msg = hapus_staf_by_name(nama_hapus)
+                if ok:
+                    force_audit_log(st.session_state["user_name"], "❌ DELETE USER", "Config_Staf", f"Hapus: {nama_hapus}", "-")
+                    st.success("Staf dihapus"); st.cache_data.clear(); time.sleep(1); st.rerun()
+                else: st.error(msg)
 
-            staff_now = get_daftar_staf_terbaru()
-            hapus_select = st.selectbox("Pilih staf yang akan dihapus:", [
-                                        "-- Pilih Staf --"] + staff_now, key="mob_del_st")
-
-            confirm_del = st.checkbox(
-                "Konfirmasi penghapusan permanen", key="mob_del_confirm")
-
-            if st.button("🔥 Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
-                if hapus_select == "-- Pilih Staf --":
-                    st.error("Pilih nama staf terlebih dahulu!")
-                elif not confirm_del:
-                    st.error("Silakan centang kotak konfirmasi penghapusan.")
-                else:
-                    with st.spinner("Menghapus..."):
-                        ok, m = hapus_staf_by_name(hapus_select)
-                        if ok:
-                            force_audit_log(
-                                actor=st.session_state.get(
-                                    "user_name", "Admin Mobile"),
-                                action="❌ DELETE USER",
-                                target_sheet="Config_Staf",
-                                chat_msg=f"Menghapus staf via HP: {hapus_select}",
-                                details_input=f"User {hapus_select} telah dihapus dari sistem mobile."
-                            )
-                            st.success(f"Staf {hapus_select} Berhasil dihapus!")
-                            st.cache_data.clear()
-                            time.sleep(1.5)
-                            st.rerun()
-                        else:
-                            st.error(m)
+    render_section_watermark()
 
 
 def render_audit_mobile():
