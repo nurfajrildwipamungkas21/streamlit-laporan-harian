@@ -4230,9 +4230,6 @@ elif menu_nav == "📊 Dashboard Admin":
             # Logic Dashboard Admin Lengkap Anda...
             pass
 
-# Render watermark secara global di akhir semua halaman
-render_section_watermark()
-
 elif menu_nav == "🎯 Target & KPI":
     if IS_MOBILE:
         render_kpi_mobile()
