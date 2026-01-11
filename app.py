@@ -4708,10 +4708,6 @@ elif menu_nav == "💳 Pembayaran":
             # --- 3. LOGIKA PENGUNCIAN KOLOM OTOMATIS ---
             locked_keywords = ["timestamp", "updated by", "log", "pelaku", "waktu", "input"]
             disabled_list = [c for c in df_ready.columns if any(k in c.lower() for k in locked_keywords)]
-            
-            # Debugging: Cek tipe data sebelum masuk ke editor
-            st.write("Dtypes df_ready:", df_ready.dtypes)
-            st.write("Auto Config Mapping:", auto_config)
 
             edited_pay = st.data_editor(
                 df_ready,
