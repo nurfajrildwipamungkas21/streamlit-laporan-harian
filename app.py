@@ -25,46 +25,28 @@ import textwrap
 from audit_service import log_admin_action, compare_and_get_changes
 
 # =========================================================
-# CONNECTIONS (PERSISTENT IN RAM)
+# [BARU] SISTEM LOGGING LANGSUNG (ANTI-GAGAL)
 # =========================================================
-@st.cache_resource(ttl=None, show_spinner=False) # Simpan selamanya di RAM
-def init_connections():
-    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
-    gs_obj = None
-    dbx_obj = None
-    
-    # 1. Setup Google Sheets
-    try:
-        if "gcp_service_account" in st.secrets:
-            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+# Ganti fungsi force_audit_log dengan ini
 
-            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-            gc = gspread.authorize(creds)
-            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
-            
-            # Pre-load Audit Sheet agar tidak perlu dicek lagi nanti
-            from audit_service import ensure_audit_sheet
-            try: ensure_audit_sheet(gs_obj)
-            except: pass
-    except Exception as e:
-        print(f"⚠️ GSheet Init Error: {e}")
 
-    # 2. Setup Dropbox
+import threading
+
+def _background_log_worker(actor, action, target_sheet, chat_msg, details_input):
+    """Worker yang berjalan di background tanpa mengganggu UI."""
     try:
-        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
-            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
-            dbx_obj.users_get_current_account()
-    except Exception as e:
-        print(f"⚠️ Dropbox Init Error: {e}")
+        ws = spreadsheet.worksheet("Global_Audit_Log")
+        ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
         
-    return gs_obj, dbx_obj
+        # Format detail
+        final_details = str(details_input)[:4000] # Cegah error teks terlalu panjang
+        if isinstance(details_input, dict):
+            final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()])
 
-# Load Global Connections dari Cache
-KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
-KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
+        row = [f"'{ts}", str(actor), str(action), str(target_sheet), str(chat_msg), final_details]
+        ws.append_row(row, value_input_option="USER_ENTERED")
+    except Exception as e:
+        print(f"Log Error: {e}")
 
 import threading
 
@@ -95,6 +77,87 @@ def force_audit_log(actor, action, target_sheet, chat_msg, details_input):
 # ANCHOR: HELPER APPROVAL (AMBIL DARI CODE KEDUA)
 # =========================================================
 SHEET_PENDING = "System_Pending_Approval"
+
+
+def init_pending_db():
+    try:
+        try:
+            ws = spreadsheet.worksheet(SHEET_PENDING)
+            headers = ws.row_values(1)
+            if "Old Data JSON" not in headers:
+                current_cols = ws.col_count
+                new_col_idx = len(headers) + 1
+                if current_cols < new_col_idx:
+                    ws.resize(cols=new_col_idx)
+                ws.update_cell(1, new_col_idx, "Old Data JSON")
+        except gspread.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(
+                title=SHEET_PENDING, rows=1000, cols=7)
+            headers = ["Timestamp", "Requestor", "Target Sheet",
+                       "Row Index (0-based)", "New Data JSON", "Reason", "Old Data JSON"]
+            ws.append_row(headers, value_input_option="USER_ENTERED")
+            maybe_auto_format_sheet(ws, force=True)
+        return ws
+    except Exception as e:
+        print(f"Error init_pending_db: {e}")
+        return None
+
+
+def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, reason, requestor):
+    ws = init_pending_db()
+    if not ws:
+        return False, "DB Error"
+    row_dict_new = new_df_row.astype(str).to_dict()
+    json_new = json.dumps(row_dict_new)
+    row_dict_old = old_df_row.astype(
+        str).to_dict() if old_df_row is not None else {}
+    json_old = json.dumps(row_dict_old)
+    ts = now_ts_str()
+    ws.append_row([ts, requestor, target_sheet, row_idx_0based,
+                  json_new, reason, json_old], value_input_option="USER_ENTERED")
+
+    diff_log = {}
+    for k, v_new in row_dict_new.items():
+        v_old = row_dict_old.get(k, "")
+        if str(v_new).strip() != str(v_old).strip():
+            diff_log[k] = f"{v_old} ➡ {v_new}"
+    diff_str = "\n".join(
+        [f"{k}: {v}" for k, v in diff_log.items()]) if diff_log else "Re-save data."
+
+    force_audit_log(actor=requestor, action="⏳ PENDING", target_sheet=target_sheet,
+                    chat_msg=f"🙋‍♂️ [ADMIN]: {reason}", details_input=diff_str)
+    return True, "Permintaan terkirim!"
+
+
+def execute_approval(request_index_0based, action, admin_name="Manager", rejection_note="-"):
+    try:
+        ws_pending = init_pending_db()
+        all_requests = ws_pending.get_all_records()
+        if request_index_0based >= len(all_requests):
+            return False, "Data tidak ditemukan."
+        req = all_requests[request_index_0based]
+
+        if action == "REJECT":
+            force_audit_log(actor=admin_name, action="❌ DITOLAK",
+                            target_sheet=req["Target Sheet"], chat_msg=f"⛔ [MANAGER]: {rejection_note}", details_input=f"Pengaju: {req['Requestor']}")
+            ws_pending.delete_rows(request_index_0based + 2)
+            return True, "Ditolak."
+
+        elif action == "APPROVE":
+            new_data_dict = json.loads(req["New Data JSON"])
+            ws_target = spreadsheet.worksheet(req["Target Sheet"])
+            headers = ws_target.row_values(1)
+            row_values = [new_data_dict.get(h, "") for h in headers]
+            gsheet_row = int(req["Row Index (0-based)"]) + 2
+            ws_target.update(range_name=f"A{gsheet_row}", values=[
+                             row_values], value_input_option="USER_ENTERED")
+            force_audit_log(actor=admin_name, action="✅ SUKSES/ACC",
+                            target_sheet=req["Target Sheet"], chat_msg="✅ [MANAGER]: Disetujui.", details_input=f"Pengaju: {req['Requestor']}")
+            ws_pending.delete_rows(request_index_0based + 2)
+            return True, "Disetujui."
+    except Exception as e:
+        return False, str(e)
+
 
 def init_pending_db():
     """Memastikan sheet pending approval ada dengan kolom untuk DATA LAMA."""
@@ -287,6 +350,42 @@ def execute_approval(request_index_0based, action, admin_name="Manager", rejecti
 
     except Exception as e:
         return False, f"System Error: {e}"
+
+
+# --- BAGIAN IMPORT OPTIONAL LIBS JANGAN DIHAPUS (Excel/AgGrid/Plotly) ---
+# Bagian ini dipertahankan dari Code Pertama untuk menjaga kompatibilitas arsitektur
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    from openpyxl.utils import get_column_letter
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
+
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+    HAS_AGGRID = True
+except ImportError:
+    HAS_AGGRID = False
+
+try:
+    import plotly.express as px
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
+
+
+# =========================================================
+# PAGE CONFIG
+# =========================================================
+APP_TITLE = "Sales & Marketing Action Center"
+st.set_page_config(
+    page_title=APP_TITLE,
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # =========================================================
 # SYSTEM LOGIN OTP VIA EMAIL
@@ -540,6 +639,63 @@ def delete_staff_account(username):
     except gspread.exceptions.CellNotFound:
         return False, "Username tidak ditemukan."
 
+
+# =========================================================
+# 1. DEFINISI FUNGSI KONEKSI & ASSETS (TARUH PALING ATAS)
+# =========================================================
+
+@st.cache_resource(ttl=None, show_spinner=False)
+def init_connections():
+    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
+    gs_obj = None
+    dbx_obj = None
+    
+    # Setup Google Sheets
+    try:
+        if "gcp_service_account" in st.secrets:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(creds)
+            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
+    except Exception as e:
+        print(f"⚠️ GSheet Init Error: {e}")
+
+    # Setup Dropbox
+    try:
+        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
+            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
+            dbx_obj.users_get_current_account()
+    except Exception as e:
+        print(f"⚠️ Dropbox Init Error: {e}")
+        
+    return gs_obj, dbx_obj
+
+@st.cache_data(ttl=None, show_spinner=False)
+def load_data_ke_ram(sheet_name):
+    """Mengambil data dari GSheet dan menguncinya di RAM."""
+    try:
+        if spreadsheet:
+            ws = spreadsheet.worksheet(sheet_name)
+            return pd.DataFrame(ws.get_all_records())
+    except Exception as e:
+        print(f"Gagal Load {sheet_name} ke RAM: {e}")
+    return pd.DataFrame()
+
+def prefetch_all_data_to_state():
+    """Memindahkan data dari RAM ke Session State setelah login sukses."""
+    if "data_loaded" not in st.session_state:
+        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
+        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
+        st.session_state["df_staf"] = get_daftar_staf_terbaru()
+        st.session_state["data_loaded"] = True
+
+# =========================================================
+# 2. EKSEKUSI KONEKSI GLOBAL
+# =========================================================
 
 # Jalankan koneksi sekarang agar variabel 'spreadsheet' tersedia untuk fungsi lain
 spreadsheet, dbx = init_connections()
@@ -1545,6 +1701,57 @@ def admin_secret_configured() -> bool:
     except Exception:
         return False
 
+
+# =========================================================
+# CONNECTIONS (PERSISTENT IN RAM)
+# =========================================================
+@st.cache_resource(ttl=None, show_spinner=False) # Simpan selamanya di RAM
+def init_connections():
+    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
+    gs_obj = None
+    dbx_obj = None
+    
+    # 1. Setup Google Sheets
+    try:
+        if "gcp_service_account" in st.secrets:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(creds)
+            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
+            
+            # Pre-load Audit Sheet agar tidak perlu dicek lagi nanti
+            from audit_service import ensure_audit_sheet
+            try: ensure_audit_sheet(gs_obj)
+            except: pass
+    except Exception as e:
+        print(f"⚠️ GSheet Init Error: {e}")
+
+    # 2. Setup Dropbox
+    try:
+        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
+            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
+            dbx_obj.users_get_current_account()
+    except Exception as e:
+        print(f"⚠️ Dropbox Init Error: {e}")
+        
+    return gs_obj, dbx_obj
+
+# Load Global Connections dari Cache
+KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
+KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
+
+# === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
+SDK = "new"
+try:
+    from google import genai as genai_new
+    from google.genai import types as types_new
+except Exception:
+    SDK = "legacy"
+    import google.generativeai as genai_legacy
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
 SDK = "new"
@@ -3829,6 +4036,9 @@ with st.sidebar:
 
     st.divider()
     st.caption("Tip: navigasi ala SpaceX → ringkas, jelas, fokus.")
+
+
+menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
 menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
