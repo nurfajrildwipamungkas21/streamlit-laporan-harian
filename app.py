@@ -641,7 +641,30 @@ def delete_staff_account(username):
 
 
 # =========================================================
-# MAIN FLOW CHECK
+# CONNECTIONS (PERSISTENT IN RAM)
+# =========================================================
+spreadsheet, dbx = init_connections()
+
+# --- PINDAHKAN DEFINISI KE SINI (DI ATAS) ---
+@st.cache_data(ttl=None, show_spinner=False)
+def load_data_ke_ram(sheet_name):
+    try:
+        if spreadsheet:
+            ws = spreadsheet.worksheet(sheet_name)
+            return pd.DataFrame(ws.get_all_records())
+    except Exception as e:
+        print(f"Gagal Load {sheet_name}: {e}")
+    return pd.DataFrame()
+
+def prefetch_all_data_to_state():
+    """Fungsi didefinisikan dulu agar saat dipanggil di bawah sudah 'kenal'"""
+    if "data_loaded" not in st.session_state:
+        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
+        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
+        st.session_state["data_loaded"] = True
+
+# =========================================================
+# MAIN FLOW CHECK (LOGIKA JALAN APLIKASI)
 # =========================================================
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -650,13 +673,10 @@ if not st.session_state["logged_in"]:
     login_page()
     st.stop() 
 
-# --- [BARU] DISINI TEMPATNYA ---
-# Jika lolos dari st.stop(), berarti user sudah login.
-# Sekarang kita kunci semua data & asset ke RAM VPS sebelum UI muncul.
-
-prefetch_all_data_to_state()  # Ambil semua data GSheet ke RAM (Instan)
-inject_global_css_fast()      # Suntik CSS dari RAM (Instan)
-render_header()               # Gambar Header dari RAM (Instan)
+# Sekarang dipanggil sudah aman karena definisi sudah dibaca Python diatas
+prefetch_all_data_to_state() 
+inject_global_css_fast() 
+render_header()
 
 # -------------------------------
 
@@ -1692,35 +1712,8 @@ def init_connections():
     return gs_obj, dbx_obj
 
 # Load Global Connections dari Cache
-spreadsheet, dbx = init_connections()
 KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
 KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
-
-@st.cache_data(ttl=None, show_spinner=False)
-def load_data_ke_ram(sheet_name):
-    """Mengambil data dari GSheet dan menguncinya di RAM VPS selamanya."""
-    try:
-        if spreadsheet:
-            ws = spreadsheet.worksheet(sheet_name)
-            return pd.DataFrame(ws.get_all_records())
-    except Exception as e:
-        print(f"Gagal Load {sheet_name} ke RAM: {e}")
-    return pd.DataFrame()
-
-def prefetch_all_data_to_state():
-    """
-    Memindahkan semua data dari RAM VPS ke dalam Session State.
-    Dijalankan hanya 1x saat login sukses.
-    """
-    if "data_loaded" not in st.session_state:
-        # Gunakan load_data_ke_ram yang punya @st.cache_data(ttl=None)
-        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
-        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
-        st.session_state["df_kpi_team"] = load_data_ke_ram(SHEET_TARGET_TEAM)
-        st.session_state["df_kpi_indiv"] = load_data_ke_ram(SHEET_TARGET_INDIVIDU)
-        st.session_state["df_staf"] = get_daftar_staf_terbaru() # Ini sudah cache data
-        
-        st.session_state["data_loaded"] = True
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
 SDK = "new"
