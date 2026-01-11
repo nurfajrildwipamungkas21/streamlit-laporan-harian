@@ -48,13 +48,28 @@ def _background_log_worker(actor, action, target_sheet, chat_msg, details_input)
     except Exception as e:
         print(f"Log Error: {e}")
 
+import threading
+
+def _background_log_worker(actor, action, target_sheet, chat_msg, details_input):
+    """Worker berjalan di background thread."""
+    try:
+        if not spreadsheet: return
+        ws = spreadsheet.worksheet("Global_Audit_Log")
+        ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
+        final_details = str(details_input)[:4000] 
+        if isinstance(details_input, dict):
+            final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()])
+        row = [f"'{ts}", str(actor), str(action), str(target_sheet), str(chat_msg), final_details]
+        ws.append_row(row, value_input_option="USER_ENTERED")
+    except Exception as e:
+        print(f"Log Background Error: {e}")
+
 def force_audit_log(actor, action, target_sheet, chat_msg, details_input):
-    """Wrapper utama: Langsung return True agar UI terasa instan."""
-    t = threading.Thread(
+    """Langsung return True agar UI instan, log jalan sendiri."""
+    threading.Thread(
         target=_background_log_worker, 
         args=(actor, action, target_sheet, chat_msg, details_input)
-    )
-    t.start()
+    ).start()
     return True
 
 
@@ -1703,6 +1718,35 @@ if SDK == "new":
 else:
     genai_legacy.configure(api_key=API_KEY)
 
+def prefetch_all_data():
+    """
+    Memuat SEMUA data sheet ke RAM (Session State) sekaligus.
+    Hanya jalan 1x saat login. Menu lain tinggal baca RAM (0 detik).
+    """
+    if "data_buffered" not in st.session_state:
+        placeholder = st.empty()
+        placeholder.info("🚀 Sedang menyiapkan Database ke RAM (High Speed Mode)...")
+        
+        # Load Payment
+        st.session_state["buf_payment"] = load_pembayaran_dp()
+        # Load Closing
+        st.session_state["buf_closing"] = load_closing_deal()
+        # Load KPI
+        st.session_state["buf_kpi_team"] = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
+        st.session_state["buf_kpi_indiv"] = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
+        # Load Staf
+        st.session_state["buf_staf"] = get_daftar_staf_terbaru()
+        
+        st.session_state["data_buffered"] = True
+        placeholder.empty()
+
+def force_refresh_buffer():
+    """Hapus buffer untuk paksa download ulang."""
+    keys = ["buf_payment", "buf_closing", "buf_kpi_team", "buf_kpi_indiv", "buf_staf", "data_buffered"]
+    for k in keys:
+        if k in st.session_state: del st.session_state[k]
+    st.cache_data.clear()
+    st.rerun()
 
 # =========================================================
 # RUPIAH PARSER (input bebas -> int Rupiah)
@@ -3794,6 +3838,9 @@ if nav_from_url in NAV_MAP:
 # Render header
 render_header()
 
+if st.session_state.get("logged_in"):
+    prefetch_all_data() # Pastikan data siap di RAM
+
 # MOBILE: tampilkan Beranda sebagai landing page
 menu_nav = st.session_state.get(
     "menu_nav", HOME_NAV if IS_MOBILE else "📝 Laporan Harian")
@@ -4764,41 +4811,75 @@ elif menu_nav == "🤝 Closing Deal":
 
 # --- 5. PEMBAYARAN ---
 elif menu_nav == "💳 Pembayaran":
+    # =========================================================
+    # [OPTIMASI RAM] SINGLE LOAD & BUFFERING SYSTEM
+    # =========================================================
+    # Logic: Cek apakah data sudah ada di RAM? Jika belum, ambil dari GSheet.
+    # Ini mencegah "loading ulang" setiap kali user mengetik atau klik tombol.
+    if "buffer_pay_data" not in st.session_state:
+        with st.spinner("🚀 Memuat Database Pembayaran ke RAM (High Speed)..."):
+            st.session_state["buffer_pay_data"] = load_pembayaran_dp()
+
+    # Ambil dataframe utama langsung dari RAM (0 detik delay)
+    df_pay = st.session_state["buffer_pay_data"]
+
     if IS_MOBILE:
-        render_payment_mobile()
+        render_payment_mobile() # #sisanyatetapsama (Pastikan fungsi mobile juga membaca buffer jika ingin cepat)
     else:
         st.markdown("## 💳 Smart Payment Action Center")
-        st.caption("Manajemen pembayaran terpadu dengan kalkulator sisa tagihan dan pelacakan cicilan.")
+        
+        # Layout Header + Tombol Sync Manual
+        col_title, col_sync = st.columns([5, 1])
+        with col_title:
+            st.caption("Manajemen pembayaran terpadu (Mode Cepat: Data berjalan di RAM).")
+        with col_sync:
+            # Tombol ini hanya diklik jika ingin menarik data terbaru dari inputan orang lain
+            if st.button("🔄 Sync Server", help="Paksa tarik data baru dari Cloud", use_container_width=True):
+                st.cache_data.clear()
+                st.session_state["buffer_pay_data"] = load_pembayaran_dp() # Update RAM
+                st.success("Data Sinkron!")
+                time.sleep(0.5)
+                st.rerun()
 
         # =========================================================
         # 1. SEKSI INPUT: KALKULATOR PEMBAYARAN PINTAR
         # =========================================================
         with st.container(border=True):
             st.markdown("### ➕ Input Pembayaran & Kalkulator Sisa")
-            with st.form("form_smart_pay", clear_on_submit=True):
+            
+            # [OPTIMASI CRITICAL] Menggunakan st.form agar TIDAK reload saat mengetik huruf
+            with st.form("form_smart_pay_ram", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
+                
                 with c1:
+                    # #logikasama: Menggunakan cache function untuk list staf agar cepat
                     p_marketing = st.selectbox("Nama Marketing", get_daftar_staf_terbaru())
                     p_group = st.text_input("Nama Group / Klien", placeholder="Masukkan nama entitas...")
                     p_total_sepakat = st.text_input("Total Nilai Kesepakatan (Rp)", placeholder="Contoh: 100.000.000")
                 
                 with c2:
+                    # #sisanyatetapsama
                     p_jenis = st.selectbox("Mekanisme Pembayaran", ["Down Payment (DP)", "Cicilan", "Cash"])
                     p_nom_bayar = st.text_input("Nominal yang Dibayar Sekarang (Rp)")
-                    p_tenor = st.number_input("Tenor Cicilan (Bulan)", min_value=0, step=1, help="Isi 0 jika pembayaran Cash/DP sekali bayar")
+                    p_tenor = st.number_input("Tenor Cicilan (Bulan)", min_value=0, step=1, help="Isi 0 jika Cash/DP")
                 
                 with c3:
+                    # #sisanyatetapsama
                     p_tgl_event = st.date_input("Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
                     p_due = st.date_input("Batas Waktu Bayar (Jatuh Tempo)", value=datetime.now(tz=TZ_JKT).date() + timedelta(days=7))
                     p_bukti = st.file_uploader("Upload Bukti Transfer (Foto/PDF)")
 
                 p_note = st.text_area("Catatan Tambahan (Opsional)", placeholder="Keterangan bank, nomor referensi, dll.")
                 
-                if st.form_submit_button("✅ Simpan & Hitung Sisa", type="primary", use_container_width=True):
+                # Tombol Submit WAJIB di dalam form
+                submitted = st.form_submit_button("✅ Simpan & Hitung Sisa", type="primary", use_container_width=True)
+                
+                if submitted:
                     if not p_total_sepakat or not p_nom_bayar:
                         st.error("Gagal: Nilai Kesepakatan dan Nominal Bayar wajib diisi!")
                     else:
-                        with st.spinner("Memproses transaksi..."):
+                        with st.spinner("Menyimpan ke Database..."):
+                            # #logikasama: Memanggil fungsi simpan database
                             ok, msg = tambah_pembayaran_dp(
                                 p_group, p_marketing, p_tgl_event, p_jenis, 
                                 p_nom_bayar, p_total_sepakat, p_tenor, p_due, p_bukti, p_note
@@ -4806,7 +4887,9 @@ elif menu_nav == "💳 Pembayaran":
                             if ok:
                                 st.success(msg)
                                 st.cache_data.clear()
-                                time.sleep(2)
+                                # [OPTIMASI] Update Buffer RAM agar data baru langsung muncul di tabel bawah tanpa fetch ulang
+                                st.session_state["buffer_pay_data"] = load_pembayaran_dp() 
+                                time.sleep(1)
                                 st.rerun()
                             else:
                                 st.error(msg)
@@ -4814,45 +4897,40 @@ elif menu_nav == "💳 Pembayaran":
         st.divider()
 
         # =========================================================
-        # 2. SEKSI MONITORING: ALERT & DATA EDITOR DINAMIS
+        # 2. SEKSI MONITORING: ALERT & DATA EDITOR (RAM BASED)
         # =========================================================
         st.markdown("### 📋 Monitoring & Riwayat Pembayaran")
-        df_pay = load_pembayaran_dp()
-
+        
+        # [OPTIMASI] Menggunakan data dari RAM (df_pay) -> Instan
         if df_pay.empty:
             st.info("Belum ada data pembayaran yang tersimpan.")
         else:
-            # --- Sistem Alert Pintar (Berdasarkan Sisa Bayar) ---
+            # --- Sistem Alert Pintar (Hitung di RAM) ---
+            # #logikasama: Logika overdue/due soon
             overdue, due_soon = build_alert_pembayaran(df_pay)
             col_stat1, col_stat2 = st.columns(2)
             with col_stat1:
                 st.metric("⛔ Overdue (Belum Lunas)", len(overdue))
-                if not overdue.empty:
-                    st.error("Ada tagihan yang melewati jatuh tempo!")
+                if not overdue.empty: st.error("Ada tagihan overdue!")
             with col_stat2:
                 st.metric("⚠️ Jatuh Tempo Dekat (≤ 3 Hari)", len(due_soon))
-                if not due_soon.empty:
-                    st.warning("Segera lakukan penagihan ulang.")
+                if not due_soon.empty: st.warning("Segera lakukan penagihan ulang.")
 
-            st.caption("Klik dua kali pada sel untuk mengedit. Kolom Log & Timestamp otomatis terkunci.")
+            st.caption("Klik dua kali pada sel untuk mengedit. Data diload dari RAM (High Speed).")
 
-            # --- 1. PROSES DATA SECARA DINAMIS (Normalisasi Tipe Data) ---
+            # --- CLEANING DATA (Di RAM) ---
+            # #logikasama: Membersihkan tipe data agar editor tidak error
             df_ready = clean_df_types_dynamically(df_pay)
             
-            # --- 2. GENERATE CONFIG SECARA OTOMATIS (Mencegah Error Tipe Data) ---
+            # #logikasama: Generate config kolom otomatis
             auto_config = generate_dynamic_column_config(df_ready)
             
-            # --- 3. LOGIKA PENGUNCIAN KOLOM OTOMATIS ---
+            # #logikasama: Kunci kolom log/timestamp
             locked_keywords = ["timestamp", "updated by", "log", "pelaku", "waktu", "input"]
             disabled_list = [c for c in df_ready.columns if any(k in c.lower() for k in locked_keywords)]
 
-            edited_pay = st.data_editor(
-                df_ready,
-                column_config=auto_config,
-                # ... sisanya tetap
-            )
-
-            # --- 4. RENDER DATA EDITOR ---
+            # --- RENDER DATA EDITOR ---
+            # [OPTIMASI] Key editor dibuat statis ('ram_optimized') agar tidak reset saat user mengetik
             edited_pay = st.data_editor(
                 df_ready,
                 column_config=auto_config,
@@ -4860,21 +4938,25 @@ elif menu_nav == "💳 Pembayaran":
                 hide_index=True,
                 use_container_width=True,
                 num_rows="dynamic",
-                key="smart_payment_editor_v3"
+                key="smart_payment_editor_ram_optimized" 
             )
 
-            # --- 5. LOGIKA SIMPAN PERUBAHAN ---
+            # --- SIMPAN PERUBAHAN (WRITE-THROUGH CACHE) ---
             if st.button("💾 Simpan Perubahan Riwayat", use_container_width=True):
-                with st.spinner("Memproses audit log dan menyimpan data..."):
+                with st.spinner("Sinkronisasi RAM & Cloud..."):
                     current_user = st.session_state.get("user_name", "Admin Desktop")
                     
-                    # Bandingkan data lama (df_pay) dengan data yang diedit (edited_pay)
+                    # #logikasama: Bandingkan data RAM vs Editor untuk Log Audit
                     final_df = apply_audit_payments_changes(df_pay, edited_pay, actor=current_user)
                     
                     if save_pembayaran_dp(final_df):
-                        st.success("✅ Perubahan database berhasil disimpan!")
+                        # [OPTIMASI SUPER] Update RAM lokal langsung!
+                        # Ini membuat UI langsung berubah tanpa perlu download ulang dari GSheet (Hemat 3-5 detik)
+                        st.session_state["buffer_pay_data"] = final_df 
+                        
+                        st.success("✅ Tersimpan! (RAM Updated)")
                         st.cache_data.clear()
-                        time.sleep(1.5)
+                        time.sleep(0.5) # Jeda dipercepat karena tidak perlu loading berat
                         st.rerun()
                     else:
                         st.error("Gagal menyimpan ke Google Sheets.")
@@ -4885,11 +4967,14 @@ elif menu_nav == "💳 Pembayaran":
             # 3. FITUR TAMBAHAN: UPDATE FOTO BUKTI SUSULAN
             # =========================================================
             with st.expander("📎 Update Bukti Pembayaran (Susulan)", expanded=False):
-                st.info("Gunakan fitur ini jika ingin menambahkan atau mengganti foto bukti transfer tanpa mengubah data lainnya.")
+                st.info("Fitur ini langsung update ke cloud dan sinkronisasi RAM.")
+                
+                # [OPTIMASI] Reset index dari data RAM untuk dropdown (Cepat)
                 df_pay_reset = df_pay.reset_index(drop=True)
                 
+                # #logikasama: Membuat list opsi dropdown
                 pay_options = [
-                    f"{i+1}. {r[COL_MARKETING]} | {r[COL_GROUP]} | Sisa: {format_rupiah_display(r[COL_SISA_BAYAR])}" 
+                    f"{i+1}. {r.get(COL_MARKETING,'-')} | {r.get(COL_GROUP,'-')} | Sisa: {format_rupiah_display(r.get(COL_SISA_BAYAR,0))}" 
                     for i, r in df_pay_reset.iterrows()
                 ]
                 
@@ -4901,10 +4986,15 @@ elif menu_nav == "💳 Pembayaran":
                 if st.button("⬆️ Upload Foto Sekarang", use_container_width=True):
                     if file_susulan:
                         mkt_name = df_pay_reset.iloc[sel_idx_upd][COL_MARKETING]
+                        # #logikasama: Upload ke Dropbox & Update Sheet
                         ok, msg = update_bukti_pembayaran_by_index(sel_idx_upd, file_susulan, mkt_name, actor="Admin")
                         if ok:
                             st.success("Foto bukti berhasil ditambahkan!")
+                            
+                            # [OPTIMASI] Force refresh RAM karena link bukti berubah di server
                             st.cache_data.clear()
+                            st.session_state["buffer_pay_data"] = load_pembayaran_dp()
+                            
                             time.sleep(1)
                             st.rerun()
                         else:
