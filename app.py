@@ -3314,19 +3314,16 @@ def apply_audit_payments_changes(df_before: pd.DataFrame, df_after: pd.DataFrame
 
 def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nominal_input, total_sepakat_input, tenor, jatuh_tempo, bukti_file, catatan):
     """
-    Menambah record pembayaran dengan sistem Smart Balance Tracking.
-    Menghitung sisa bayar secara otomatis dan menentukan status lunas/belum.
+    Menambah record pembayaran dengan sistem Smart Balance Tracking dan kalkulator cicilan transparan.
     """
     if not KONEKSI_GSHEET_BERHASIL: 
         return False, "Sistem Error: Koneksi Google Sheets tidak aktif."
 
     try:
-        # --- 1. NORMALISASI & VALIDASI INPUT ---
         group = str(nama_group).strip() if nama_group else "-"
         marketing = str(nama_marketing).strip() if nama_marketing else "Unknown"
         catatan_clean = str(catatan).strip() if catatan else "-"
         
-        # Parsing angka menggunakan Rupiah Parser
         nom_bayar = parse_rupiah_to_int(nominal_input) or 0
         total_sepakat = parse_rupiah_to_int(total_sepakat_input) or 0
         tenor_val = int(tenor) if tenor else 0
@@ -3334,65 +3331,62 @@ def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nom
         if total_sepakat <= 0:
             return False, "Input Gagal: Total nilai kesepakatan harus diisi dengan benar."
 
-        # --- 2. KALKULATOR OTOMATIS (BALANCE TRACKING) ---
         sisa_bayar = total_sepakat - nom_bayar
         
-        # --- 3. LOGIKA STATUS PEMBAYARAN PINTAR ---
-        # Menentukan label status berdasarkan mekanisme dan sisa saldo
+        info_cicilan = ""
+        if tenor_val > 0 and sisa_bayar > 0:
+            nilai_per_cicilan = sisa_bayar / tenor_val
+            info_cicilan = f" | Cicilan: {format_rupiah_display(nilai_per_cicilan)} x{tenor_val} term"
+
         if sisa_bayar <= 0:
             status_fix = "✅ Lunas"
-            if jenis_bayar == "Cash": status_fix += " (Cash)"
+            if jenis_bayar == "Cash": 
+                status_fix += " (Cash)"
         else:
             if jenis_bayar == "Down Payment (DP)":
-                status_fix = f"⏳ DP (Sisa: {format_rupiah_display(sisa_bayar)})"
+                status_fix = f"⏳ DP (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
             elif jenis_bayar == "Cicilan":
-                status_fix = f"💳 Cicilan (Sisa: {format_rupiah_display(sisa_bayar)})"
+                status_fix = f"💳 Cicilan (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
             else:
-                status_fix = f"⚠️ Belum Lunas (Sisa: {format_rupiah_display(sisa_bayar)})"
+                status_fix = f"⚠️ Belum Lunas (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
 
-        # --- 4. PENANGANAN FILE (DROPBOX) ---
         link_bukti = "-"
         if bukti_file and KONEKSI_DROPBOX_BERHASIL:
-            # Gunakan kategori spesifik untuk kemudahan arsip di Dropbox
             link_bukti = upload_ke_dropbox(bukti_file, marketing, kategori="Bukti_Pembayaran")
 
-        # --- 5. PERSIAPAN DATA BARIS (SESUAI PAYMENT_COLUMNS) ---
         ts_in = now_ts_str()
         
-        # Format Tanggal agar seragam YYYY-MM-DD di GSheet
         fmt_tgl_event = tgl_event.strftime("%Y-%m-%d") if hasattr(tgl_event, "strftime") else str(tgl_event)
         fmt_jatuh_tempo = jatuh_tempo.strftime("%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
 
-        # Konstruksi baris harus SAMA PERSIS dengan urutan di PAYMENT_COLUMNS
+        log_entry = f"[{ts_in}] Input Baru: {jenis_bayar}{info_cicilan}"
+
         row = [
-            ts_in,              # COL_TS_BAYAR
-            group,              # COL_GROUP
-            marketing,          # COL_MARKETING
-            fmt_tgl_event,      # COL_TGL_EVENT
-            total_sepakat,      # COL_NILAI_KESEPAKATAN
-            jenis_bayar,        # COL_JENIS_BAYAR
-            nom_bayar,          # COL_NOMINAL_BAYAR
-            tenor_val,          # COL_TENOR_CICILAN
-            sisa_bayar,         # COL_SISA_BAYAR
-            fmt_jatuh_tempo,    # COL_JATUH_TEMPO
-            status_fix,         # COL_STATUS_BAYAR
-            link_bukti,         # COL_BUKTI_BAYAR
-            catatan_clean,      # COL_CATATAN_BAYAR
-            build_numbered_log([ts_in]), # COL_TS_UPDATE (Initial Log)
-            marketing           # COL_UPDATED_BY
+            ts_in,
+            group,
+            marketing,
+            fmt_tgl_event,
+            total_sepakat,
+            jenis_bayar,
+            nom_bayar,
+            tenor_val,
+            sisa_bayar,
+            fmt_jatuh_tempo,
+            status_fix,
+            link_bukti,
+            catatan_clean,
+            build_numbered_log([log_entry]),
+            marketing
         ]
 
-        # --- 6. EKSEKUSI KE GOOGLE SHEETS ---
         ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
-        # Pastikan header terbaru ada jika sheet baru dibuat otomatis
         ensure_headers(ws, PAYMENT_COLUMNS)
         
         ws.append_row(row, value_input_option="USER_ENTERED")
         
-        # Berikan feedback yang informatif ke UI
         msg_feedback = f"Pembayaran berhasil disimpan! "
         if sisa_bayar > 0:
-            msg_feedback += f"Sisa tagihan: {format_rupiah_display(sisa_bayar)}."
+            msg_feedback += f"Sisa tagihan: {format_rupiah_display(sisa_bayar)} dengan rincian {info_cicilan.replace(' | ', '')}."
         else:
             msg_feedback += "Status: LUNAS."
 
