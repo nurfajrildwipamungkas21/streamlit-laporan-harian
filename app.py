@@ -726,25 +726,6 @@ def prefetch_all_data_to_state():
         
         st.session_state["data_loaded"] = True
 
-
-# =========================================================
-# MAIN FLOW CHECK
-# =========================================================
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-
-if not st.session_state["logged_in"]:
-    login_page()
-    st.stop() 
-
-# --- [BARU] DISINI TEMPATNYA ---
-# Jika lolos dari st.stop(), berarti user sudah login.
-# Sekarang kita kunci semua data & asset ke RAM VPS sebelum UI muncul.
-
-prefetch_all_data_to_state()  # Ambil semua data GSheet ke RAM (Instan)
-inject_global_css_fast()      # Suntik CSS dari RAM (Instan)
-render_header()               # Gambar Header dari RAM (Instan)
-
 # -------------------------------
 
 # Variabel Global (tetap seperti kode lama Anda)
@@ -5554,3 +5535,21 @@ elif menu_nav == "📊 Dashboard Admin":
                                 st.error("Alasan harus diisi.")
 
         render_section_watermark()
+
+# =========================================================
+# MAIN FLOW CHECK
+# =========================================================
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login_page()
+    st.stop() 
+
+# --- [BARU] DISINI TEMPATNYA ---
+# Jika lolos dari st.stop(), berarti user sudah login.
+# Sekarang kita kunci semua data & asset ke RAM VPS sebelum UI muncul.
+
+prefetch_all_data_to_state()  # Ambil semua data GSheet ke RAM (Instan)
+inject_global_css_fast()      # Suntik CSS dari RAM (Instan)
+render_header()               # Gambar Header dari RAM (Instan)
