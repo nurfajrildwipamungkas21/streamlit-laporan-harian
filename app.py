@@ -3910,7 +3910,7 @@ with st.sidebar:
     st.markdown("<div class='sx-section-title'>Navigation</div>",
                 unsafe_allow_html=True)
 
-    # Update: Menambahkan "📅 Presensi" di daftar menu utama sidebar
+    # Daftar menu utama sidebar
     menu_items = [
         "📅 Presensi",
         "📝 Laporan Harian",
@@ -3942,62 +3942,62 @@ with st.sidebar:
                     pass
             st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
+
     # -----------------------------------------------------------
-    # PROFIL USER (OTP LOGIN)
+    # PROFIL USER (DIPERBAIKI UNTUK MENCEGAH ERROR 'NoneType')
     # -----------------------------------------------------------
-    st.divider()
+    # Hanya muncul jika user sedang login
+    if st.session_state.get("logged_in"):
+        st.divider()
+        col_p1, col_p2 = st.columns([1, 3])
 
-    col_p1, col_p2 = st.columns([1, 3])
+        with col_p1:
+            st.markdown("👤")
 
-    with col_p1:
-        # Icon default karena OTP tidak ambil foto profil Google
-        st.markdown("👤")
+        with col_p2:
+            st.caption("Login sebagai:")
+            # Ambil nama, jika None ganti ke 'User'
+            u_name = st.session_state.get('user_name', 'User') or "User"
+            st.markdown(f"**{u_name}**")
 
-    with col_p2:
-        st.caption("Login sebagai:")
-        st.markdown(f"**{st.session_state.get('user_name', 'User')}**")
+            # FIX: Pastikan role tidak None dan paksa jadi string sebelum .upper()
+            role_raw = st.session_state.get("user_role", "staff") or "staff"
+            role_now = str(role_raw).lower()
+            role_color = "red" if role_now == "admin" else "blue"
+            st.markdown(f":{role_color}[{role_now.upper()}]")
 
-        role_now = st.session_state.get("user_role", "user")
-        role_color = "red" if role_now == "admin" else "blue"
-        st.markdown(f":{role_color}[{role_now.upper()}]")
-
-    # Tombol Logout Manual (Reset State)
-    if st.button("🚪 Sign Out / Logout", use_container_width=True):
-        # Reset semua variabel sesi yang penting
-        st.session_state["logged_in"] = False
-        st.session_state["user_email"] = None
-        st.session_state["user_name"] = None
-        st.session_state["user_role"] = None
-        st.session_state["is_admin"] = False
-
-        # Reset step OTP agar kembali ke input email saat login ulang
-        st.session_state["otp_step"] = 1
-        st.session_state["temp_email"] = ""
-        st.session_state["generated_otp"] = ""
-
-        st.rerun()
+        # Tombol Logout Manual (Reset State)
+        if st.button("🚪 Sign Out / Logout", use_container_width=True):
+            # Reset semua variabel sesi
+            st.session_state["logged_in"] = False
+            st.session_state["user_email"] = None
+            st.session_state["user_name"] = None
+            st.session_state["user_role"] = None
+            st.session_state["is_admin"] = False
+            st.session_state["otp_step"] = 1
+            st.session_state["temp_email"] = ""
+            st.session_state["generated_otp"] = ""
+            
+            # Kembali ke halaman utama (Login)
+            st.rerun()
 
     st.divider()
 
     # Quick stats (lightweight)
-    try:
-        df_pay_sidebar = load_pembayaran_dp()
-        overdue_s, due_soon_s = build_alert_pembayaran(
-            df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
-        st.markdown("<div class='sx-section-title'>Quick Stats</div>",
-                    unsafe_allow_html=True)
-        st.metric("Overdue Payment", int(len(overdue_s))
-                  if overdue_s is not None else 0)
-        st.metric("Due ≤ 3 hari", int(len(due_soon_s))
-                  if due_soon_s is not None else 0)
-    except Exception:
-        pass
+    if st.session_state.get("logged_in"):
+        try:
+            df_pay_sidebar = load_pembayaran_dp()
+            overdue_s, due_soon_s = build_alert_pembayaran(
+                df_pay_sidebar, days_due_soon=3) if not df_pay_sidebar.empty else (pd.DataFrame(), pd.DataFrame())
+            st.markdown("<div class='sx-section-title'>Quick Stats</div>",
+                        unsafe_allow_html=True)
+            st.metric("Overdue Payment", int(len(overdue_s)) if overdue_s is not None else 0)
+            st.metric("Due ≤ 3 hari", int(len(due_soon_s)) if due_soon_s is not None else 0)
+        except Exception:
+            pass
 
     st.divider()
     st.caption("Tip: navigasi ala SpaceX → ringkas, jelas, fokus.")
-
-
-menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
 menu_nav = st.session_state.get("menu_nav", "📝 Laporan Harian")
 
