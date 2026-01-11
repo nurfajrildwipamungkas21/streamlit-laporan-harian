@@ -4303,7 +4303,7 @@ def render_admin_mobile():
                     
                     # Konfigurasi API Gemini
                     genai.configure(api_key="AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4")
-                    model = genai.GenerativeModel("gemini-3-flash")
+                    model = genai.GenerativeModel("gemini-2.5-flash")
 
                     # Siapkan ringkasan data untuk dikirim ke AI
                     staf_stats = report_counts.to_dict()
