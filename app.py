@@ -30,60 +30,32 @@ from audit_service import log_admin_action, compare_and_get_changes
 # Ganti fungsi force_audit_log dengan ini
 
 
-def force_audit_log(actor, action, target_sheet, chat_msg, details_input):
+import threading
+
+def _background_log_worker(actor, action, target_sheet, chat_msg, details_input):
+    """Worker yang berjalan di background tanpa mengganggu UI."""
     try:
-        SHEET_NAME = "Global_Audit_Log"
-        try:
-            ws = spreadsheet.worksheet(SHEET_NAME)
-        except gspread.WorksheetNotFound:
-            # Buat baru jika tidak ada dengan header standar
-            ws = spreadsheet.add_worksheet(title=SHEET_NAME, rows=1000, cols=6)
-            ws.append_row(["Waktu", "User", "Status", "Target Data", "Chat & Catatan",
-                          "Detail Perubahan"], value_input_option="USER_ENTERED")
+        ws = spreadsheet.worksheet("Global_Audit_Log")
+        ts = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%d-%m-%Y %H:%M:%S")
+        
+        # Format detail
+        final_details = str(details_input)[:4000] # Cegah error teks terlalu panjang
+        if isinstance(details_input, dict):
+            final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()])
 
-        # Ambil header untuk tahu urutan kolom
-        headers = ws.row_values(1)
-
-        ts = datetime.now(ZoneInfo("Asia/Jakarta")
-                          ).strftime("%d-%m-%Y %H:%M:%S")
-        final_details = "\n".join([f"• {k}: {v}" for k, v in details_input.items()]) if isinstance(
-            details_input, dict) else (str(details_input) if details_input else "-")
-
-        # Data yang akan dimasukkan (Mapping Keyword ke Value)
-        payload = {
-            "waktu": f"'{ts}",
-            "user": str(actor),
-            "pelaku": str(actor),
-            "status": str(action),
-            "aksi": str(action),  # Menangkap "Aksi Dilakukan"
-            "target": str(target_sheet),
-            "nama data": str(target_sheet),
-            "chat": str(chat_msg),
-            "catatan": str(chat_msg),
-            "alasan": str(chat_msg),
-            "detail": str(final_details),
-            "rincian": str(final_details)
-        }
-
-        # Susun baris baru mengikuti urutan header di GSheet secara dinamis
-        row_to_append = [""] * len(headers)
-        for i, h in enumerate(headers):
-            h_lower = h.lower()
-            for key, val in payload.items():
-                if key in h_lower:
-                    row_to_append[i] = val
-                    break
-
-        # Jika baris masih kosong (header tidak cocok), gunakan format default di akhir
-        if all(x == "" for x in row_to_append):
-            row_to_append = [f"'{ts}", str(actor), str(action), str(
-                target_sheet), str(chat_msg), str(final_details)]
-
-        ws.append_row(row_to_append, value_input_option="USER_ENTERED")
-        return True
+        row = [f"'{ts}", str(actor), str(action), str(target_sheet), str(chat_msg), final_details]
+        ws.append_row(row, value_input_option="USER_ENTERED")
     except Exception as e:
-        print(f"⚠️ FORCE LOG ERROR: {e}")
-        return False
+        print(f"Log Error: {e}")
+
+def force_audit_log(actor, action, target_sheet, chat_msg, details_input):
+    """Wrapper utama: Langsung return True agar UI terasa instan."""
+    t = threading.Thread(
+        target=_background_log_worker, 
+        args=(actor, action, target_sheet, chat_msg, details_input)
+    )
+    t.start()
+    return True
 
 
 # =========================================================
@@ -1652,58 +1624,47 @@ def admin_secret_configured() -> bool:
 
 
 # =========================================================
-# CONNECTIONS
+# CONNECTIONS (PERSISTENT IN RAM)
 # =========================================================
-KONEKSI_GSHEET_BERHASIL = False
-KONEKSI_DROPBOX_BERHASIL = False
-spreadsheet = None
-dbx = None
+@st.cache_resource(ttl=None, show_spinner=False) # Simpan selamanya di RAM
+def init_connections():
+    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
+    gs_obj = None
+    dbx_obj = None
+    
+    # 1. Setup Google Sheets
+    try:
+        if "gcp_service_account" in st.secrets:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
-# 1) Google Sheets
-try:
-    if "gcp_service_account" in st.secrets:
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        if "private_key" in creds_dict:
-            creds_dict["private_key"] = creds_dict["private_key"].replace(
-                "\\n", "\n")
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(creds)
+            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
+            
+            # Pre-load Audit Sheet agar tidak perlu dicek lagi nanti
+            from audit_service import ensure_audit_sheet
+            try: ensure_audit_sheet(gs_obj)
+            except: pass
+    except Exception as e:
+        print(f"⚠️ GSheet Init Error: {e}")
 
-        creds = Credentials.from_service_account_info(
-            creds_dict, scopes=scopes)
-        gc = gspread.authorize(creds)
-        spreadsheet = gc.open(NAMA_GOOGLE_SHEET)
-        KONEKSI_GSHEET_BERHASIL = True
-        # =========================================================
-        # [BARU] AUTO-CREATE AUDIT SHEET SAAT STARTUP
-        # =========================================================
-        # Tambahkan blok ini agar sheet otomatis dibuat saat aplikasi dibuka
-        from audit_service import ensure_audit_sheet
-        try:
-            ensure_audit_sheet(spreadsheet)
-            # print("Audit sheet ready.") # Opsional untuk debug console
-        except Exception as e:
-            st.error(
-                f"⚠️ Sistem Error: Gagal membuat Sheet Audit otomatis. Pesan: {e}")
-            # Ini akan memunculkan kotak merah di layar jika gagal,
-            # jadi admin langsung tahu ada yang salah.
-    else:
-        st.error("GSheet Error: Kredensial tidak ditemukan.")
-except Exception as e:
-    st.error(f"GSheet Error: {e}")
+    # 2. Setup Dropbox
+    try:
+        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
+            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
+            dbx_obj.users_get_current_account()
+    except Exception as e:
+        print(f"⚠️ Dropbox Init Error: {e}")
+        
+    return gs_obj, dbx_obj
 
-# 2) Dropbox
-try:
-    if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
-        dbx = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
-        dbx.users_get_current_account()
-        KONEKSI_DROPBOX_BERHASIL = True
-except AuthError:
-    st.error("Dropbox Error: Token Autentikasi tidak valid.")
-except Exception as e:
-    st.error(f"Dropbox Error: {e}")
+# Load Global Connections dari Cache
+spreadsheet, dbx = init_connections()
+KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
+KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
     
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
@@ -2063,21 +2024,39 @@ def _build_currency_number_format_rupiah():
 
 
 def maybe_auto_format_sheet(worksheet, force: bool = False):
-    """Throttled formatting: avoid calling heavy formatting too often."""
+    """
+    Throttled formatting: Mencegah pemanggilan fungsi formatting yang berat 
+    terlalu sering untuk menghemat kuota API dan menjaga performa.
+    """
     try:
+        # 1. Validasi keberadaan worksheet
         if worksheet is None:
             return
+            
+        # 2. Inisialisasi penyimpanan waktu terakhir format di session state
         if "_fmt_sheet_last" not in st.session_state:
             st.session_state["_fmt_sheet_last"] = {}
 
         now = time.time()
+        
+        # 3. Identifikasi sheet menggunakan ID unik (atau 'unknown')
+        # gspread worksheet object memiliki atribut 'id'
         key = str(getattr(worksheet, "id", "unknown"))
+        
+        # Ambil waktu terakhir sheet ini diformat
         last = float(st.session_state["_fmt_sheet_last"].get(key, 0))
+        
+        # 4. Cek apakah harus menjalankan auto_format
+        # Dijalankan jika: dipaksa (force=True) ATAU selisih waktu > batas throttle
         if force or (now - last) > FORMAT_THROTTLE_SECONDS:
             auto_format_sheet(worksheet)
+            
+            # Update timestamp terakhir kali berhasil format
             st.session_state["_fmt_sheet_last"][key] = now
+            
     except Exception:
-        # Never break app due to formatting.
+        # Fitur pengaman: Error pada formatting tidak boleh membuat 
+        # seluruh aplikasi crash/berhenti.
         pass
 
 
@@ -2482,32 +2461,37 @@ def load_checklist(sheet_name, columns):
 def save_checklist(sheet_name, df, columns):
     try:
         ws = spreadsheet.worksheet(sheet_name)
-        ensure_headers(ws, columns)
-
-        ws.clear()
-
-        rows_needed = len(df) + 1
-        if ws.row_count < rows_needed:
-            ws.resize(rows=rows_needed)
-
+        # Tidak perlu ensure_headers setiap saat jika struktur stabil
+        
+        # Siapkan data
         df_save = df.copy().fillna("")
-        for c in columns:
-            if c not in df_save.columns:
-                df_save[c] = ""
-
+        for c in columns: # Pastikan kolom lengkap
+            if c not in df_save.columns: df_save[c] = ""
+        
+        # Konversi boolean ke string explicit
         if "Status" in df_save.columns:
-            df_save["Status"] = df_save["Status"].apply(
-                lambda x: "TRUE" if bool(x) else "FALSE")
+            df_save["Status"] = df_save["Status"].apply(lambda x: "TRUE" if x is True or str(x).upper()=='TRUE' else "FALSE")
 
-        df_save = df_save[columns].astype(str)
-        data_to_save = [df_save.columns.values.tolist()] + \
-            df_save.values.tolist()
+        # Gabungkan Header + Data
+        data_body = [columns] + df_save.astype(str).values.tolist()
+        
+        # UPDATE CERDAS: Hanya update area yang diperlukan (A1 sampai Z_sekian)
+        num_rows = len(data_body)
+        num_cols = len(columns)
+        range_sq = f"A1:{gspread.utils.rowcol_to_a1(num_rows, num_cols)}"
+        
+        ws.update(range_name=range_sq, values=data_body, value_input_option="USER_ENTERED")
+        
+        # Hapus sisa baris kosong di bawah (Cleanup) sesekali saja
+        if ws.row_count > num_rows + 50:
+             ws.resize(rows=num_rows + 10)
 
-        ws.update(range_name="A1", values=data_to_save,
-                  value_input_option="USER_ENTERED")
-        # maybe_auto_format_sheet(ws)
+        # Matikan auto-format agar simpan instan (< 1 detik)
+        # maybe_auto_format_sheet(ws) 
+        
         return True
-    except Exception:
+    except Exception as e:
+        print(f"Save Error: {e}")
         return False
 
 
@@ -4149,12 +4133,27 @@ def render_payment_mobile():
     st.markdown("### 💳 Pembayaran (Full Mobile)")
     
     # =========================================================
-    # 1. FORM INPUT BARU
+    # 1. INITIALIZATION & REFRESH SYSTEM (Integrasi Kode Kedua)
+    # =========================================================
+    if "buffer_pay_data" not in st.session_state:
+        with st.spinner("Memuat data dari server..."):
+            # Load awal dari GSheet -> Masuk ke RAM (Session State)
+            st.session_state["buffer_pay_data"] = load_pembayaran_dp()
+
+    # Tombol Refresh untuk menarik data terbaru dari Google Sheets
+    if st.button("🔄 Refresh Data Server", use_container_width=True):
+        st.cache_data.clear()
+        st.session_state["buffer_pay_data"] = load_pembayaran_dp()
+        st.success("Data diperbarui dari server!")
+        time.sleep(0.5)
+        st.rerun()
+
+    # =========================================================
+    # 2. FORM INPUT BARU
     # =========================================================
     with st.expander("➕ Input Pembayaran Baru", expanded=False):
         with st.form("mob_form_pay"):
             p_group = st.text_input("Group (Opsional)")
-            # Menggunakan daftar staf terbaru agar konsisten dengan Config_Staf
             p_marketing = st.selectbox("Marketing", get_daftar_staf_terbaru())
             p_nominal = st.text_input("Nominal (Rp)", placeholder="Contoh: 15.000.000 atau 15jt")
             p_jenis = st.selectbox("Jenis", ["Down Payment (DP)", "Termin", "Pelunasan"])
@@ -4170,7 +4169,9 @@ def render_payment_mobile():
                     )
                     if res:
                         st.success(msg)
+                        # Update Buffer RAM agar data baru langsung muncul setelah rerun
                         st.cache_data.clear()
+                        st.session_state["buffer_pay_data"] = load_pembayaran_dp()
                         time.sleep(1)
                         st.rerun()
                     else:
@@ -4179,9 +4180,10 @@ def render_payment_mobile():
     st.divider()
 
     # =========================================================
-    # 2. LOAD DATA & SISTEM ALERT
+    # 3. LOAD DATA DARI BUFFER & SISTEM ALERT
     # =========================================================
-    df_pay = load_pembayaran_dp()
+    # Gunakan data dari RAM (Session State)
+    df_pay = st.session_state["buffer_pay_data"]
 
     if not df_pay.empty:
         # Sistem Peringatan (Overdue & Due Soon)
@@ -4192,15 +4194,18 @@ def render_payment_mobile():
             st.warning(f"⚠️ **{len(due_soon)} Jatuh Tempo Dekat.** Batas bayar dalam 3 hari ke depan.")
 
         # =========================================================
-        # 3. EDITOR DATA (Audit Log Otomatis)
+        # 4. EDITOR DATA (Audit Log & Dynamic Cleaning)
         # =========================================================
         st.markdown("#### 📋 Edit Data & Cek Status")
         st.caption("Ubah status 'Lunas' atau 'Jatuh Tempo' langsung di tabel bawah ini.")
 
-        # Formatting Rupiah untuk tampilan editor (hanya visual)
-        df_view = payment_df_for_display(df_pay)
+        # Bersihkan tipe data secara dinamis sebelum masuk ke editor (Integrasi Kode Kedua)
+        df_editor_source = clean_df_types_dynamically(df_pay)
         
-        # Sesuai Code Kedua: Batasi kolom yang boleh diubah staf via HP
+        # Sesuai Code Pertama: Batasi kolom yang boleh diubah staf via HP
+        # Kita gunakan display wrapper untuk tampilan rupiah yang cantik
+        df_view = payment_df_for_display(df_editor_source)
+        
         editable_cols = [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR]
         disabled_cols = [c for c in df_view.columns if c not in editable_cols]
 
@@ -4216,20 +4221,20 @@ def render_payment_mobile():
             disabled=disabled_cols,
             hide_index=True,
             use_container_width=True,
-            key="editor_pay_mobile_final"
+            key="smart_payment_editor_mobile_v3"
         )
 
-        # Tombol Simpan Perubahan dengan Logic Deteksi Perubahan (Diff)
+        # Tombol Simpan Perubahan
         if st.button("💾 Simpan Perubahan Data", type="primary", use_container_width=True):
             with st.spinner("Memproses perubahan & mencatat audit log..."):
-                # Actor diambil dari sesi login (Staff/Admin)
                 actor_name = st.session_state.get("user_name", "Mobile User")
                 
-                # Membandingkan data lama vs baru untuk membuat catatan log otomatis
-                # Menggunakan helper apply_audit_payments_changes dari migrasi sebelumnya
+                # Proses deteksi perubahan
                 final_df = apply_audit_payments_changes(df_pay, edited_pay_mob, actor=actor_name)
                 
                 if save_pembayaran_dp(final_df):
+                    # Update RAM lokal agar UI langsung sinkron (Integrasi Kode Kedua)
+                    st.session_state["buffer_pay_data"] = final_df
                     st.success("✅ Perubahan database berhasil disimpan!")
                     st.cache_data.clear()
                     time.sleep(1)
@@ -4240,13 +4245,12 @@ def render_payment_mobile():
         st.divider()
 
         # =========================================================
-        # 4. FITUR UPLOAD BUKTI SUSULAN
+        # 5. FITUR UPLOAD BUKTI SUSULAN
         # =========================================================
         with st.expander("📎 Upload Bukti (Susulan)", expanded=False):
             st.caption("Gunakan ini untuk menambah/mengganti foto bukti transfer.")
             df_pay_reset = df_pay.reset_index(drop=True)
             
-            # Membuat list pilihan data agar user tidak salah pilih baris
             options = [
                 f"{i+1}. {r[COL_MARKETING]} | {r[COL_GROUP]} ({format_rupiah_display(r[COL_NOMINAL_BAYAR])})" 
                 for i, r in df_pay_reset.iterrows()
@@ -4265,6 +4269,8 @@ def render_payment_mobile():
                     ok, msg = update_bukti_pembayaran_by_index(sel_idx, file_susulan, marketing_name, actor=actor_now)
                     if ok:
                         st.success("✅ Bukti berhasil di-update!")
+                        # Refresh buffer setelah upload file
+                        st.session_state["buffer_pay_data"] = load_pembayaran_dp()
                         st.cache_data.clear()
                         time.sleep(1)
                         st.rerun()
