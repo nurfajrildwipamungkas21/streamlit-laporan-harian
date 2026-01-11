@@ -3956,16 +3956,28 @@ def render_kpi_mobile():
     with tab2:
         st.caption("Target Individu")
         staff = get_daftar_staf_terbaru()
-        filter_nama = st.selectbox(
-            "Filter Nama:", staff, key="mob_indiv_filter")
+        filter_nama = st.selectbox("Filter Nama:", staff, key="mob_indiv_filter")
 
-        df_indiv_all = load_checklist(
-            SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
+        df_indiv_all = load_checklist(SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS)
         df_user = df_indiv_all[df_indiv_all["Nama"] == filter_nama]
 
         if not df_user.empty:
-            edited_indiv = render_hybrid_table(
-                df_user, f"mob_indiv_{filter_nama}", "Target")
+            # --- TAMBAHKAN LOGIKA PROGRES DI SINI ---
+            total_target = len(df_user)
+            # Menghitung jumlah 'TRUE' pada kolom Status
+            jumlah_selesai = df_user["Status"].sum() 
+            
+            # Hitung persentase
+            persentase = (jumlah_selesai / total_target) if total_target > 0 else 0
+            
+            # Tampilkan Progress Bar yang Estetik
+            st.markdown(f"### 📈 Progres Kerja: {int(persentase * 100)}%")
+            st.progress(persentase)
+            st.write(f"Selesai: **{jumlah_selesai}** dari **{total_target}** tugas.")
+            st.divider()
+            # --- END LOGIKA PROGRES ---
+
+            edited_indiv = render_hybrid_table(df_user, f"mob_indiv_{filter_nama}", "Target")
 
             if st.button(f"💾 Simpan ({filter_nama})", use_container_width=True, key="mob_save_indiv"):
                 df_merged = df_indiv_all.copy()
