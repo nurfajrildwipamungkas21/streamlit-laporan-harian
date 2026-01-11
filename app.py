@@ -398,7 +398,7 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
         [f"{k}: {v}" for k, v in diff_log.items()]) if diff_log else "Re-save data."
 
     force_audit_log(actor=requestor, action="â³ PENDING", target_sheet=target_sheet,
-                    chat_msg=f"ðŸ™‹â€â™‚ï¸ [ADMIN]: {reason}", details_input=diff_str)
+                    chat_msg=f"🏠™‹â€â™‚ï¸ [ADMIN]: {reason}", details_input=diff_str)
     return True, "Permintaan terkirim!"
 
 
@@ -513,7 +513,7 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
     # --- 5. Format Chat & Catat Log (Revisi dari Code Kedua) ---
 
     # Format Chat Admin agar lebih interaktif di UI
-    final_chat = f"ðŸ™‹â€â™‚ï¸ [ADMIN]: {reason}" if reason else "ðŸ™‹â€â™‚ï¸ [ADMIN]: Request Update Data."
+    final_chat = f"🏠™‹â€â™‚ï¸ [ADMIN]: {reason}" if reason else "🏠™‹â€â™‚ï¸ [ADMIN]: Request Update Data."
 
     # Panggil fungsi logging yang baru
     force_audit_log(
@@ -655,7 +655,7 @@ except ImportError:
 APP_TITLE = "Sales & Marketing Action Center"
 st.set_page_config(
     page_title=APP_TITLE,
-    page_icon="ðŸš€",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -719,7 +719,7 @@ def generate_otp():
 
 def login_page():
     st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center;'>ðŸ” Access Portal</h1>",
+    st.markdown("<h1 style='text-align: center;'>🏠” Access Portal</h1>",
                 unsafe_allow_html=True)
     st.markdown(
         f"<p style='text-align: center;'>{APP_TITLE}</p>", unsafe_allow_html=True)
@@ -728,11 +728,11 @@ def login_page():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         # MEMBUAT TABS: Staff (Langsung) vs Admin (OTP)
-        tab_staff, tab_admin = st.tabs(["ðŸš€ Akses Staff", "ðŸ›¡ï¸ Login Admin"])
+        tab_staff, tab_admin = st.tabs(["🚀 Akses Staff", "🏠›¡ï¸ Login Admin"])
 
         # --- TAB 1: AKSES STAFF (LANGSUNG) ---
         with tab_staff:
-            st.markdown("### ðŸ‘‹ Halo, Team!")
+            st.markdown("### 🏠‘‹ Halo, Team!")
             st.info("Klik tombol di bawah untuk masuk dan mulai membuat laporan.")
 
             if st.button("Masuk Aplikasi (Staff)", type="primary", use_container_width=True):
@@ -962,7 +962,7 @@ except ImportError:
 APP_TITLE = "Sales & Marketing Action Center"
 st.set_page_config(
     page_title=APP_TITLE,
-    page_icon="ðŸš€",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -3019,7 +3019,7 @@ def render_hybrid_table(df_data, unique_key, main_text_col):
 
 
 def render_laporan_harian_mobile():
-    st.markdown("## ðŸ“ Laporan Harian")
+    st.markdown("## 🏠“ Laporan Harian")
 
     # tombol balik
     if st.button("â¬…ï¸ Kembali ke Beranda", use_container_width=True):
@@ -3032,21 +3032,21 @@ def render_laporan_harian_mobile():
 
     pending_msg = get_reminder_pending(nama_pelapor)
     if pending_msg:
-        st.warning(f"ðŸ”” Pending terakhir: **{pending_msg}**")
+        st.warning(f"🏠”” Pending terakhir: **{pending_msg}**")
 
     tab1, tab2, tab3, tab4 = st.tabs(
-        ["ðŸ“Œ Aktivitas", "ðŸ Kesimpulan", "ðŸ“‡ Kontak", "âœ… Submit"])
+        ["🏠“Œ Aktivitas", "🏠 Kesimpulan", "🏠“‡ Kontak", "âœ… Submit"])
 
     # ===== TAB 1: Aktivitas =====
     with tab1:
         kategori_aktivitas = st.radio(
             "Jenis Aktivitas",
-            ["ðŸš— Sales (Kunjungan Lapangan)", "ðŸ’» Digital Marketing / Konten / Ads",
-             "ðŸ“ž Telesales / Follow Up", "ðŸ¢ Lainnya"],
+            ["🏠š— Sales (Kunjungan Lapangan)", "🏠’» Digital Marketing / Konten / Ads",
+             "🏠“ž Telesales / Follow Up", "🏠¢ Lainnya"],
             horizontal=False,
             key="m_kategori"
         )
-        is_kunjungan = kategori_aktivitas.startswith("ðŸš—")
+        is_kunjungan = kategori_aktivitas.startswith("🏠š—")
 
         if "Digital Marketing" in kategori_aktivitas:
             st.text_input("Link Konten / Ads / Drive (Opsional)",
@@ -3054,7 +3054,7 @@ def render_laporan_harian_mobile():
 
         if is_kunjungan:
             st.text_input(
-                "ðŸ“ Nama Klien / Lokasi Kunjungan (Wajib)", key="m_lokasi")
+                "🏠“ Nama Klien / Lokasi Kunjungan (Wajib)", key="m_lokasi")
         else:
             st.text_input("Jenis Tugas", value=kategori_aktivitas,
                           disabled=True, key="m_tugas")
@@ -3077,21 +3077,21 @@ def render_laporan_harian_mobile():
 
     # ===== TAB 2: Kesimpulan =====
     with tab2:
-        st.text_area("ðŸ’¡ Kesimpulan hari ini", height=100, key="m_kesimpulan")
-        st.text_area("ðŸš§ Kendala internal", height=90, key="m_kendala")
-        st.text_area("ðŸ§‘â€ðŸ’¼ Kendala klien", height=90, key="m_kendala_klien")
+        st.text_area("🏠’¡ Kesimpulan hari ini", height=100, key="m_kesimpulan")
+        st.text_area("🏠š§ Kendala internal", height=90, key="m_kendala")
+        st.text_area("🏠§‘â€🏠’¼ Kendala klien", height=90, key="m_kendala_klien")
 
     # ===== TAB 3: Kontak =====
     with tab3:
         st.radio(
-            "ðŸ“ˆ Tingkat Interest",
+            "🏠“ˆ Tingkat Interest",
             ["Under 50% (A)", "50-75% (B)", "75%-100%"],
             horizontal=False,
             key="interest_persen"
         )
-        st.text_input("ðŸ‘¤ Nama Klien", key="nama_klien_input")
-        st.text_input("ðŸ“ž No HP/WA Klien", key="kontak_klien_input")
-        st.text_input("ðŸ“Œ Next Plan / Pending (Reminder Besok)",
+        st.text_input("🏠‘¤ Nama Klien", key="nama_klien_input")
+        st.text_input("🏠“ž No HP/WA Klien", key="kontak_klien_input")
+        st.text_input("🏠“Œ Next Plan / Pending (Reminder Besok)",
                       key="m_pending")
 
 # ===== TAB 4: Submit =====
@@ -3102,7 +3102,7 @@ def render_laporan_harian_mobile():
 
             # --- 1. SIAPKAN VARIABEL DATA ---
             kategori_aktivitas = st.session_state.get("m_kategori", "")
-            is_kunjungan = str(kategori_aktivitas).startswith("ðŸš—")
+            is_kunjungan = str(kategori_aktivitas).startswith("🏠š—")
             lokasi_input = st.session_state.get(
                 "m_lokasi", "") if is_kunjungan else kategori_aktivitas
             main_deskripsi = st.session_state.get("m_deskripsi", "")
@@ -3130,7 +3130,7 @@ def render_laporan_harian_mobile():
 
             # Tampilkan Bar Awal (0%)
             my_bar = progress_placeholder.progress(
-                0, text="ðŸš€ Memulai proses...")
+                0, text="🚀 Memulai proses...")
 
             try:
                 # Siapkan data timestamp & string lain
@@ -3164,7 +3164,7 @@ def render_laporan_harian_mobile():
                             pct = 1.0
 
                         my_bar.progress(
-                            pct, text=f"ðŸ“¤ Mengupload foto ke-{i+1} dari {jml_foto}...")
+                            pct, text=f"🏠“¤ Mengupload foto ke-{i+1} dari {jml_foto}...")
 
                         # Eksekusi Upload (Berat)
                         url = upload_ke_dropbox(
@@ -3202,7 +3202,7 @@ def render_laporan_harian_mobile():
                     pct_save = 0.95  # Biarkan sisa sedikit untuk efek selesai
 
                 my_bar.progress(
-                    pct_save, text="ðŸ’¾ Menyimpan data ke Database...")
+                    pct_save, text="🏠’¾ Menyimpan data ke Database...")
 
                 # Eksekusi Simpan (Berat)
                 ok = simpan_laporan_harian_batch(rows, nama_pelapor)
@@ -3448,7 +3448,7 @@ def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nom
             if jenis_bayar == "Down Payment (DP)":
                 status_fix = f"â³ DP (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
             elif jenis_bayar == "Cicilan":
-                status_fix = f"ðŸ’³ Cicilan (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
+                status_fix = f"🏠’³ Cicilan (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
             else:
                 status_fix = f"âš ï¸ Belum Lunas (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
 
@@ -3734,7 +3734,7 @@ def render_header():
 <div class="sx-hero-grid">
 <div class="sx-logo-card">{left_html}</div>
 <div class="sx-hero-center">
-<div class="sx-title">ðŸš€ {APP_TITLE}</div>
+<div class="sx-title">🚀 {APP_TITLE}</div>
 <div class="sx-subrow">
 <span>Realtime: {ts_now}</span>
 {pill('GSheet: ON' if g_on else 'GSheet: OFF', g_on)}
@@ -3772,21 +3772,21 @@ def render_section_watermark():
 
 
 def render_home_mobile():
-    st.markdown("## ðŸ§­ Menu Utama")
+    st.markdown("## 🏠§­ Menu Utama")
     st.caption("Pilih fitur seperti shortcut ala aplikasi mobile.")
 
     features = [
-        {"key": "report",  "icon": "ðŸ“", "title": "Laporan Harian",
+        {"key": "report",  "icon": "🏠“", "title": "Laporan Harian",
             "sub": "Input aktivitas + reminder"},
-        {"key": "kpi",     "icon": "ðŸŽ¯", "title": "Target & KPI",
+        {"key": "kpi",     "icon": "🏠Ž¯", "title": "Target & KPI",
             "sub": "Checklist team & individu"},
-        {"key": "closing", "icon": "ðŸ¤", "title": "Closing Deal",
+        {"key": "closing", "icon": "🏠¤", "title": "Closing Deal",
             "sub": "Catat deal + export"},
-        {"key": "payment", "icon": "ðŸ’³", "title": "Pembayaran",
+        {"key": "payment", "icon": "🏠’³", "title": "Pembayaran",
             "sub": "DP/Termin/Pelunasan + jatuh tempo"},
-        {"key": "log",     "icon": "ðŸ“œ", "title": "Global Audit Log",
+        {"key": "log",     "icon": "🏠“œ", "title": "Global Audit Log",
             "sub": "Riwayat perubahan data (Super Admin)"},
-        {"key": "admin",   "icon": "ðŸ”", "title": "Akses Admin",
+        {"key": "admin",   "icon": "🏠”", "title": "Akses Admin",
             "sub": "Dashboard + kontrol (butuh login)"},
     ]
 
@@ -3814,7 +3814,7 @@ if not KONEKSI_DROPBOX_BERHASIL:
 # =========================================================
 # ROUTER NAV (untuk mobile ala "Facebook shortcut")
 # =========================================================
-HOME_NAV = "ðŸ  Beranda"
+HOME_NAV = "🏠  Beranda"
 
 # Update: Menambahkan entry 'presensi' ke dalam Mapping
 NAV_MAP = {
@@ -3863,7 +3863,7 @@ if "is_admin" not in st.session_state:
 
 if "menu_nav" not in st.session_state:
     # Mobile masuk Beranda, Desktop tetap ke Laporan Harian
-    st.session_state["menu_nav"] = HOME_NAV if IS_MOBILE else "ðŸ“ Laporan Harian"
+    st.session_state["menu_nav"] = HOME_NAV if IS_MOBILE else "🏠“ Laporan Harian"
 
 # Sinkronkan kalau URL ada ?nav=...
 nav_from_url = _get_query_nav()
@@ -3875,7 +3875,7 @@ render_header()
 
 # MOBILE: tampilkan Beranda sebagai landing page
 menu_nav = st.session_state.get(
-    "menu_nav", HOME_NAV if IS_MOBILE else "ðŸ“ Laporan Harian")
+    "menu_nav", HOME_NAV if IS_MOBILE else "🏠“ Laporan Harian")
 
 if IS_MOBILE and menu_nav == HOME_NAV:
     render_home_mobile()
@@ -3962,7 +3962,7 @@ with st.sidebar:
 
     with col_p1:
         # Icon default karena OTP tidak ambil foto profil Google
-        st.markdown("ðŸ‘¤")
+        st.markdown("🏠‘¤")
 
     with col_p2:
         st.caption("Login sebagai:")
@@ -3973,7 +3973,7 @@ with st.sidebar:
         st.markdown(f":{role_color}[{role_now.upper()}]")
 
     # Tombol Logout Manual (Reset State)
-    if st.button("ðŸšª Sign Out / Logout", use_container_width=True):
+    if st.button("🏠šª Sign Out / Logout", use_container_width=True):
         # Reset semua variabel sesi yang penting
         st.session_state["logged_in"] = False
         st.session_state["user_email"] = None
@@ -4007,11 +4007,11 @@ with st.sidebar:
     st.divider()
 
 
-menu_nav = st.session_state.get("menu_nav", "ðŸ“ Laporan Harian")
+menu_nav = st.session_state.get("menu_nav", "🏠“ Laporan Harian")
 
 # [MULAI KODE TAMBAHAN: FIX NAVIGASI MOBILE]
 # Ini akan memunculkan tombol Back & Menu Bawah untuk Closing, KPI, Payment, dll.
-if IS_MOBILE and menu_nav != "ðŸ“ Laporan Harian":
+if IS_MOBILE and menu_nav != "🏠“ Laporan Harian":
     # 1. Tombol Kembali ke Beranda
     if st.button("â¬…ï¸ Kembali ke Beranda", use_container_width=True, key="global_mobile_back"):
         set_nav("home")
@@ -4020,12 +4020,12 @@ if IS_MOBILE and menu_nav != "ðŸ“ Laporan Harian":
     # Perbaikan: Menambahkan link nav=log dan merapikan tag HTML
     st.markdown("""
     <div class="mobile-bottom-nav">
-      <a href="?nav=home">ðŸ </a>
-      <a href="?nav=report">ðŸ“</a>
-      <a href="?nav=kpi">ðŸŽ¯</a>
-      <a href="?nav=closing">ðŸ¤</a>
-      <a href="?nav=payment">ðŸ’³</a>
-      <a href="?nav=log">ðŸ“œ</a>
+      <a href="?nav=home">🏠 </a>
+      <a href="?nav=report">🏠“</a>
+      <a href="?nav=kpi">🏠Ž¯</a>
+      <a href="?nav=closing">🏠¤</a>
+      <a href="?nav=payment">🏠’³</a>
+      <a href="?nav=log">🏠“œ</a>
     </div>
     """, unsafe_allow_html=True)
 
@@ -4036,10 +4036,10 @@ if IS_MOBILE and menu_nav != "ðŸ“ Laporan Harian":
 # FUNGSI RENDER MOBILE PER FITUR (BARU)
 # =========================================================
 def render_kpi_mobile():
-    st.markdown("### ðŸŽ¯ Target & KPI (Full Mobile)")
+    st.markdown("### 🏠Ž¯ Target & KPI (Full Mobile)")
 
     # Gunakan Tabs seperti Desktop agar fitur lengkap
-    tab1, tab2, tab3 = st.tabs(["ðŸ† Team", "âš¡ Individu", "âš™ï¸ Admin"])
+    tab1, tab2, tab3 = st.tabs(["🏠† Team", "âš¡ Individu", "âš™ï¸ Admin"])
 
     # --- TAB 1: TEAM ---
     with tab1:
@@ -4051,7 +4051,7 @@ def render_kpi_mobile():
             edited_team = render_hybrid_table(df_team, "mob_team_tbl", "Misi")
 
             # Tombol Simpan
-            if st.button("ðŸ’¾ Simpan Perubahan (Team)", use_container_width=True, key="mob_btn_save_team"):
+            if st.button("🏠’¾ Simpan Perubahan (Team)", use_container_width=True, key="mob_btn_save_team"):
                 actor = get_actor_fallback(default="Admin")
                 final_df = apply_audit_checklist_changes(
                     df_team, edited_team, ["Misi"], actor)
@@ -4062,7 +4062,7 @@ def render_kpi_mobile():
             st.divider()
 
             # 2. Upload Bukti (Fitur Desktop dibawa ke HP)
-            with st.expander("ðŸ“‚ Upload Bukti / Catatan"):
+            with st.expander("🏠“‚ Upload Bukti / Catatan"):
                 sel_misi = st.selectbox(
                     "Pilih Misi", df_team["Misi"].unique(), key="mob_sel_misi")
                 note_misi = st.text_area("Catatan", key="mob_note_misi")
@@ -4099,7 +4099,7 @@ def render_kpi_mobile():
             persentase = (jumlah_selesai / total_target) if total_target > 0 else 0
             
             # Tampilkan Progress Bar yang Estetik
-            st.markdown(f"### ðŸ“ˆ Progres Kerja: {int(persentase * 100)}%")
+            st.markdown(f"### 🏠“ˆ Progres Kerja: {int(persentase * 100)}%")
             st.progress(persentase)
             st.write(f"Selesai: **{jumlah_selesai}** dari **{total_target}** tugas.")
             st.divider()
@@ -4107,7 +4107,7 @@ def render_kpi_mobile():
 
             edited_indiv = render_hybrid_table(df_user, f"mob_indiv_{filter_nama}", "Target")
 
-            if st.button(f"ðŸ’¾ Simpan ({filter_nama})", use_container_width=True, key="mob_save_indiv"):
+            if st.button(f"🏠’¾ Simpan ({filter_nama})", use_container_width=True, key="mob_save_indiv"):
                 df_merged = df_indiv_all.copy()
                 df_merged.update(edited_indiv)
                 final_df = apply_audit_checklist_changes(
@@ -4118,7 +4118,7 @@ def render_kpi_mobile():
                 st.rerun()
 
             # Upload Bukti Individu
-            with st.expander(f"ðŸ“‚ Update Bukti ({filter_nama})"):
+            with st.expander(f"🏠“‚ Update Bukti ({filter_nama})"):
                 pilih_target = st.selectbox(
                     "Target:", df_user["Target"].tolist(), key="mob_sel_indiv")
                 note_target = st.text_area("Catatan", key="mob_note_indiv")
@@ -4167,7 +4167,7 @@ def render_kpi_mobile():
 
 
 def render_closing_mobile():
-    st.markdown("### ðŸ¤ Closing Deal (Full Mobile)")
+    st.markdown("### 🏠¤ Closing Deal (Full Mobile)")
 
     # Form Input Tetap Sama
     with st.expander("âž• Input Deal Baru", expanded=False):
@@ -4191,7 +4191,7 @@ def render_closing_mobile():
                     st.error(msg)
 
     st.divider()
-    st.markdown("#### ðŸ“‹ Riwayat Lengkap & Download")
+    st.markdown("#### 🏠“‹ Riwayat Lengkap & Download")
 
     df_cd = load_closing_deal()
 
@@ -4220,7 +4220,7 @@ def render_closing_mobile():
 
         # 4. Grafik (Jika ada Plotly)
         if HAS_PLOTLY:
-            with st.expander("ðŸ“Š Lihat Grafik Performance"):
+            with st.expander("🏠“Š Lihat Grafik Performance"):
                 try:
                     df_plot = df_cd.copy()
                     df_plot[COL_NILAI_KONTRAK] = df_plot[COL_NILAI_KONTRAK].fillna(
@@ -4235,7 +4235,7 @@ def render_closing_mobile():
 
 
 def render_payment_mobile():
-    st.markdown("### ðŸ’³ Pembayaran (Full Mobile)")
+    st.markdown("### 🏠’³ Pembayaran (Full Mobile)")
     
     # =========================================================
     # 1. FORM INPUT BARU
@@ -4283,7 +4283,7 @@ def render_payment_mobile():
         # =========================================================
         # 3. EDITOR DATA (Audit Log Otomatis)
         # =========================================================
-        st.markdown("#### ðŸ“‹ Edit Data & Cek Status")
+        st.markdown("#### 🏠“‹ Edit Data & Cek Status")
         st.caption("Ubah status 'Lunas' atau 'Jatuh Tempo' langsung di tabel bawah ini.")
 
         # Formatting Rupiah untuk tampilan editor (hanya visual)
@@ -4309,7 +4309,7 @@ def render_payment_mobile():
         )
 
         # Tombol Simpan Perubahan dengan Logic Deteksi Perubahan (Diff)
-        if st.button("ðŸ’¾ Simpan Perubahan Data", type="primary", use_container_width=True):
+        if st.button("🏠’¾ Simpan Perubahan Data", type="primary", use_container_width=True):
             with st.spinner("Memproses perubahan & mencatat audit log..."):
                 # Actor diambil dari sesi login (Staff/Admin)
                 actor_name = st.session_state.get("user_name", "Mobile User")
@@ -4331,7 +4331,7 @@ def render_payment_mobile():
         # =========================================================
         # 4. FITUR UPLOAD BUKTI SUSULAN
         # =========================================================
-        with st.expander("ðŸ“Ž Upload Bukti (Susulan)", expanded=False):
+        with st.expander("🏠“Ž Upload Bukti (Susulan)", expanded=False):
             st.caption("Gunakan ini untuk menambah/mengganti foto bukti transfer.")
             df_pay_reset = df_pay.reset_index(drop=True)
             
@@ -4366,7 +4366,7 @@ def render_payment_mobile():
 
 
 def render_admin_mobile():
-    st.markdown("### ðŸ” Admin Dashboard (Full Mobile)")
+    st.markdown("### 🏠” Admin Dashboard (Full Mobile)")
 
     # 1. Cek Login
     if not st.session_state["is_admin"]:
@@ -4381,7 +4381,7 @@ def render_admin_mobile():
         return  # Stop disini kalau belum login
 
     # 2. Jika Sudah Login -> Tampilkan Dashboard Penuh
-    if st.button("ðŸ”“ Logout", use_container_width=True, key="mob_adm_logout"):
+    if st.button("🏠”“ Logout", use_container_width=True, key="mob_adm_logout"):
         st.session_state["is_admin"] = False
         st.rerun()
 
@@ -4401,7 +4401,7 @@ def render_admin_mobile():
             pass
 
 # TABS NAVIGATION MOBILE
-    tab_prod, tab_leads, tab_data, tab_cfg = st.tabs(["ðŸ“ˆ Grafik", "ðŸ§² Leads", "ðŸ“¦ Data", "âš™ï¸ Config"])
+    tab_prod, tab_leads, tab_data, tab_cfg = st.tabs(["🏠“ˆ Grafik", "🏠§² Leads", "🏠“¦ Data", "âš™ï¸ Config"])
 
     with tab_prod:
         st.caption("Analisa Kinerja")
@@ -4415,7 +4415,7 @@ def render_admin_mobile():
             st.bar_chart(report_counts)
 
             st.divider()
-            st.markdown("#### ðŸ¤– AI Management Insight")
+            st.markdown("#### 🏠¤– AI Management Insight")
             
             with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
                 try:
@@ -4488,7 +4488,7 @@ def render_admin_mobile():
         st.dataframe(df_all, use_container_width=True)
 
     with tab_cfg:
-        st.markdown("#### ðŸ‘¥ Kelola Personel (Staf)")
+        st.markdown("#### 🏠‘¥ Kelola Personel (Staf)")
         with st.form("mob_add_staff"):
             st.markdown("âž• **Tambah Staf Baru**")
             new_st = st.text_input("Nama Staf", placeholder="Ketik nama baru...")
@@ -4505,12 +4505,12 @@ def render_admin_mobile():
                 else:
                     st.error("Nama tidak boleh kosong.")
         st.markdown("---") 
-        st.markdown("#### ðŸ—‘ï¸ Hapus Staf")
+        st.markdown("#### 🏠—‘ï¸ Hapus Staf")
         st.caption("Menghapus nama dari daftar pelapor.")
         staff_now = get_daftar_staf_terbaru()
         hapus_select = st.selectbox("Pilih staf yang akan dihapus:", ["-- Pilih Staf --"] + staff_now, key="mob_del_st")
         confirm_del = st.checkbox("Konfirmasi penghapusan permanen", key="mob_del_confirm")
-        if st.button("ðŸ”¥ Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
+        if st.button("🏠”¥ Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
             if hapus_select == "-- Pilih Staf --":
                 st.error("Pilih nama staf terlebih dahulu!")
             elif not confirm_del:
@@ -4528,7 +4528,7 @@ def render_admin_mobile():
                         st.error(m)
 
             # --- SUB-BAGIAN: HAPUS STAF ---
-            st.markdown("#### ðŸ—‘ï¸ Hapus Staf")
+            st.markdown("#### 🏠—‘ï¸ Hapus Staf")
             st.caption("Menghapus nama dari daftar pelapor.")
 
             staff_now = get_daftar_staf_terbaru()
@@ -4538,7 +4538,7 @@ def render_admin_mobile():
             confirm_del = st.checkbox(
                 "Konfirmasi penghapusan permanen", key="mob_del_confirm")
 
-            if st.button("ðŸ”¥ Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
+            if st.button("🏠”¥ Konfirmasi Hapus", type="primary", use_container_width=True, key="mob_btn_del"):
                 if hapus_select == "-- Pilih Staf --":
                     st.error("Pilih nama staf terlebih dahulu!")
                 elif not confirm_del:
@@ -4564,12 +4564,12 @@ def render_admin_mobile():
 
 
 def render_audit_mobile():
-    st.markdown("### ðŸ“œ Global Audit Log (Mobile)")
+    st.markdown("### 🏠“œ Global Audit Log (Mobile)")
     st.caption("Rekaman jejak perubahan data admin.")
 
     from audit_service import load_audit_log
 
-    if st.button("ðŸ”„ Refresh", use_container_width=True, key="mob_refresh_log"):
+    if st.button("🏠”„ Refresh", use_container_width=True, key="mob_refresh_log"):
         st.cache_data.clear()
         st.rerun()
 
@@ -4586,19 +4586,19 @@ def render_audit_mobile():
         except:
             pass
 
-        st.markdown("#### ðŸ•’ 10 Aktivitas Terakhir")
+        st.markdown("#### 🏠•’ 10 Aktivitas Terakhir")
 
         for i, row in df_log.head(10).iterrows():
             with st.container(border=True):
                 # Gunakan .get() agar aman jika kolom tetap tidak terdeteksi
                 st.markdown(f"**{row.get('User', '-')}**")
                 st.caption(
-                    f"ðŸ“… {row.get('Waktu', '-')} | Status: {row.get('Status', '-')}")
+                    f"🏠“… {row.get('Waktu', '-')} | Status: {row.get('Status', '-')}")
                 st.text(f"Data: {row.get('Target Data', '-')}")
 
                 chat_val = row.get('Chat & Catatan', '-')
                 if chat_val not in ["-", ""]:
-                    st.info(f"ðŸ“ {chat_val}")
+                    st.info(f"🏠“ {chat_val}")
 
                 with st.expander("Lihat Detail"):
                     st.code(row.get('Detail Perubahan', '-'), language="text")
@@ -4615,8 +4615,8 @@ def render_audit_mobile():
 # =========================================================
 
 # --- 1. HALAMAN PRESENSI (REAL-TIME & NO-EDIT) ---
-if menu_nav == "ðŸ“… Presensi":
-    st.markdown("## ðŸ“… Presensi Kehadiran Real-Time")
+if menu_nav == "🏠“… Presensi":
+    st.markdown("## 🏠“… Presensi Kehadiran Real-Time")
     st.caption(
         "Silakan pilih nama Anda. Waktu, hari, dan tanggal akan tercatat otomatis oleh sistem (WIB).")
 
@@ -4627,7 +4627,7 @@ if menu_nav == "ðŸ“… Presensi":
 
         waktu_skrg = datetime.now(TZ_JKT)
         st.info(
-            f"ðŸ•’ Waktu Sistem Saat Ini: **{waktu_skrg.strftime('%A, %d %B %Y - %H:%M:%S')} WIB**")
+            f"🏠•’ Waktu Sistem Saat Ini: **{waktu_skrg.strftime('%A, %d %B %Y - %H:%M:%S')} WIB**")
 
         if st.button("âœ… Kirim Presensi Sekarang", type="primary", use_container_width=True):
             if pilih_nama == "-- Pilih Nama --":
@@ -4650,7 +4650,7 @@ if menu_nav == "ðŸ“… Presensi":
                         st.warning(msg)
 
     st.divider()
-    st.markdown("### ðŸ“‹ Kehadiran Hari Ini")
+    st.markdown("### 🏠“‹ Kehadiran Hari Ini")
     ws_p = init_presensi_db()
     if ws_p:
         data_p = ws_p.get_all_records()
@@ -4667,11 +4667,11 @@ if menu_nav == "ðŸ“… Presensi":
                 st.info("Belum ada data kehadiran hari ini.")
 
 # --- 2. HALAMAN LAPORAN HARIAN ---
-elif menu_nav == "ðŸ“ Laporan Harian":
+elif menu_nav == "🏠“ Laporan Harian":
     if IS_MOBILE:
         render_laporan_harian_mobile()
     else:
-        st.markdown("## ðŸ“ Laporan Kegiatan Harian")
+        st.markdown("## 🏠“ Laporan Kegiatan Harian")
         c1, c2 = st.columns([1, 2])
         with c1:
             pelapor = st.selectbox(
@@ -4679,27 +4679,27 @@ elif menu_nav == "ðŸ“ Laporan Harian":
         with c2:
             pending = get_reminder_pending(pelapor)
             if pending:
-                st.warning(f"ðŸ”” Reminder Pending: {pending}")
+                st.warning(f"🏠”” Reminder Pending: {pending}")
 
         with st.container(border=True):
             with st.form("daily_report_desk", clear_on_submit=False):
-                st.markdown("### ðŸ“Œ Detail Aktivitas")
+                st.markdown("### 🏠“Œ Detail Aktivitas")
                 col_kiri, col_kanan = st.columns(2)
                 with col_kiri:
                     kategori = st.radio(
-                        "Kategori", ["ðŸš— Sales Lapangan", "ðŸ’» Digital/Kantor", "ðŸ“ž Telesales", "ðŸ¢ Lainnya"])
+                        "Kategori", ["🏠š— Sales Lapangan", "🏠’» Digital/Kantor", "🏠“ž Telesales", "🏠¢ Lainnya"])
                     lokasi = st.text_input(
                         "Lokasi / Nama Klien / Jenis Tugas", placeholder="Wajib diisi...")
                     deskripsi = st.text_area("Deskripsi Detail", height=150)
                     foto = st.file_uploader(
                         "Upload Bukti", accept_multiple_files=True, disabled=not KONEKSI_DROPBOX_BERHASIL)
                 with col_kanan:
-                    st.markdown("### ðŸ“Š Hasil & Follow Up")
+                    st.markdown("### 🏠“Š Hasil & Follow Up")
                     kesimpulan = st.text_area("Kesimpulan / Hasil", height=80)
                     kendala = st.text_area(
                         "Kendala Internal/Lapangan", height=60)
                     next_plan = st.text_input("Next Plan / Pending (Reminder)")
-                    st.markdown("### ðŸ‘¤ Data Klien")
+                    st.markdown("### 🏠‘¤ Data Klien")
                     cl_nama = st.text_input("Nama Klien")
                     cl_kontak = st.text_input("No HP/WA")
                     cl_interest = st.selectbox(
@@ -4727,18 +4727,18 @@ elif menu_nav == "ðŸ“ Laporan Harian":
                                 st.error("Gagal simpan ke GSheet.")
 
 # --- 3. TARGET & KPI ---
-elif menu_nav == "ðŸŽ¯ Target & KPI":
+elif menu_nav == "🏠Ž¯ Target & KPI":
     if IS_MOBILE:
         render_kpi_mobile()
     else:
-        st.markdown("## ðŸŽ¯ Manajemen Target & KPI")
+        st.markdown("## 🏠Ž¯ Manajemen Target & KPI")
         tab1, tab2, tab3 = st.tabs(
-            ["ðŸ† Target Team", "âš¡ Target Individu", "âš™ï¸ Admin Setup"])
+            ["🏠† Target Team", "âš¡ Target Individu", "âš™ï¸ Admin Setup"])
         with tab1:
             df_team = load_checklist(SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS)
             if not df_team.empty:
                 edited_team = render_hybrid_table(df_team, "team_desk", "Misi")
-                if st.button("ðŸ’¾ Simpan Perubahan Team"):
+                if st.button("🏠’¾ Simpan Perubahan Team"):
                     final_df = apply_audit_checklist_changes(
                         df_team, edited_team, ["Misi"], get_actor_fallback())
                     save_checklist(SHEET_TARGET_TEAM, final_df,
@@ -4765,7 +4765,7 @@ elif menu_nav == "ðŸŽ¯ Target & KPI":
                 persentase = jumlah_selesai / total_target if total_target > 0 else 0
                 
                 # Tampilan Visual Progres
-                st.markdown(f"### ðŸ“ˆ Progres {pilih_staf}: {int(persentase * 100)}%")
+                st.markdown(f"### 🏠“ˆ Progres {pilih_staf}: {int(persentase * 100)}%")
                 st.progress(persentase)
                 st.write(f"âœ… **{jumlah_selesai}** selesai dari **{total_target}** target.")
                 st.divider()
@@ -4775,7 +4775,7 @@ elif menu_nav == "ðŸŽ¯ Target & KPI":
                 edited_indiv = render_hybrid_table(
                     df_user, f"indiv_{pilih_staf}", "Target")
                 
-                if st.button(f"ðŸ’¾ Simpan Target {pilih_staf}", use_container_width=True):
+                if st.button(f"🏠’¾ Simpan Target {pilih_staf}", use_container_width=True):
                     df_merged = df_indiv_all.copy()
                     
                     # Update data lama dengan data hasil editan tabel
@@ -4816,11 +4816,11 @@ elif menu_nav == "ðŸŽ¯ Target & KPI":
                         st.rerun()
 
 # --- 4. CLOSING DEAL ---
-elif menu_nav == "ðŸ¤ Closing Deal":
+elif menu_nav == "🏠¤ Closing Deal":
     if IS_MOBILE:
         render_closing_mobile()
     else:
-        st.markdown("## ðŸ¤ Closing Deal")
+        st.markdown("## 🏠¤ Closing Deal")
         with st.container(border=True):
             with st.form("form_closing_desk_full", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
@@ -4846,11 +4846,11 @@ elif menu_nav == "ðŸ¤ Closing Deal":
             st.dataframe(df_cd, use_container_width=True, hide_index=True)
 
 # --- 5. PEMBAYARAN ---
-elif menu_nav == "ðŸ’³ Pembayaran":
+elif menu_nav == "🏠’³ Pembayaran":
     if IS_MOBILE:
         render_payment_mobile()
     else:
-        st.markdown("## ðŸ’³ Smart Payment Action Center")
+        st.markdown("## 🏠’³ Smart Payment Action Center")
         st.caption("Manajemen pembayaran terpadu dengan kalkulator sisa tagihan dan pelacakan cicilan.")
 
         # =========================================================
@@ -4899,7 +4899,7 @@ elif menu_nav == "ðŸ’³ Pembayaran":
         # =========================================================
         # 2. SEKSI MONITORING: ALERT & DATA EDITOR DINAMIS
         # =========================================================
-        st.markdown("### ðŸ“‹ Monitoring & Riwayat Pembayaran")
+        st.markdown("### 🏠“‹ Monitoring & Riwayat Pembayaran")
         df_pay = load_pembayaran_dp()
 
         if df_pay.empty:
@@ -4947,7 +4947,7 @@ elif menu_nav == "ðŸ’³ Pembayaran":
             )
 
             # --- 5. LOGIKA SIMPAN PERUBAHAN ---
-            if st.button("ðŸ’¾ Simpan Perubahan Riwayat", use_container_width=True):
+            if st.button("🏠’¾ Simpan Perubahan Riwayat", use_container_width=True):
                 with st.spinner("Memproses audit log dan menyimpan data..."):
                     current_user = st.session_state.get("user_name", "Admin Desktop")
                     
@@ -4967,7 +4967,7 @@ elif menu_nav == "ðŸ’³ Pembayaran":
             # =========================================================
             # 3. FITUR TAMBAHAN: UPDATE FOTO BUKTI SUSULAN
             # =========================================================
-            with st.expander("ðŸ“Ž Update Bukti Pembayaran (Susulan)", expanded=False):
+            with st.expander("🏠“Ž Update Bukti Pembayaran (Susulan)", expanded=False):
                 st.info("Gunakan fitur ini jika ingin menambahkan atau mengganti foto bukti transfer tanpa mengubah data lainnya.")
                 df_pay_reset = df_pay.reset_index(drop=True)
                 
@@ -4997,12 +4997,12 @@ elif menu_nav == "ðŸ’³ Pembayaran":
 
         render_section_watermark()
 
-elif menu_nav == "ðŸ“œ Global Audit Log":
+elif menu_nav == "🏠“œ Global Audit Log":
     if IS_MOBILE:
         render_audit_mobile()
     else:
         # --- LOGIC DESKTOP ---
-        st.markdown("## ðŸ“œ Global Audit Log")
+        st.markdown("## 🏠“œ Global Audit Log")
         st.caption(
             "Rekaman jejak perubahan data. Transparansi data Admin & Manager.")
 
@@ -5010,7 +5010,7 @@ elif menu_nav == "ðŸ“œ Global Audit Log":
         from audit_service import load_audit_log
 
         # Tombol Refresh
-        if st.button("ðŸ”„ Refresh Log", use_container_width=True):
+        if st.button("🏠”„ Refresh Log", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
@@ -5037,7 +5037,7 @@ elif menu_nav == "ðŸ“œ Global Audit Log":
                 pass
 
             # --- FITUR FILTERING ---
-            with st.expander("ðŸ” Filter Pencarian"):
+            with st.expander("🏠” Filter Pencarian"):
                 c1, c2 = st.columns(2)
                 # Ambil list unik untuk filter
                 all_users = df_log["User"].unique().tolist()
@@ -5067,14 +5067,14 @@ elif menu_nav == "ðŸ“œ Global Audit Log":
                 hide_index=True,
                 column_config={
                     "Waktu": st.column_config.DatetimeColumn(
-                        "ðŸ•’ Waktu",
+                        "🏠•’ Waktu",
                         format="D MMM YYYY, HH:mm",
                         width="small"
                     ),
                     "Target Data": st.column_config.TextColumn("Data"),
-                    "Chat & Catatan": st.column_config.TextColumn("ðŸ’¬ Catatan / Chat", width="medium"),
+                    "Chat & Catatan": st.column_config.TextColumn("🏠’¬ Catatan / Chat", width="medium"),
                     "Detail Perubahan": st.column_config.TextColumn(
-                        "ðŸ“„ Detail Perubahan",
+                        "🏠“„ Detail Perubahan",
                         width="large",
                         help="Menampilkan detail perubahan data"
                     )
@@ -5097,19 +5097,19 @@ elif menu_nav == "ðŸ“œ Global Audit Log":
         # Watermark
         render_section_watermark()
 
-elif menu_nav == "ðŸ“Š Dashboard Admin":
+elif menu_nav == "🏠“Š Dashboard Admin":
     if IS_MOBILE:
         render_admin_mobile()
     else:
         # --- LOGIC DESKTOP (PC/LAPTOP) ---
-        st.markdown("## ðŸ“Š Dashboard Admin & Analytics")
+        st.markdown("## 🏠“Š Dashboard Admin & Analytics")
 
         # 1. Verifikasi Akses Admin
         if not st.session_state.get("is_admin"):
             col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
             with col_l2:
                 with st.container(border=True):
-                    st.markdown("### ðŸ” Login Dashboard")
+                    st.markdown("### 🏠” Login Dashboard")
                     pwd_input = st.text_input(
                         "Masukkan Password Admin:", type="password", key="pwd_admin_desk")
                     if st.button("Masuk Ke Dashboard", use_container_width=True, type="primary"):
@@ -5142,16 +5142,16 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # Susun Label Tab (Approval hanya muncul jika Manager)
             tabs_labels = []
             if is_manager:
-                tabs_labels.append("ðŸ”” APPROVAL (ACC)")
+                tabs_labels.append("🏠”” APPROVAL (ACC)")
 
             tabs_labels.extend([
-                "ðŸ“ˆ Produktivitas",
-                "ðŸ§² Leads & Interest",
-                "ðŸ’¬ Review & Feedback",
-                "ðŸ–¼ï¸ Galeri Bukti",
-                "ðŸ“¦ Master Data",
+                "🏠“ˆ Produktivitas",
+                "🏠§² Leads & Interest",
+                "🏠’¬ Review & Feedback",
+                "🏠–¼ï¸ Galeri Bukti",
+                "🏠“¦ Master Data",
                 "âš™ï¸ Config Staff",
-                "ðŸ—‘ï¸ Hapus Akun",
+                "🏠—‘ï¸ Hapus Akun",
                 "âš¡ SUPER EDITOR"
             ])
 
@@ -5163,7 +5163,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # -----------------------------------------------------------
             if is_manager:
                 with all_tabs[tab_ptr]:
-                    st.markdown("### ðŸ”” Pusat Persetujuan Manager")
+                    st.markdown("### 🏠”” Pusat Persetujuan Manager")
                     pending_data = get_pending_approvals()
                     if not pending_data:
                         st.info("âœ… Tidak ada data yang menunggu persetujuan.")
@@ -5173,10 +5173,10 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
                                 c_h1, c_h2 = st.columns([3, 1])
                                 with c_h1:
                                     st.markdown(
-                                        f"ðŸ‘¤ **{req['Requestor']}** mengajukan perubahan pada `{req['Target Sheet']}`")
-                                    st.info(f"ðŸ“ Alasan: {req['Reason']}")
+                                        f"🏠‘¤ **{req['Requestor']}** mengajukan perubahan pada `{req['Target Sheet']}`")
+                                    st.info(f"🏠“ Alasan: {req['Reason']}")
                                 with c_h2:
-                                    st.caption(f"ðŸ“… {req['Timestamp']}")
+                                    st.caption(f"🏠“… {req['Timestamp']}")
 
                                 # Tampilkan Perbandingan Data
                                 try:
@@ -5224,7 +5224,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # 2. TAB PRODUKTIVITAS (PLOTLY CHART + AI GEMINI)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### ðŸš€ Analisa Kinerja Tim")
+                st.markdown("### 🚀 Analisa Kinerja Tim")
                 if not df_all.empty:
                     d_opt = st.selectbox(
                         "Lihat Data:", [7, 14, 30, 90], index=2, key="d_opt_prod")
@@ -5245,7 +5245,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
 
                     # --- INTEGRASI AI GEMINI UNTUK DESKTOP ---
                     st.divider()
-                    st.markdown("#### ðŸ¤– AI Management Insight")
+                    st.markdown("#### 🏠¤– AI Management Insight")
                     with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
                         # Penyiapan Data Non-Visual
                         staf_stats_str = json.dumps(report_counts.to_dict(), indent=2)
@@ -5302,7 +5302,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # 3. TAB LEADS & INTEREST (EXPORT ENABLED)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### ðŸ§² Leads Management")
+                st.markdown("### 🏠§² Leads Management")
                 if not df_all.empty and COL_INTEREST in df_all.columns:
                     sel_in = st.radio("Pilih Tingkat Interest:", [
                                       "Under 50% (A)", "50-75% (B)", "75%-100%"], horizontal=True)
@@ -5321,14 +5321,14 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # 4. TAB REVIEW & FEEDBACK
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### ðŸ’¬ Review & Beri Feedback")
+                st.markdown("### 🏠’¬ Review & Beri Feedback")
                 if not df_all.empty:
                     # Ambil 10 laporan terbaru
                     for i, r in df_all.sort_values(by=COL_TIMESTAMP, ascending=False).head(10).iterrows():
                         with st.container(border=True):
                             st.markdown(
-                                f"**{r[COL_NAMA]}** | {r[COL_TIMESTAMP]} | ðŸ“ {r[COL_TEMPAT]}")
-                            st.write(f"ðŸ“ {r[COL_DESKRIPSI]}")
+                                f"**{r[COL_NAMA]}** | {r[COL_TIMESTAMP]} | 🏠“ {r[COL_TEMPAT]}")
+                            st.write(f"🏠“ {r[COL_DESKRIPSI]}")
                             f_input = st.text_input(
                                 "Kirim masukan ke staf:", key=f"f_in_{i}")
                             if st.button("Kirim Masukan", key=f"f_btn_{i}"):
@@ -5343,7 +5343,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # 5. TAB GALERI BUKTI
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### ðŸ–¼ï¸ Galeri Foto Aktivitas")
+                st.markdown("### 🏠–¼ï¸ Galeri Foto Aktivitas")
                 if not df_all.empty:
                     df_img = df_all[df_all[COL_LINK_FOTO].str.contains(
                         "http", na=False)].head(12)
@@ -5360,7 +5360,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # 6. TAB MASTER DATA
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### ðŸ“¦ Database Utama")
+                st.markdown("### 🏠“¦ Database Utama")
                 st.dataframe(df_all, use_container_width=True)
             tab_ptr += 1
 
@@ -5368,7 +5368,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # 7. TAB CONFIG STAFF (TAMBAH STAF)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### ðŸ‘¥ Kelola Personel & Tim")
+                st.markdown("### 🏠‘¥ Kelola Personel & Tim")
                 with st.form("form_add_staf_new"):
                     new_st_name = st.text_input("Nama Staf Baru:")
                     if st.form_submit_button("âž• Tambahkan ke Sistem"):
@@ -5391,7 +5391,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
             # 8. TAB HAPUS AKUN (FITUR KHUSUS DARI CODE PERTAMA)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
-                st.markdown("### ðŸ—‘ï¸ Hapus Personel")
+                st.markdown("### 🏠—‘ï¸ Hapus Personel")
                 st.error(
                     "âš ï¸ Tindakan ini permanen. Nama staf akan hilang dari daftar pelapor.")
                 list_staf_del = get_daftar_staf_terbaru()
@@ -5399,7 +5399,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
                                           "-- Pilih --"] + list_staf_del, key="sb_del")
                 confirm_del = st.checkbox(
                     "Saya mengonfirmasi penghapusan ini.")
-                if st.button("ðŸ”¥ HAPUS PERMANEN", type="primary", use_container_width=True):
+                if st.button("🏠”¥ HAPUS PERMANEN", type="primary", use_container_width=True):
                     if nama_hapus != "-- Pilih --" and confirm_del:
                         ok, m = hapus_staf_by_name(nama_hapus)
                         if ok:
@@ -5427,7 +5427,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
                     "Pilih Tabel Data:", list(map_s.keys()))
                 s_target_name = map_s[s_target_label]
 
-                if st.button("ðŸ“‚ Ambil Data"):
+                if st.button("🏠“‚ Ambil Data"):
                     try:
                         ws_edit = spreadsheet.worksheet(s_target_name)
                         st.session_state["df_editor_raw"] = pd.DataFrame(
@@ -5440,14 +5440,14 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
                     st.info(
                         f"Sedang mengedit: **{st.session_state['df_editor_name']}**")
                     alasan_edit = st.text_input(
-                        "ðŸ“ Alasan Edit (Wajib):", key="alasan_super_desk")
+                        "🏠“ Alasan Edit (Wajib):", key="alasan_super_desk")
 
                     # Data Editor
                     edited_result = st.data_editor(
                         st.session_state["df_editor_raw"], use_container_width=True, num_rows="dynamic")
 
                     if is_manager:
-                        if st.button("ðŸ’¾ SIMPAN PERUBAHAN (Manager Direct)", type="primary", use_container_width=True):
+                        if st.button("🏠’¾ SIMPAN PERUBAHAN (Manager Direct)", type="primary", use_container_width=True):
                             if alasan_edit:
                                 ws_final = spreadsheet.worksheet(
                                     st.session_state["df_editor_name"])
@@ -5464,7 +5464,7 @@ elif menu_nav == "ðŸ“Š Dashboard Admin":
                             else:
                                 st.error("Alasan harus diisi.")
                     else:
-                        if st.button("ðŸ“¤ AJUKAN KE MANAGER (Admin Request)", type="primary", use_container_width=True):
+                        if st.button("🏠“¤ AJUKAN KE MANAGER (Admin Request)", type="primary", use_container_width=True):
                             if alasan_edit:
                                 changes_list = compare_and_get_changes(
                                     st.session_state["df_editor_raw"], edited_result)
