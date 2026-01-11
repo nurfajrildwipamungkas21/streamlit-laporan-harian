@@ -641,60 +641,95 @@ def delete_staff_account(username):
 
 
 # =========================================================
-# CONNECTIONS (PERSISTENT IN RAM)
+# 1. DEFINISI FUNGSI KONEKSI & ASSETS (TARUH PALING ATAS)
 # =========================================================
-spreadsheet, dbx = init_connections()
 
-# --- PINDAHKAN DEFINISI KE SINI (DI ATAS) ---
+@st.cache_resource(ttl=None, show_spinner=False)
+def init_connections():
+    """Inisialisasi koneksi berat hanya SEKALI saat server start."""
+    gs_obj = None
+    dbx_obj = None
+    
+    # Setup Google Sheets
+    try:
+        if "gcp_service_account" in st.secrets:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(creds)
+            gs_obj = gc.open(NAMA_GOOGLE_SHEET)
+    except Exception as e:
+        print(f"⚠️ GSheet Init Error: {e}")
+
+    # Setup Dropbox
+    try:
+        if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
+            dbx_obj = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
+            dbx_obj.users_get_current_account()
+    except Exception as e:
+        print(f"⚠️ Dropbox Init Error: {e}")
+        
+    return gs_obj, dbx_obj
+
 @st.cache_data(ttl=None, show_spinner=False)
 def load_data_ke_ram(sheet_name):
+    """Mengambil data dari GSheet dan menguncinya di RAM."""
     try:
         if spreadsheet:
             ws = spreadsheet.worksheet(sheet_name)
             return pd.DataFrame(ws.get_all_records())
     except Exception as e:
-        print(f"Gagal Load {sheet_name}: {e}")
+        print(f"Gagal Load {sheet_name} ke RAM: {e}")
     return pd.DataFrame()
 
 def prefetch_all_data_to_state():
-    """Fungsi didefinisikan dulu agar saat dipanggil di bawah sudah 'kenal'"""
+    """Memindahkan data dari RAM ke Session State setelah login sukses."""
     if "data_loaded" not in st.session_state:
         st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
         st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
+        st.session_state["df_staf"] = get_daftar_staf_terbaru()
         st.session_state["data_loaded"] = True
 
 # =========================================================
-# MAIN FLOW CHECK (LOGIKA JALAN APLIKASI)
+# 2. EKSEKUSI KONEKSI GLOBAL
 # =========================================================
+
+# Jalankan koneksi sekarang agar variabel 'spreadsheet' tersedia untuk fungsi lain
+spreadsheet, dbx = init_connections()
+KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
+KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
+
+# =========================================================
+# 3. LOGIKA LOGIN & ALUR UTAMA (MAIN FLOW)
+# =========================================================
+
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
+# Halaman Login
 if not st.session_state["logged_in"]:
     login_page()
     st.stop() 
 
-# Sekarang dipanggil sudah aman karena definisi sudah dibaca Python diatas
-prefetch_all_data_to_state() 
+# --- JIKA SUDAH LOGIN, KODE DI BAWAH INI AKAN BERJALAN ---
+
+# 1. Kunci data ke RAM (Instan)
+prefetch_all_data_to_state()
+
+# 2. Suntik CSS dan Tampilkan Header (Pastikan fungsi ini sudah didefinisikan di atas)
 inject_global_css_fast() 
 render_header()
 
-# -------------------------------
-
-# Variabel Global (tetap seperti kode lama Anda)
+# 3. Inisialisasi Variabel User Global
 user_email = st.session_state["user_email"]
 user_name = st.session_state["user_name"]
 user_role = st.session_state["user_role"]
 
 # =========================================================
-# USER INFO SETELAH LOGIN (Variabel Global)
-# =========================================================
-# Variabel ini akan dipakai di seluruh aplikasi
-user_email = st.session_state["user_email"]
-user_name = st.session_state["user_name"]
-user_role = st.session_state["user_role"]
-
-# =========================================================
-# OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
+# 4. OPTIONAL LIBRARIES (LOAD SETELAH LOGIN AGAR RINGAN)
 # =========================================================
 try:
     from openpyxl import Workbook
@@ -710,12 +745,6 @@ try:
     HAS_AGGRID = True
 except ImportError:
     HAS_AGGRID = False
-
-try:
-    import plotly.express as px
-    HAS_PLOTLY = True
-except ImportError:
-    HAS_PLOTLY = False
 
 
 # =========================================================
