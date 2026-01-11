@@ -98,7 +98,116 @@ def load_checklist(sheet_name, columns):
         return df[columns].copy()
     except Exception:
         return pd.DataFrame(columns=columns)
+    
+@st.cache_data(ttl=3600)
+def load_closing_deal():
+    if not KONEKSI_GSHEET_BERHASIL:
+        return pd.DataFrame(columns=CLOSING_COLUMNS)
 
+    try:
+        try:
+            ws = spreadsheet.worksheet(SHEET_CLOSING_DEAL)
+        except Exception:
+            ws = spreadsheet.add_worksheet(
+                title=SHEET_CLOSING_DEAL, rows=300, cols=len(CLOSING_COLUMNS))
+            ws.append_row(CLOSING_COLUMNS, value_input_option="USER_ENTERED")
+            maybe_auto_format_sheet(ws, force=True)
+            return pd.DataFrame(columns=CLOSING_COLUMNS)
+
+        ensure_headers(ws, CLOSING_COLUMNS)
+
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+
+        for c in CLOSING_COLUMNS:
+            if c not in df.columns:
+                df[c] = ""
+
+        if COL_NILAI_KONTRAK in df.columns:
+            parsed = df[COL_NILAI_KONTRAK].apply(parse_rupiah_to_int)
+            df[COL_NILAI_KONTRAK] = pd.Series(parsed, dtype="Int64")
+
+        for c in [COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_BIDANG]:
+            if c in df.columns:
+                df[c] = df[c].fillna("").astype(str)
+
+        return df[CLOSING_COLUMNS].copy()
+    except Exception:
+        return pd.DataFrame(columns=CLOSING_COLUMNS)
+    
+@st.cache_data(ttl=3600)
+def load_pembayaran_dp():
+    if not KONEKSI_GSHEET_BERHASIL:
+        return pd.DataFrame(columns=PAYMENT_COLUMNS)
+
+    try:
+        try:
+            ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
+        except Exception:
+            ws = spreadsheet.add_worksheet(
+                title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
+            ws.append_row(PAYMENT_COLUMNS, value_input_option="USER_ENTERED")
+            maybe_auto_format_sheet(ws, force=True)
+            return pd.DataFrame(columns=PAYMENT_COLUMNS)
+
+        ensure_headers(ws, PAYMENT_COLUMNS)
+
+        data = ws.get_all_records()
+        df = pd.DataFrame(data)
+
+        for c in PAYMENT_COLUMNS:
+            if c not in df.columns:
+                df[c] = ""
+
+        if COL_NOMINAL_BAYAR in df.columns:
+            parsed = df[COL_NOMINAL_BAYAR].apply(parse_rupiah_to_int)
+            df[COL_NOMINAL_BAYAR] = pd.Series(parsed, dtype="Int64")
+
+        if COL_STATUS_BAYAR in df.columns:
+            df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(
+                lambda x: True if str(x).upper() == "TRUE" else False)
+
+        if COL_JATUH_TEMPO in df.columns:
+            df[COL_JATUH_TEMPO] = pd.to_datetime(
+                df[COL_JATUH_TEMPO], errors="coerce").dt.date
+
+        for c in [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
+                  COL_BUKTI_BAYAR, COL_CATATAN_BAYAR, COL_TS_UPDATE, COL_UPDATED_BY]:
+            if c in df.columns:
+                df[c] = df[c].fillna("").astype(str)
+
+        # rapihkan log agar tampil bernomor & multiline
+        if COL_TS_UPDATE in df.columns:
+            df[COL_TS_UPDATE] = df[COL_TS_UPDATE].apply(
+                lambda x: build_numbered_log(parse_payment_log_lines(x)))
+
+        # fallback: kalau log kosong tapi ada timestamp input
+        if COL_TS_BAYAR in df.columns and COL_TS_UPDATE in df.columns:
+            def _fix_empty_log(row):
+                logv = safe_str(row.get(COL_TS_UPDATE, ""), "").strip()
+                if logv:
+                    return logv
+                ts_in = safe_str(row.get(COL_TS_BAYAR, ""), "").strip()
+                return build_numbered_log([ts_in]) if ts_in else ""
+            df[COL_TS_UPDATE] = df.apply(_fix_empty_log, axis=1)
+
+        return df[PAYMENT_COLUMNS].copy()
+    except Exception:
+        return pd.DataFrame(columns=PAYMENT_COLUMNS)
+
+@st.cache_data(ttl=3600)
+def load_all_reports(daftar_staf):
+    all_data = []
+    for nama in daftar_staf:
+        try:
+            ws = get_or_create_worksheet(nama)
+            if ws:
+                d = ws.get_all_records()
+                if d:
+                    all_data.extend(d)
+        except Exception:
+            pass
+    return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
 # =========================================================
 # [CORE] SYSTEM REACTOR V3 - SMART AUTO-SYNC RAM
 # =========================================================
@@ -2837,21 +2946,6 @@ def get_reminder_pending(nama_staf):
         return None
 
 
-@st.cache_data(ttl=3600)
-def load_all_reports(daftar_staf):
-    all_data = []
-    for nama in daftar_staf:
-        try:
-            ws = get_or_create_worksheet(nama)
-            if ws:
-                d = ws.get_all_records()
-                if d:
-                    all_data.extend(d)
-        except Exception:
-            pass
-    return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
-
-
 def render_hybrid_table(df_data, unique_key, main_text_col):
     use_aggrid_attempt = HAS_AGGRID
 
@@ -3137,46 +3231,6 @@ def render_laporan_harian_mobile():
                 st.error(f"Terjadi kesalahan: {e}")
 
 
-# =========================================================
-# CLOSING DEAL
-# =========================================================
-@st.cache_data(ttl=3600)
-def load_closing_deal():
-    if not KONEKSI_GSHEET_BERHASIL:
-        return pd.DataFrame(columns=CLOSING_COLUMNS)
-
-    try:
-        try:
-            ws = spreadsheet.worksheet(SHEET_CLOSING_DEAL)
-        except Exception:
-            ws = spreadsheet.add_worksheet(
-                title=SHEET_CLOSING_DEAL, rows=300, cols=len(CLOSING_COLUMNS))
-            ws.append_row(CLOSING_COLUMNS, value_input_option="USER_ENTERED")
-            maybe_auto_format_sheet(ws, force=True)
-            return pd.DataFrame(columns=CLOSING_COLUMNS)
-
-        ensure_headers(ws, CLOSING_COLUMNS)
-
-        data = ws.get_all_records()
-        df = pd.DataFrame(data)
-
-        for c in CLOSING_COLUMNS:
-            if c not in df.columns:
-                df[c] = ""
-
-        if COL_NILAI_KONTRAK in df.columns:
-            parsed = df[COL_NILAI_KONTRAK].apply(parse_rupiah_to_int)
-            df[COL_NILAI_KONTRAK] = pd.Series(parsed, dtype="Int64")
-
-        for c in [COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_BIDANG]:
-            if c in df.columns:
-                df[c] = df[c].fillna("").astype(str)
-
-        return df[CLOSING_COLUMNS].copy()
-    except Exception:
-        return pd.DataFrame(columns=CLOSING_COLUMNS)
-
-
 def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai_kontrak_input):
     if not KONEKSI_GSHEET_BERHASIL:
         return False, "Koneksi GSheet belum aktif."
@@ -3216,70 +3270,6 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
         return True, "Closing deal berhasil disimpan!"
     except Exception as e:
         return False, str(e)
-
-
-# =========================================================
-# PEMBAYARAN
-# =========================================================
-@st.cache_data(ttl=3600)
-def load_pembayaran_dp():
-    if not KONEKSI_GSHEET_BERHASIL:
-        return pd.DataFrame(columns=PAYMENT_COLUMNS)
-
-    try:
-        try:
-            ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
-        except Exception:
-            ws = spreadsheet.add_worksheet(
-                title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
-            ws.append_row(PAYMENT_COLUMNS, value_input_option="USER_ENTERED")
-            maybe_auto_format_sheet(ws, force=True)
-            return pd.DataFrame(columns=PAYMENT_COLUMNS)
-
-        ensure_headers(ws, PAYMENT_COLUMNS)
-
-        data = ws.get_all_records()
-        df = pd.DataFrame(data)
-
-        for c in PAYMENT_COLUMNS:
-            if c not in df.columns:
-                df[c] = ""
-
-        if COL_NOMINAL_BAYAR in df.columns:
-            parsed = df[COL_NOMINAL_BAYAR].apply(parse_rupiah_to_int)
-            df[COL_NOMINAL_BAYAR] = pd.Series(parsed, dtype="Int64")
-
-        if COL_STATUS_BAYAR in df.columns:
-            df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(
-                lambda x: True if str(x).upper() == "TRUE" else False)
-
-        if COL_JATUH_TEMPO in df.columns:
-            df[COL_JATUH_TEMPO] = pd.to_datetime(
-                df[COL_JATUH_TEMPO], errors="coerce").dt.date
-
-        for c in [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
-                  COL_BUKTI_BAYAR, COL_CATATAN_BAYAR, COL_TS_UPDATE, COL_UPDATED_BY]:
-            if c in df.columns:
-                df[c] = df[c].fillna("").astype(str)
-
-        # rapihkan log agar tampil bernomor & multiline
-        if COL_TS_UPDATE in df.columns:
-            df[COL_TS_UPDATE] = df[COL_TS_UPDATE].apply(
-                lambda x: build_numbered_log(parse_payment_log_lines(x)))
-
-        # fallback: kalau log kosong tapi ada timestamp input
-        if COL_TS_BAYAR in df.columns and COL_TS_UPDATE in df.columns:
-            def _fix_empty_log(row):
-                logv = safe_str(row.get(COL_TS_UPDATE, ""), "").strip()
-                if logv:
-                    return logv
-                ts_in = safe_str(row.get(COL_TS_BAYAR, ""), "").strip()
-                return build_numbered_log([ts_in]) if ts_in else ""
-            df[COL_TS_UPDATE] = df.apply(_fix_empty_log, axis=1)
-
-        return df[PAYMENT_COLUMNS].copy()
-    except Exception:
-        return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
 
 def save_pembayaran_dp(df: pd.DataFrame) -> bool:
