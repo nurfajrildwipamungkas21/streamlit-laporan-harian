@@ -1715,7 +1715,7 @@ except Exception:
     SDK = "legacy"
     import google.generativeai as genai_legacy
 
-API_KEY = "AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4"
+API_KEY = "AIzaSyDHv5hgPTwoF1DGOVAvVhZsXabFnIIemf4"
 # Daftar model cadangan agar tidak muncul pesan "berhalangan" jika satu model error
 MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
