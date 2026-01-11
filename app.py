@@ -1651,6 +1651,32 @@ def admin_secret_configured() -> bool:
         )
     except Exception:
         return False
+    
+@st.cache_data(ttl=None, show_spinner=False)
+def load_data_ke_ram(sheet_name):
+    """Mengambil data dari GSheet dan menguncinya di RAM VPS selamanya."""
+    try:
+        if spreadsheet:
+            ws = spreadsheet.worksheet(sheet_name)
+            return pd.DataFrame(ws.get_all_records())
+    except Exception as e:
+        print(f"Gagal Load {sheet_name} ke RAM: {e}")
+    return pd.DataFrame()
+
+def prefetch_all_data_to_state():
+    """
+    Memindahkan semua data dari RAM VPS ke dalam Session State.
+    Dijalankan hanya 1x saat login sukses.
+    """
+    if "data_loaded" not in st.session_state:
+        # Gunakan load_data_ke_ram yang punya @st.cache_data(ttl=None)
+        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
+        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
+        st.session_state["df_kpi_team"] = load_data_ke_ram(SHEET_TARGET_TEAM)
+        st.session_state["df_kpi_indiv"] = load_data_ke_ram(SHEET_TARGET_INDIVIDU)
+        st.session_state["df_staf"] = get_daftar_staf_terbaru() # Ini sudah cache data
+        
+        st.session_state["data_loaded"] = True
 
 
 # =========================================================
@@ -1695,32 +1721,6 @@ def init_connections():
 spreadsheet, dbx = init_connections()
 KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
 KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
-
-@st.cache_data(ttl=None, show_spinner=False)
-def load_data_ke_ram(sheet_name):
-    """Mengambil data dari GSheet dan menguncinya di RAM VPS selamanya."""
-    try:
-        if spreadsheet:
-            ws = spreadsheet.worksheet(sheet_name)
-            return pd.DataFrame(ws.get_all_records())
-    except Exception as e:
-        print(f"Gagal Load {sheet_name} ke RAM: {e}")
-    return pd.DataFrame()
-
-def prefetch_all_data_to_state():
-    """
-    Memindahkan semua data dari RAM VPS ke dalam Session State.
-    Dijalankan hanya 1x saat login sukses.
-    """
-    if "data_loaded" not in st.session_state:
-        # Gunakan load_data_ke_ram yang punya @st.cache_data(ttl=None)
-        st.session_state["df_payment"] = load_data_ke_ram(SHEET_PEMBAYARAN)
-        st.session_state["df_closing"] = load_data_ke_ram(SHEET_CLOSING_DEAL)
-        st.session_state["df_kpi_team"] = load_data_ke_ram(SHEET_TARGET_TEAM)
-        st.session_state["df_kpi_indiv"] = load_data_ke_ram(SHEET_TARGET_INDIVIDU)
-        st.session_state["df_staf"] = get_daftar_staf_terbaru() # Ini sudah cache data
-        
-        st.session_state["data_loaded"] = True
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
 SDK = "new"
