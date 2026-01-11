@@ -726,12 +726,6 @@ def prefetch_all_data_to_state():
         
         st.session_state["data_loaded"] = True
 
-# -------------------------------
-
-# Variabel Global (tetap seperti kode lama Anda)
-user_email = st.session_state["user_email"]
-user_name = st.session_state["user_name"]
-user_role = st.session_state["user_role"]
 
 # =========================================================
 # USER INFO SETELAH LOGIN (Variabel Global)
@@ -3947,38 +3941,50 @@ with st.sidebar:
     # PROFIL USER (DIPERBAIKI UNTUK MENCEGAH ERROR 'NoneType')
     # -----------------------------------------------------------
     # Hanya muncul jika user sedang login
+# -----------------------------------------------------------
+    # PROFIL USER (SIDEBAR) - VERSI AMAN ANTI-CRASH
+    # -----------------------------------------------------------
+    # Kita hanya menampilkan bagian ini jika user benar-benar sudah login
     if st.session_state.get("logged_in"):
         st.divider()
         col_p1, col_p2 = st.columns([1, 3])
 
         with col_p1:
+            # Menampilkan icon profil
             st.markdown("👤")
 
         with col_p2:
             st.caption("Login sebagai:")
-            # Ambil nama, jika None ganti ke 'User'
-            u_name = st.session_state.get('user_name', 'User') or "User"
+            
+            # 1. Ambil Nama secara aman (fallback ke "User" jika None)
+            u_name = st.session_state.get('user_name') or "User"
             st.markdown(f"**{u_name}**")
 
-            # FIX: Pastikan role tidak None dan paksa jadi string sebelum .upper()
-            role_raw = st.session_state.get("user_role", "staff") or "staff"
+            # 2. Proteksi Role agar tidak None saat fungsi .upper() dipanggil
+            # Kita berikan default "staff" jika data tidak ditemukan
+            role_raw = st.session_state.get("user_role") or "staff"
+            
+            # Pastikan diproses sebagai string dan huruf kecil untuk logika warna
             role_now = str(role_raw).lower()
             role_color = "red" if role_now == "admin" else "blue"
+            
+            # Sekarang .upper() aman digunakan karena role_now pasti string
             st.markdown(f":{role_color}[{role_now.upper()}]")
 
-        # Tombol Logout Manual (Reset State)
+        # 3. Tombol Logout dengan Reset State yang bersih
         if st.button("🚪 Sign Out / Logout", use_container_width=True):
-            # Reset semua variabel sesi
+            # Ubah status login
             st.session_state["logged_in"] = False
-            st.session_state["user_email"] = None
-            st.session_state["user_name"] = None
-            st.session_state["user_role"] = None
-            st.session_state["is_admin"] = False
-            st.session_state["otp_step"] = 1
-            st.session_state["temp_email"] = ""
-            st.session_state["generated_otp"] = ""
             
-            # Kembali ke halaman utama (Login)
+            # PENTING: Jangan set role ke None. Set ke string default 
+            # agar komponen UI yang masih sempat 'merender' tidak crash.
+            st.session_state["user_role"] = "staff"
+            st.session_state["user_name"] = "User"
+            
+            # Kembalikan alur OTP ke langkah awal
+            st.session_state["otp_step"] = 1
+            
+            # Paksa aplikasi memuat ulang ke halaman login
             st.rerun()
 
     st.divider()
@@ -5537,19 +5543,25 @@ elif menu_nav == "📊 Dashboard Admin":
         render_section_watermark()
 
 # =========================================================
-# MAIN FLOW CHECK
+# MAIN FLOW CHECK (Letakkan di Bagian Paling Bawah)
 # =========================================================
+
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
 if not st.session_state["logged_in"]:
     login_page()
-    st.stop() 
+    st.stop() # Berhenti di sini jika belum login
 
-# --- [BARU] DISINI TEMPATNYA ---
-# Jika lolos dari st.stop(), berarti user sudah login.
-# Sekarang kita kunci semua data & asset ke RAM VPS sebelum UI muncul.
+# --- JIKA SUDAH LOGIN, BARU JALANKAN INI ---
+# Ambil variabel secara aman setelah dipastikan login sukses
+user_email = st.session_state.get("user_email", "unknown")
+user_name = st.session_state.get("user_name", "User")
+user_role = st.session_state.get("user_role", "staff")
 
-prefetch_all_data_to_state()  # Ambil semua data GSheet ke RAM (Instan)
-inject_global_css_fast()      # Suntik CSS dari RAM (Instan)
-render_header()               # Gambar Header dari RAM (Instan)
+# Kunci data ke RAM
+prefetch_all_data_to_state()  
+inject_global_css_fast()      
+render_header()               
+
+# Lanjutkan ke Router Menu/Sidebar...
