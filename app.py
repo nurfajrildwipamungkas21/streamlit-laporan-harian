@@ -5079,8 +5079,9 @@ elif menu_nav == "📊 Dashboard Admin":
                                             st.rerun()
                 tab_ptr += 1
 
+
             # -----------------------------------------------------------
-            # 2. TAB PRODUKTIVITAS (PLOTLY CHART)
+            # 2. TAB PRODUKTIVITAS (PLOTLY CHART + AI GEMINI)
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 🚀 Analisa Kinerja Tim")
@@ -5094,12 +5095,45 @@ elif menu_nav == "📊 Dashboard Admin":
                     col_m1, col_m2 = st.columns(2)
                     with col_m1:
                         st.markdown("#### Total Laporan per Staf")
-                        st.bar_chart(df_f[COL_NAMA].value_counts())
+                        report_counts = df_f[COL_NAMA].value_counts()
+                        st.bar_chart(report_counts)
                     with col_m2:
                         if HAS_PLOTLY:
                             fig = px.pie(df_f, names="Kategori_Aktivitas",
                                          title="Proporsi Jenis Aktivitas", hole=0.3)
                             st.plotly_chart(fig, use_container_width=True)
+
+                    # --- INTEGRASI AI GEMINI UNTUK DESKTOP ---
+                    st.divider()
+                    st.markdown("#### 🤖 AI Management Insight")
+                    with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
+                        try:
+                            import google.generativeai as genai
+                            genai.configure(api_key="AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4")
+                            model = genai.GenerativeModel("gemini-2.5-flash") # Gunakan 1.5-flash
+
+                            staf_stats = report_counts.to_dict()
+                            total_lap = len(df_f)
+                            
+                            prompt = f"""
+                            Kamu adalah asisten virtual pribadi Pak Nugroho. Tugasmu adalah memberikan laporan analisis kinerja tim Sales & Marketing kepada Pak Nugroho.
+                            Data Kinerja Tim ({d_opt} hari terakhir):
+                            - Statistik Laporan per Staf: {staf_stats}
+                            - Total Laporan Terkumpul: {total_lap}
+                            - Target Perusahaan: Minimal 48 tempat/kunjungan per minggu per orang.
+                            
+                            Instruksi Penulisan:
+                            1. Awali kalimat dengan variasi pembuka seperti: "Sebagai asisten virtual Pak Nugroho...", "Melaporkan untuk Pak Nugroho...", atau "Berdasarkan catatan asisten Pak Nugroho...".
+                            2. JANGAN PERNAH menyebut dirimu sebagai AI atau Gemini.
+                            3. Gunakan nada bicara yang sangat MANUSIAWI, hangat, dan EMPATIK.
+                            4. Jika ada staf yang belum mencapai target 48 kunjungan, jangan menyalahkan mereka. Carilah alasan logis (cuaca, macet, atau negosiasi alot).
+                            5. Tekankan bahwa manajemen siap mendukung tim. Berikan apresiasi bagi yang dedikasinya tinggi.
+                            6. Lindungi semangat tim di depan atasan dengan menonjolkan usaha keras mereka.
+                            """
+                            ai_response = model.generate_content(prompt)
+                            st.info(ai_response.text)
+                        except Exception as e:
+                            st.warning("Asisten Pak Nugroho sedang berhalangan memberikan laporan saat ini.")
                 else:
                     st.info("Belum ada data.")
             tab_ptr += 1
