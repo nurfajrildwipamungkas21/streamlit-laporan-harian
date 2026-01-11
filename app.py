@@ -638,6 +638,12 @@ def delete_staff_account(username):
         return True, f"User {username} dihapus."
     except gspread.exceptions.CellNotFound:
         return False, "Username tidak ditemukan."
+    
+
+# Load Global Connections dari Cache
+spreadsheet, dbx = init_connections()
+KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
+KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
 
 @st.cache_data(ttl=None, show_spinner=False)
 def load_data_ke_ram(sheet_name):
@@ -1716,11 +1722,6 @@ def init_connections():
         print(f"⚠️ Dropbox Init Error: {e}")
         
     return gs_obj, dbx_obj
-
-# Load Global Connections dari Cache
-spreadsheet, dbx = init_connections()
-KONEKSI_GSHEET_BERHASIL = (spreadsheet is not None)
-KONEKSI_DROPBOX_BERHASIL = (dbx is not None)
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
 SDK = "new"
