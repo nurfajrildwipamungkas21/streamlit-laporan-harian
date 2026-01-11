@@ -7,3 +7,4 @@ plotly
 streamlit-aggrid
 openpyxl
 streamlit-google-auth
+google-generativeai
