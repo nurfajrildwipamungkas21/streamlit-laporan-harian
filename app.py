@@ -1540,6 +1540,45 @@ def dynamic_column_mapper(df):
 
     return df.rename(columns=mapping)
 
+# =========================================================
+# [BARU] DYNAMIC UI HELPERS (Anti-Crash & Auto-Type)
+# =========================================================
+
+def clean_df_types_dynamically(df: pd.DataFrame) -> pd.DataFrame:
+    """Memastikan tipe data DataFrame sesuai (Numeric/Date/String) secara dinamis."""
+    df_clean = df.copy()
+    for col in df_clean.columns:
+        col_lower = col.lower()
+        # Jika kolom Uang/Angka -> Paksa jadi numerik
+        if any(key in col_lower for key in ["nilai", "nominal", "sisa", "kontrak", "sepakat", "tenor"]):
+            df_clean[col] = df_clean[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x)
+            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0)
+        # Jika kolom Tanggal -> Paksa jadi objek datetime.date
+        elif any(key in col_lower for key in ["tanggal", "tempo", "waktu"]):
+            if "log" not in col_lower and "update" not in col_lower and "timestamp" not in col_lower:
+                df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce').dt.date
+    return df_clean
+
+def generate_dynamic_column_config(df):
+    """Menghasilkan konfigurasi kolom otomatis untuk st.data_editor."""
+    config = {}
+    for col in df.columns:
+        col_lower = col.lower()
+        if any(key in col_lower for key in ["nilai", "nominal", "sisa", "kontrak", "sepakat"]):
+            config[col] = st.column_config.NumberColumn(col, format="Rp %d", min_value=0)
+        elif any(key in col_lower for key in ["tanggal", "tempo", "waktu"]):
+            if "timestamp" not in col_lower:
+                config[col] = st.column_config.DateColumn(col, format="DD/MM/YYYY")
+            else:
+                config[col] = st.column_config.TextColumn(col, disabled=True)
+        elif "bukti" in col_lower:
+            config[col] = st.column_config.LinkColumn(col, help="Klik untuk membuka bukti transfer")
+        elif "status" in col_lower:
+            config[col] = st.column_config.TextColumn(col, width="medium")
+        else:
+            config[col] = st.column_config.TextColumn(col)
+    return config
+
 
 # =========================================================
 # ADMIN PASSWORD HELPERS
@@ -4602,7 +4641,6 @@ elif menu_nav == "💳 Pembayaran":
                         st.error("Gagal: Nilai Kesepakatan dan Nominal Bayar wajib diisi!")
                     else:
                         with st.spinner("Memproses transaksi..."):
-                            # Memanggil fungsi pintar yang baru
                             ok, msg = tambah_pembayaran_dp(
                                 p_group, p_marketing, p_tgl_event, p_jenis, 
                                 p_nom_bayar, p_total_sepakat, p_tenor, p_due, p_bukti, p_note
@@ -4618,7 +4656,7 @@ elif menu_nav == "💳 Pembayaran":
         st.divider()
 
         # =========================================================
-        # 2. SEKSI MONITORING: ALERT & DATA EDITOR
+        # 2. SEKSI MONITORING: ALERT & DATA EDITOR DINAMIS
         # =========================================================
         st.markdown("### 📋 Monitoring & Riwayat Pembayaran")
         df_pay = load_pembayaran_dp()
@@ -4626,7 +4664,7 @@ elif menu_nav == "💳 Pembayaran":
         if df_pay.empty:
             st.info("Belum ada data pembayaran yang tersimpan.")
         else:
-            # --- Sistem Alert Pintar ---
+            # --- Sistem Alert Pintar (Berdasarkan Sisa Bayar) ---
             overdue, due_soon = build_alert_pembayaran(df_pay)
             col_stat1, col_stat2 = st.columns(2)
             with col_stat1:
@@ -4638,54 +4676,54 @@ elif menu_nav == "💳 Pembayaran":
                 if not due_soon.empty:
                     st.warning("Segera lakukan penagihan ulang.")
 
-            # --- Data Editor dengan Audit Log Otomatis ---
-            st.caption("Gunakan tabel di bawah untuk mengubah Status, Jatuh Tempo, atau Catatan. Kolom Nominal dikunci demi keamanan.")
-            
-            # Format visual untuk UI
-            df_view = payment_df_for_display(df_pay)
-            
-            # Kolom yang diizinkan untuk diupdate staf/admin di desktop
-            editable_cols = [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR, COL_TENOR_CICILAN]
-            disabled_cols = [c for c in df_view.columns if c not in editable_cols]
+            st.caption("Klik dua kali pada sel untuk mengedit. Kolom Log & Timestamp otomatis terkunci.")
 
+            # --- 1. PROSES DATA SECARA DINAMIS (Normalisasi Tipe Data) ---
+            df_ready = clean_df_types_dynamically(df_pay)
+            
+            # --- 2. GENERATE CONFIG SECARA OTOMATIS (Mencegah Error Tipe Data) ---
+            auto_config = generate_dynamic_column_config(df_ready)
+            
+            # --- 3. LOGIKA PENGUNCIAN KOLOM OTOMATIS ---
+            locked_keywords = ["timestamp", "updated by", "log", "pelaku", "waktu", "input"]
+            disabled_list = [c for c in df_ready.columns if any(k in c.lower() for k in locked_keywords)]
+
+            # --- 4. RENDER DATA EDITOR ---
             edited_pay = st.data_editor(
-                df_view,
-                disabled=disabled_cols,
-                column_config={
-                    COL_SISA_BAYAR: st.column_config.NumberColumn("Sisa Tagihan", format="Rp %d"),
-                    COL_NOMINAL_BAYAR: st.column_config.TextColumn("Terbayar", disabled=True),
-                    COL_STATUS_BAYAR: st.column_config.TextColumn("Label Status", width="medium"),
-                    COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo"),
-                    COL_BUKTI_BAYAR: st.column_config.LinkColumn("Bukti Foto"),
-                    COL_TS_UPDATE: st.column_config.TextColumn("Audit Log", width="large", disabled=True)
-                },
-                use_container_width=True,
+                df_ready,
+                column_config=auto_config,
+                disabled=disabled_list,
                 hide_index=True,
-                key="editor_pay_desktop_smart"
+                use_container_width=True,
+                num_rows="dynamic",
+                key="smart_payment_editor_v3"
             )
 
+            # --- 5. LOGIKA SIMPAN PERUBAHAN ---
             if st.button("💾 Simpan Perubahan Riwayat", use_container_width=True):
-                with st.spinner("Memperbarui database..."):
+                with st.spinner("Memproses audit log dan menyimpan data..."):
                     current_user = st.session_state.get("user_name", "Admin Desktop")
-                    # Fungsi apply_audit akan mendeteksi perbedaan data lama vs baru
+                    
+                    # Bandingkan data lama (df_pay) dengan data yang diedit (edited_pay)
                     final_df = apply_audit_payments_changes(df_pay, edited_pay, actor=current_user)
                     
                     if save_pembayaran_dp(final_df):
-                        st.success("Database Pembayaran Berhasil Diperbarui!")
+                        st.success("✅ Perubahan database berhasil disimpan!")
                         st.cache_data.clear()
                         time.sleep(1.5)
                         st.rerun()
                     else:
-                        st.error("Terjadi kendala saat menyimpan ke Google Sheets.")
+                        st.error("Gagal menyimpan ke Google Sheets.")
+
+            st.divider()
 
             # =========================================================
             # 3. FITUR TAMBAHAN: UPDATE FOTO BUKTI SUSULAN
             # =========================================================
             with st.expander("📎 Update Bukti Pembayaran (Susulan)", expanded=False):
-                st.info("Fitur ini digunakan jika staf lupa melampirkan foto bukti saat penginputan awal.")
+                st.info("Gunakan fitur ini jika ingin menambahkan atau mengganti foto bukti transfer tanpa mengubah data lainnya.")
                 df_pay_reset = df_pay.reset_index(drop=True)
                 
-                # Membangun daftar pilihan yang informatif
                 pay_options = [
                     f"{i+1}. {r[COL_MARKETING]} | {r[COL_GROUP]} | Sisa: {format_rupiah_display(r[COL_SISA_BAYAR])}" 
                     for i, r in df_pay_reset.iterrows()
@@ -4696,219 +4734,19 @@ elif menu_nav == "💳 Pembayaran":
                 
                 file_susulan = st.file_uploader("Upload File Bukti Baru", key="desk_file_susulan")
                 
-                if st.button("⬆️ Upload Foto Sekarang", use_container_width=False):
+                if st.button("⬆️ Upload Foto Sekarang", use_container_width=True):
                     if file_susulan:
                         mkt_name = df_pay_reset.iloc[sel_idx_upd][COL_MARKETING]
                         ok, msg = update_bukti_pembayaran_by_index(sel_idx_upd, file_susulan, mkt_name, actor="Admin")
                         if ok:
-                            st.success("Foto bukti berhasil ditambahkan!"); st.cache_data.clear(); time.sleep(1); st.rerun()
-                        else:
-                            st.error(msg)
-                    else:
-                        st.warning("Pilih file terlebih dahulu.")
-
-# --- 6. GLOBAL AUDIT LOG ---
-elif menu_nav == "📜 Global Audit Log":
-    from audit_service import load_audit_log
-    st.markdown("## 📜 Global Audit Log")
-    df_raw = load_audit_log(spreadsheet)
-    if not df_raw.empty:
-        df_log = dynamic_column_mapper(df_raw)
-        st.dataframe(df_log, use_container_width=True, hide_index=True)
-
-# =========================================================
-# MENU: CLOSING DEAL (FIXED & RESTORED)
-# =========================================================
-elif menu_nav == "🤝 Closing Deal":
-    # --- LOGIKA MOBILE (HP) ---
-    if IS_MOBILE:
-        st.markdown("### 🤝 Closing Deal (Mobile)")
-
-        with st.expander("➕ Input Deal Baru", expanded=True):
-            with st.form("mob_form_closing"):
-                # Tambahkan Input Group yang hilang sebelumnya
-                cd_group = st.text_input(
-                    "Nama Group (Opsional)", placeholder="Kosongkan jika tidak ada")
-                cd_marketing = st.selectbox(
-                    "Nama Marketing", get_daftar_staf_terbaru())
-                cd_tgl = st.date_input("Tanggal Event")
-                cd_bidang = st.text_input(
-                    "Bidang", placeholder="F&B / Wedding / dll")
-                cd_nilai = st.text_input(
-                    "Nilai (Rp)", placeholder="Contoh: 15jt")
-
-                if st.form_submit_button("Simpan Deal", type="primary", use_container_width=True):
-                    with st.spinner("Menyimpan data..."):
-                        # Panggil fungsi dengan 5 argumen lengkap
-                        res, msg = tambah_closing_deal(
-                            cd_group, cd_marketing, cd_tgl, cd_bidang, cd_nilai)
-
-                    if res:
-                        st.success(msg)
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
-        st.divider()
-        st.markdown("#### 📋 Riwayat Closing (5 Terakhir)")
-
-        df_cd = load_closing_deal()
-
-        if not df_cd.empty:
-            df_display = df_cd.sort_index(ascending=False).head(5)
-
-            for _, row in df_display.iterrows():
-                with st.container(border=True):
-                    val_disp = format_rupiah_display(
-                        row.get(COL_NILAI_KONTRAK))
-                    st.markdown(f"💰 **{val_disp}**")
-                    st.caption(
-                        f"👤 {row.get(COL_MARKETING,'-')} | 📅 {row.get(COL_TGL_EVENT,'-')}")
-                    st.text(
-                        f"Group: {row.get(COL_GROUP,'-')} | Bidang: {row.get(COL_BIDANG,'-')}")
-
-            sisa_data = len(df_cd) - 5
-            if sisa_data > 0:
-                st.caption(
-                    f"ℹ️ {sisa_data} data lama disembunyikan. Buka di Laptop untuk lihat semua.")
-        else:
-            st.info("Belum ada data.")
-
-    # --- LOGIKA DESKTOP (PC/LAPTOP) ---
-    else:
-        st.markdown("## 🤝 Closing Deal")
-        st.caption("Pencatatan sales closing (Kontrak/Event).")
-
-        # 1. FORM INPUT LENGKAP (5 KOLOM)
-        with st.container(border=True):
-            st.markdown("### ➕ Input Closing Deal")
-            with st.form("form_closing_desk_full", clear_on_submit=True):
-                # Baris 1: Group, Marketing, Tanggal
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    inp_group = st.text_input(
-                        "Nama Group (Opsional)", placeholder="Kosongkan jika personal")
-                with c2:
-                    inp_marketing = st.text_input(
-                        "Nama Marketing (Wajib)", placeholder="Nama Sales")
-                with c3:
-                    inp_tgl_event = st.date_input(
-                        "Tanggal Event", value=datetime.now(tz=TZ_JKT).date())
-
-                # Baris 2: Bidang, Nilai
-                c4, c5 = st.columns([1, 1])
-                with c4:
-                    inp_bidang = st.text_input(
-                        "Bidang / Jenis Event", placeholder="Contoh: Gathering / Training / Wedding")
-                with c5:
-                    inp_nilai = st.text_input(
-                        "Nilai Kontrak (Rupiah)", placeholder="Contoh: 15.000.000 / 15jt")
-
-                if st.form_submit_button("✅ Simpan Closing Deal", type="primary", use_container_width=True):
-                    if not inp_marketing or not inp_nilai:
-                        st.error(
-                            "Nama Marketing dan Nilai Kontrak wajib diisi!")
-                    else:
-                        # Panggil fungsi save
-                        res, msg = tambah_closing_deal(
-                            inp_group, inp_marketing, inp_tgl_event, inp_bidang, inp_nilai)
-                        if res:
-                            st.success(msg)
-                            ui_toast("Closing deal tersimpan!", icon="✅")
+                            st.success("Foto bukti berhasil ditambahkan!")
                             st.cache_data.clear()
                             time.sleep(1)
                             st.rerun()
                         else:
                             st.error(msg)
-
-        # 2. TABEL DATA & EXPORT
-        st.divider()
-        st.markdown("### 📋 Riwayat Closing Deal")
-
-        df_cd = load_closing_deal()
-
-        if not df_cd.empty:
-            # Summary Metrics di atas tabel
-            tot_nilai = df_cd[COL_NILAI_KONTRAK].sum(
-            ) if COL_NILAI_KONTRAK in df_cd.columns else 0
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total Closing (Deal)", len(df_cd))
-            m2.metric("Total Nilai Kontrak", format_rupiah_display(tot_nilai))
-            # Placeholder logic sederhana
-            m3.metric("Bulan Ini", f"{len(df_cd)} deal")
-
-            # Tampilkan Tabel
-            df_show = df_cd.copy()
-            if COL_NILAI_KONTRAK in df_show.columns:
-                df_show[COL_NILAI_KONTRAK] = df_show[COL_NILAI_KONTRAK].apply(
-                    lambda x: format_rupiah_display(x))
-
-            st.dataframe(
-                df_show,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    COL_NILAI_KONTRAK: st.column_config.TextColumn("Nilai Kontrak", width="medium"),
-                    COL_TGL_EVENT: st.column_config.DateColumn(
-                        "Tanggal Event", format="DD/MM/YYYY")
-                }
-            )
-
-            # Tombol Download Excel/CSV
-            col_ex, col_csv = st.columns([1, 1])
-            with col_ex:
-                if HAS_OPENPYXL:
-                    xbytes = df_to_excel_bytes(
-                        df_cd,
-                        sheet_name="Closing_Deal",
-                        right_align_cols=[COL_NILAI_KONTRAK],
-                        number_format_cols={COL_NILAI_KONTRAK: '"Rp" #,##0'}
-                    )
-                    if xbytes:
-                        st.download_button(
-                            "⬇️ Download Excel (Closing)",
-                            data=xbytes,
-                            file_name="closing_deal.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True
-                        )
-
-            with col_csv:
-                csv_data = df_cd.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "⬇️ Download CSV",
-                    data=csv_data,
-                    file_name="closing_deal.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-
-            # Chart Sederhana (Jika Plotly ada)
-            if HAS_PLOTLY and not df_cd.empty:
-                try:
-                    st.markdown("#### 📊 Grafik Performa")
-                    df_plot = df_cd.copy()
-                    df_plot[COL_NILAI_KONTRAK] = df_plot[COL_NILAI_KONTRAK].fillna(
-                        0).astype(int)
-
-                    fig = px.bar(
-                        df_plot,
-                        x=COL_MARKETING,
-                        y=COL_NILAI_KONTRAK,
-                        color=COL_BIDANG,
-                        title="Nilai Kontrak per Marketing (Breakdown Bidang)",
-                        labels={
-                            COL_NILAI_KONTRAK: "Total Nilai (Rp)", COL_MARKETING: "Nama Marketing"}
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                except Exception:
-                    pass
-
-        else:
-            st.info("Belum ada data closing deal yang tersimpan.")
+                    else:
+                        st.warning("Silakan pilih file terlebih dahulu.")
 
         render_section_watermark()
 
