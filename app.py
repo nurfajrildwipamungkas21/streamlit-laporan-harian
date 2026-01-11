@@ -726,15 +726,6 @@ def prefetch_all_data_to_state():
         
         st.session_state["data_loaded"] = True
 
-
-# =========================================================
-# USER INFO SETELAH LOGIN (Variabel Global)
-# =========================================================
-# Variabel ini akan dipakai di seluruh aplikasi
-user_email = st.session_state["user_email"]
-user_name = st.session_state["user_name"]
-user_role = st.session_state["user_role"]
-
 # =========================================================
 # OPTIONAL LIBS (Excel Export / AgGrid / Plotly)
 # =========================================================
