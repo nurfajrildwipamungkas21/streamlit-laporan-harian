@@ -1717,7 +1717,7 @@ except Exception:
 
 API_KEY = "AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4"
 # Daftar model cadangan agar tidak muncul pesan "berhalangan" jika satu model error
-MODEL_FALLBACKS = ["gemini-1.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-pro"]
+MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
 if SDK == "new":
     client_ai = genai_new.Client(api_key=API_KEY)
