@@ -1715,7 +1715,25 @@ except Exception:
     SDK = "legacy"
     import google.generativeai as genai_legacy
 
-API_KEY = "AIzaSyCi19OsrR1lsoN7qs2EU5U4zP-8j_1eHh4"
+# === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
+SDK = "new"
+try:
+    from google import genai as genai_new
+    from google.genai import types as types_new
+except Exception:
+    SDK = "legacy"
+    import google.generativeai as genai_legacy
+
+# AMBIL DARI SECRETS (SANGAT AMAN)
+API_KEY = st.secrets.get("gemini_api_key", "")
+
+# Daftar model cadangan
+MODEL_FALLBACKS = ["gemini-2.0-flash", "gemini-1.5-flash"]
+
+if SDK == "new":
+    client_ai = genai_new.Client(api_key=API_KEY)
+else:
+    genai_legacy.configure(api_key=API_KEY)
 # Daftar model cadangan agar tidak muncul pesan "berhalangan" jika satu model error
 MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
