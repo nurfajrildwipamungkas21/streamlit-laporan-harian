@@ -154,18 +154,113 @@ def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
         st.info("Data tidak tersedia untuk ditampilkan.")
         return
 
+    # --- [MODIFIKASI START]: Auto-Format Rupiah & Tanggal ---
+    # Kita copy data agar tidak merusak data asli di cache
+    df_display = df_data.copy()
+    column_configs = {}
+
+    for col in df_display.columns:
+        col_lower = col.lower()
+        
+        # 1. Deteksi Kolom Uang (Nilai, Nominal, Harga, Kontrak, Sisa, Amount)
+        if any(k in col_lower for k in ["nilai", "nominal", "harga", "total", "kontrak", "sisa", "sepakat", "amount"]):
+            # Pastikan tipe datanya Numeric/Float agar bisa diformat angka
+            df_display[col] = pd.to_numeric(
+                df_display[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x),
+                errors='coerce'
+            ).fillna(0)
+
+            # Konfigurasi Tampilan: Format "Rp 2.000.000"
+            column_configs[col] = st.column_config.NumberColumn(
+                col,
+                format="Rp %d",   # Format ini otomatis memberi titik pemisah ribuan
+                min_value=0,
+                step=100000       # Step 100rb saat klik panah atas/bawah
+            )
+
+        # 2. Deteksi Kolom Tanggal (agar muncul kalender picker)
+        elif any(k in col_lower for k in ["tanggal", "tgl", "date", "event", "tempo", "waktu"]):
+            if "timestamp" not in col_lower: # Kecualikan timestamp sistem
+                try:
+                    df_display[col] = pd.to_datetime(df_display[col], errors='coerce')
+                    column_configs[col] = st.column_config.DateColumn(
+                        col,
+                        format="DD/MM/YYYY"
+                    )
+                except:
+                    pass
+    # --- [MODIFIKASI END] ---
+
     # 1. Tampilkan Editor Data (Editable)
-    # num_rows="fixed" digunakan agar index baris tetap sinkron dengan Google Sheet
-    # saat mengajukan perubahan (update row).
     edited_df = st.data_editor(
-        df_data,
+        df_display, # Gunakan df_display yang sudah bersih tipe datanya
         key=f"editor_{unique_key}",
         use_container_width=True,
-        num_rows="fixed" 
+        num_rows="fixed",
+        column_config=column_configs # Terapkan config format uang & tanggal
     )
 
     # 2. Form Alasan & Submit Perubahan
     col_reason, col_btn = st.columns([3, 1])
+    with col_reason:
+        reason = st.text_input("📝 Alasan Perubahan (Wajib diisi):", key=f"reason_{unique_key}", placeholder="Contoh: Koreksi typo, update status leads...")
+    with col_btn:
+        st.markdown("<br>", unsafe_allow_html=True) # Spacer
+        is_submit = st.button("📤 Ajukan Perubahan", key=f"btn_{unique_key}", type="primary", use_container_width=True)
+
+    if is_submit:
+        if not reason.strip():
+            st.error("⚠️ Harap isi alasan perubahan terlebih dahulu!")
+        else:
+            # 3. Logika Deteksi Perubahan (Diff Checker)
+            changes_found = []
+            
+            # Gunakan df_display sebagai acuan data lama agar tipe datanya apple-to-apple dengan edited_df
+            df_old_str = df_display.astype(str).reset_index(drop=True)
+            df_new_str = edited_df.astype(str).reset_index(drop=True)
+
+            # Loop cek per baris
+            for i in df_old_str.index:
+                row_old = df_old_str.iloc[i]
+                row_new = df_new_str.iloc[i]
+                
+                if not row_old.equals(row_new):
+                    # Ambil data asli (non-string) dari dataframe editor untuk dikirim
+                    changes_found.append({
+                        "row_idx": i,
+                        "new_data": edited_df.iloc[i],
+                        "old_data": df_display.iloc[i]
+                    })
+
+            if not changes_found:
+                st.warning("Tidak ada perubahan data yang terdeteksi pada baris yang ada.")
+            else:
+                # 4. Kirim Request ke System Pending Approval
+                success_count = 0
+                current_user = st.session_state.get("user_name", "Admin")
+                
+                progress_bar = st.progress(0, text="Mengirim permintaan ke Manager...")
+
+                for idx, change in enumerate(changes_found):
+                    ok, msg = submit_change_request(
+                        target_sheet=sheet_target_name,
+                        row_idx_0based=change['row_idx'],
+                        new_df_row=change['new_data'],
+                        old_df_row=change['old_data'],
+                        reason=reason,
+                        requestor=current_user
+                    )
+                    if ok: success_count += 1
+                    progress_bar.progress((idx + 1) / len(changes_found))
+                
+                progress_bar.empty()
+
+                if success_count > 0:
+                    st.success(f"✅ Berhasil mengirim {success_count} permintaan perubahan ke Manager!")
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error("Gagal mengirim permintaan.")
     with col_reason:
         reason = st.text_input("📝 Alasan Perubahan (Wajib diisi):", key=f"reason_{unique_key}", placeholder="Contoh: Koreksi typo, update status leads...")
     with col_btn:
