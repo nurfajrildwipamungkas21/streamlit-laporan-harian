@@ -3261,10 +3261,10 @@ def load_pembayaran_dp():
             df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(
                 lambda x: True if str(x).upper() == "TRUE" else False)
 
-        # 4. Normalisasi Tanggal Jatuh Tempo
+        # 4. Normalisasi Tanggal Jatuh Tempo (FIX: Gunakan dayfirst=True untuk format DD/MM/YYYY)
         if COL_JATUH_TEMPO in df.columns:
             df[COL_JATUH_TEMPO] = pd.to_datetime(
-                df[COL_JATUH_TEMPO], errors="coerce").dt.date
+                df[COL_JATUH_TEMPO], dayfirst=True, errors="coerce").dt.date
 
         # 5. Normalisasi Kolom Teks Lainnya
         text_cols = [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
