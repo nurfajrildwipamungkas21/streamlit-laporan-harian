@@ -5496,30 +5496,59 @@ elif menu_nav == "📊 Dashboard Admin":
                 admin_smart_editor_ui(df_view, "prod_edit", selected_staff_target)
         tab_ptr += 1
 
-        with all_tabs[tab_ptr]:
+        with all_tabs[tab_ptr]: # Tab Leads
             st.markdown("### 🧲 Leads Management")
             
             if not df_all.empty and COL_INTEREST in df_all.columns:
                 st.markdown("#### 📥 Filter & Download Leads (Global)")
-                sel_in = st.radio("Pilih Tingkat Interest:", ["Under 50% (A)", "50-75% (B)", "75%-100%"], horizontal=True)
-                df_leads_global = df_all[df_all[COL_INTEREST].astype(str).str.strip() == sel_in]
-                st.dataframe(df_leads_global[[COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_KESIMPULAN]], use_container_width=True)
+                
+                # [FIX 1] Mapping Filter agar sinkron dengan data database
+                # Pilihan UI -> Keyword Pencarian
+                sel_in = st.selectbox("Pilih Tingkat Interest:", ["Under 50%", "50-75%", "75%-100%"], key="adm_leads_filter")
+                
+                # Ambil keyword utama saja (misal "50-75" dari "50-75% (B)")
+                keyword_search = sel_in.split("%")[0].strip() 
+                
+                # [FIX 2] Gunakan .str.contains() agar pencarian lebih fleksibel
+                # Ini akan mencocokkan "50-75" dengan "50-75% (B)" atau "50-75%"
+                mask_leads = df_all[COL_INTEREST].astype(str).str.contains(keyword_search, case=False, na=False)
+                df_leads_global = df_all[mask_leads].copy()
+                
+                # Tampilkan Data
+                st.info(f"Ditemukan **{len(df_leads_global)}** leads potensial.")
+                
+                cols_view = [COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_KESIMPULAN, COL_INTEREST]
+                cols_final = [c for c in cols_view if c in df_leads_global.columns]
+                
+                st.dataframe(df_leads_global[cols_final], use_container_width=True, hide_index=True)
 
+                # [FIX 3] Tambahkan Fitur Download Excel
                 if HAS_OPENPYXL and not df_leads_global.empty:
-                    xb = df_to_excel_bytes(df_leads_global, sheet_name="Leads")
-                    st.download_button("⬇️ Download Leads (Excel)", data=xb, file_name=f"leads_{sel_in}.xlsx")
-            
+                    xb = df_to_excel_bytes(df_leads_global[cols_final], sheet_name="Leads_Data")
+                    if xb:
+                        st.download_button(
+                            label=f"⬇️ Download Excel ({sel_in})",
+                            data=xb, 
+                            file_name=f"Leads_{sel_in.replace(' ','_')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+            else:
+                st.info("Belum ada data leads yang masuk.")
+
             st.divider()
             
+            # Bagian Editor Leads Per Staff (Tetap)
             st.markdown("#### 🛠️ Editor Leads (Per Staff)")
             if selected_staff_target == "-- Pilih Staf --":
-                st.warning("👈 Silakan pilih nama staf di dropdown atas untuk mengedit leads.")
+                st.warning("👈 Silakan pilih nama staf di dropdown atas 'Data Controller' untuk mengedit.")
             elif not df_staff_current.empty:
                 cols_leads = [COL_TIMESTAMP, COL_NAMA_KLIEN, COL_KONTAK_KLIEN, COL_INTEREST, COL_PENDING]
-                df_view = df_staff_current[cols_leads].copy()
+                cols_exist = [c for c in cols_leads if c in df_staff_current.columns]
+                df_view = df_staff_current[cols_exist].copy()
                 admin_smart_editor_ui(df_view, "leads_edit", selected_staff_target)
             else:
-                st.info("Data leads kosong.")
+                st.info("Data leads untuk staf ini kosong.")
         tab_ptr += 1
 
         with all_tabs[tab_ptr]:
@@ -5579,53 +5608,108 @@ elif menu_nav == "📊 Dashboard Admin":
                     admin_smart_editor_ui(df_view, "img_edit", selected_staff_target)
         tab_ptr += 1
 
-        with all_tabs[tab_ptr]:
+        with all_tabs[tab_ptr]: # Tab Master Data
             st.markdown("### 📦 Master Data Editor")
-            st.caption("Mengedit data global (Closing & Pembayaran). Perubahan membutuhkan Approval Manager.")
-            md_opt = st.radio("Pilih Data Master:", ["Closing Deal", "Pembayaran (DP/Termin)"], horizontal=True)
-            target_sheet_md = SHEET_CLOSING_DEAL if md_opt == "Closing Deal" else SHEET_PEMBAYARAN
+            st.caption("Mengedit data global. Pastikan format input (Angka/Tanggal) benar.")
+            
+            md_opt = st.radio("Pilih Data Master:", ["Closing Deal", "Pembayaran (DP/Termin)"], horizontal=True, key="adm_md_radio")
+            
+            # [FIX 1] Tentukan Urutan Kolom Standar secara Eksplisit
+            if md_opt == "Closing Deal":
+                target_sheet_md = SHEET_CLOSING_DEAL
+                target_cols = CLOSING_COLUMNS # Gunakan konstanta urutan kolom yang benar
+            else:
+                target_sheet_md = SHEET_PEMBAYARAN
+                target_cols = PAYMENT_COLUMNS # [Timestamp, Group, Marketing, ... Nominal ...]
+
             ws_md = get_or_create_worksheet(target_sheet_md)
-            df_md = pd.DataFrame(ws_md.get_all_records())
+            
+            # Gunakan get_all_records untuk mengambil data
+            records = ws_md.get_all_records()
+            df_md = pd.DataFrame(records)
             
             if not df_md.empty:
+                # [FIX 2] Paksa Dataframe mengikuti urutan kolom standar
+                # Langkah ini mencegah "Link Foto" muncul di kolom "Nominal"
+                for col in target_cols:
+                    if col not in df_md.columns:
+                        df_md[col] = "" # Isi kolom kosong jika hilang
+                
+                # Reorder: Buang kolom sampah & urutkan
+                df_md = df_md[target_cols].copy()
+
+                # [FIX 3] Bersihkan Tipe Data (String Rupiah jadi Angka Integer)
                 df_md = clean_df_types_dynamically(df_md)
-                admin_smart_editor_ui(df_md, f"md_{md_opt}", target_sheet_md)
+                
+                # Tampilkan Editor
+                admin_smart_editor_ui(df_md, f"md_editor_{md_opt}", target_sheet_md)
             else:
-                st.info("Data Master kosong.")
+                st.info(f"Data Master '{md_opt}' masih kosong.")
         tab_ptr += 1
 
-        with all_tabs[tab_ptr]:
-            st.markdown("### ⚙️ Config Staff & Tim")
-            c_cfg1, c_cfg2 = st.columns(2)
-            with c_cfg1:
-                with st.form("add_staf_adm_new"):
-                    st.markdown("#### ➕ Tambah Staf Baru")
-                    new_nm = st.text_input("Nama Lengkap")
-                    if st.form_submit_button("Simpan"):
-                        ok, m = tambah_staf_baru(new_nm)
-                        if ok: 
-                            st.success(m)
-                            st.cache_data.clear()
-                            st.rerun()
-                        else: st.error(m)
+        with all_tabs[tab_ptr]: # Tab Config
+            st.markdown("### ⚙️ Config Staff & Team")
             
-            with c_cfg2:
-                st.markdown("#### 🗑️ Hapus Akses Staf")
+            # Membagi Layout menjadi 2 Bagian: Individu & Team
+            col_cfg_staf, col_cfg_team = st.columns(2)
+            
+            # --- BAGIAN KIRI: STAFF INDIVIDU ---
+            with col_cfg_staf:
+                st.markdown("#### 👤 Kelola Personel")
+                with st.form("add_staf_form"):
+                    st.caption("➕ Tambah Staf Baru")
+                    new_nm = st.text_input("Nama Lengkap")
+                    if st.form_submit_button("Simpan Staf"):
+                        if new_nm.strip():
+                            ok, m = tambah_staf_baru(new_nm)
+                            if ok: 
+                                st.success(m)
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else: st.error(m)
+                        else: st.error("Nama tidak boleh kosong.")
+                
+                st.markdown("---")
+                st.caption("🗑️ Hapus Akses Staf")
                 del_nm = st.selectbox("Pilih Nama:", ["-"] + staff_list_global, key="del_st_cfg")
-                if st.button("Hapus Akses"):
+                if st.button("Hapus Akses", use_container_width=True):
                     if del_nm != "-":
                         ok, m = hapus_staf_by_name(del_nm)
-                        if ok: 
-                            st.success(m)
-                            st.cache_data.clear()
-                            st.rerun()
-            
-            st.divider()
-            st.markdown("#### 🛠️ Edit Struktur Tim")
-            ws_tm = get_or_create_worksheet(SHEET_CONFIG_TEAM)
-            df_tm = pd.DataFrame(ws_tm.get_all_records())
-            if not df_tm.empty:
-                admin_smart_editor_ui(df_tm, "team_cfg_edit", SHEET_CONFIG_TEAM)
+                        if ok: st.success(m); st.cache_data.clear(); st.rerun()
+
+            # --- BAGIAN KANAN: TEAM (FITUR BARU) ---
+            with col_cfg_team:
+                st.markdown("#### 🏆 Kelola Tim Sales")
+                
+                # [FIX] Form Tambah Team
+                with st.expander("➕ Buat Team Baru", expanded=True):
+                    with st.form("add_team_form"):
+                        t_nama = st.text_input("Nama Team (Contoh: Tim Alpha)")
+                        t_posisi = st.text_input("Posisi (Contoh: Sales Canvas)")
+                        # Multiselect mengambil data dari daftar staf yang ada
+                        t_anggota = st.multiselect("Pilih Anggota:", staff_list_global)
+                        
+                        if st.form_submit_button("Simpan Team"):
+                            if t_nama and t_posisi and t_anggota:
+                                ok, m = tambah_team_baru(t_nama, t_posisi, t_anggota)
+                                if ok:
+                                    st.success(m)
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                                else: st.error(m)
+                            else:
+                                st.warning("Semua kolom wajib diisi.")
+                
+                st.divider()
+                st.caption("📋 Data Team Saat Ini:")
+                ws_tm = get_or_create_worksheet(SHEET_CONFIG_TEAM)
+                df_tm = pd.DataFrame(ws_tm.get_all_records())
+                if not df_tm.empty:
+                    # Filter kolom agar rapi
+                    valid_cols = [c for c in TEAM_COLUMNS if c in df_tm.columns]
+                    admin_smart_editor_ui(df_tm[valid_cols], "team_cfg_view", SHEET_CONFIG_TEAM)
         tab_ptr += 1
 
         with all_tabs[tab_ptr]:
@@ -5647,26 +5731,50 @@ elif menu_nav == "📊 Dashboard Admin":
                     st.error("Pilih nama staf dan centang konfirmasi terlebih dahulu.")
         tab_ptr += 1
 
-        with all_tabs[tab_ptr]:
+        with all_tabs[tab_ptr]: # Tab Super Editor
             st.markdown("### ⚡ Super Editor (Advanced)")
-            st.info("Gunakan fitur ini untuk mengedit Sheet Laporan Harian milik staf tertentu atau data lainnya.")
-            se_type = st.selectbox("📂 Kategori Sheet:", ["Laporan Harian Staff", "Master Data Lainnya"])
+            st.info("Mode Administrator: Mengedit langsung ke dalam Sheet.")
+            
+            se_type = st.selectbox("📂 Kategori Sheet:", ["Laporan Harian Staff", "Master Data Lainnya"], key="se_cat_fix")
             
             target_sheet_se = None
+            # Variabel untuk menyimpan standar kolom
+            forced_cols = None 
+            
             if se_type == "Laporan Harian Staff":
-                target_sheet_se = st.selectbox("👤 Pilih Nama Staff:", staff_list_global, key="se_staff_sel")
+                target_sheet_se = st.selectbox("👤 Pilih Nama Staff:", staff_list_global, key="se_st_sel")
+                forced_cols = NAMA_KOLOM_STANDAR
             else:
-                master_sheets = [SHEET_CLOSING_DEAL, SHEET_PEMBAYARAN, SHEET_TARGET_TEAM, SHEET_TARGET_INDIVIDU]
-                target_sheet_se = st.selectbox("📄 Pilih Sheet Master:", master_sheets, key="se_master_sel")
+                # Peta Nama Sheet -> Kolom Standar
+                map_master = {
+                    "Closing Deal": (SHEET_CLOSING_DEAL, CLOSING_COLUMNS),
+                    "Pembayaran": (SHEET_PEMBAYARAN, PAYMENT_COLUMNS),
+                    "Target Team": (SHEET_TARGET_TEAM, TEAM_CHECKLIST_COLUMNS),
+                    "Target Individu": (SHEET_TARGET_INDIVIDU, INDIV_CHECKLIST_COLUMNS),
+                    "Config Team": (SHEET_CONFIG_TEAM, TEAM_COLUMNS)
+                }
+                sel_master = st.selectbox("📄 Pilih Sheet Master:", list(map_master.keys()), key="se_ms_sel")
+                target_sheet_se, forced_cols = map_master[sel_master]
             
             if target_sheet_se:
                 st.divider()
-                st.markdown(f"**Editing: {target_sheet_se}**")
+                st.markdown(f"**Editing: `{target_sheet_se}`**")
                 try:
                     ws_se = get_or_create_worksheet(target_sheet_se)
                     df_se = pd.DataFrame(ws_se.get_all_records())
+                    
                     if not df_se.empty:
+                        # [FIX] Terapkan pemaksaan urutan kolom (Reordering)
+                        if forced_cols:
+                            # Isi kolom hilang dengan string kosong
+                            for c in forced_cols:
+                                if c not in df_se.columns: df_se[c] = ""
+                            # Urutkan dataframe berdasarkan standar kolom
+                            df_se = df_se[forced_cols].copy()
+
+                        # Bersihkan tipe data (Integer, Date)
                         df_se = clean_df_types_dynamically(df_se)
+                        
                         admin_smart_editor_ui(df_se, f"super_edit_{target_sheet_se}", target_sheet_se)
                     else:
                         st.info(f"Sheet '{target_sheet_se}' kosong.")
