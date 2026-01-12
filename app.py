@@ -4725,6 +4725,7 @@ elif menu_nav == "📝 Laporan Harian":
                     kesimpulan = st.text_area("Kesimpulan / Hasil", height=80)
                     kendala = st.text_area(
                         "Kendala Internal/Lapangan", height=60)
+                    kendala_klien = st.text_area("Kendala dari Sisi Klien", height=60, placeholder="Misal: Budget belum turun, owner sedang keluar kota...")
                     next_plan = st.text_input("Next Plan / Pending (Reminder)")
                     st.markdown("### 👤 Data Klien")
                     cl_nama = st.text_input("Nama Klien")
@@ -4744,7 +4745,7 @@ elif menu_nav == "📝 Laporan Harian":
                                     f, pelapor, "Laporan_Harian") for f in foto]
                                 final_link = ", ".join(links)
                             row_data = [ts, pelapor, lokasi, deskripsi, final_link, "-", kesimpulan,
-                                        kendala, "-", next_plan, "-", cl_interest, cl_nama, cl_kontak]
+                                        kendala,kendala_klien, "-", next_plan, "-", cl_interest, cl_nama, cl_kontak]
                             if simpan_laporan_harian_batch([row_data], pelapor):
                                 st.success("Laporan Terkirim!")
                                 st.cache_data.clear()
