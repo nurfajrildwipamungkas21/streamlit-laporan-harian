@@ -3261,10 +3261,15 @@ def load_pembayaran_dp():
             df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(
                 lambda x: True if str(x).upper() == "TRUE" else False)
 
-        # 4. Normalisasi Tanggal Jatuh Tempo (FIX: Gunakan dayfirst=True untuk format DD/MM/YYYY)
+        # 4. Normalisasi Tanggal Jatuh Tempo (ROBUST FIX)
         if COL_JATUH_TEMPO in df.columns:
+            # Langkah 1: Ubah semua ke string, hilangkan spasi, ubah '-' jadi '/'
+            df[COL_JATUH_TEMPO] = df[COL_JATUH_TEMPO].astype(str).str.strip().str.replace('-', '/', regex=False)
+            
+            # Langkah 2: Konversi dengan dayfirst=True (memaksa bacaan DD/MM/YYYY)
             df[COL_JATUH_TEMPO] = pd.to_datetime(
-                df[COL_JATUH_TEMPO], dayfirst=True, errors="coerce").dt.date
+                df[COL_JATUH_TEMPO], dayfirst=True, errors="coerce"
+            ).dt.date
 
         # 5. Normalisasi Kolom Teks Lainnya
         text_cols = [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
@@ -3530,8 +3535,11 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
     today = datetime.now(tz=TZ_JKT).date()
     df_alert = df.copy()
 
-    # 1. Normalisasi Tanggal (Gunakan dayfirst agar akurat)
+    # 1. Normalisasi Tanggal (Pre-Cleaning ketat)
     if COL_JATUH_TEMPO in df_alert.columns:
+        # Pastikan format string bersih (ganti strip dengan slash)
+        df_alert[COL_JATUH_TEMPO] = df_alert[COL_JATUH_TEMPO].astype(str).str.strip().str.replace('-', '/', regex=False)
+        
         df_alert[COL_JATUH_TEMPO] = pd.to_datetime(
             df_alert[COL_JATUH_TEMPO], 
             dayfirst=True, 
