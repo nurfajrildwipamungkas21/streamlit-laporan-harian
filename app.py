@@ -3521,54 +3521,42 @@ def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nom
 
 def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
     """
-    Sistem Alert Pintar (Hybrid): 
-    Mendeteksi tagihan berdasarkan Sisa Pembayaran > 0 dan Tanggal Jatuh Tempo.
-    Mempertahankan fleksibilitas parameter 'days_due_soon' dari kode lama.
+    Sistem Alert Pintar: Mendeteksi tagihan berdasarkan Sisa > 0 dan Tanggal Jatuh Tempo.
     """
-    # 1. Validasi awal: Jika data kosong, kembalikan dataframe kosong dengan kolom yang benar
     if df is None or df.empty:
-        cols = df.columns if df is not None else PAYMENT_COLUMNS
-        return pd.DataFrame(columns=cols), pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=PAYMENT_COLUMNS), pd.DataFrame(columns=PAYMENT_COLUMNS)
 
+    # Ambil waktu sekarang (WIB)
     today = datetime.now(tz=TZ_JKT).date()
-    
-    # 2. Copy data agar manipulasi tipe data tidak merusak data utama di memori
     df_alert = df.copy()
 
-    # 3. Normalisasi Tipe Data (Penting untuk kalkulator sisa)
-    # Pastikan Jatuh Tempo adalah objek date dan Sisa Pembayaran adalah angka
+    # 1. Normalisasi Tanggal (Gunakan dayfirst agar akurat)
     if COL_JATUH_TEMPO in df_alert.columns:
-        # Gunakan dayfirst=True agar 12/01/2026 dibaca 12 Januari, bukan 1 Desember
         df_alert[COL_JATUH_TEMPO] = pd.to_datetime(
             df_alert[COL_JATUH_TEMPO], 
             dayfirst=True, 
             errors="coerce"
         ).dt.date
     
+    # 2. Normalisasi Sisa Pembayaran (Pastikan angka murni)
     if COL_SISA_BAYAR in df_alert.columns:
         df_alert[COL_SISA_BAYAR] = pd.to_numeric(df_alert[COL_SISA_BAYAR], errors='coerce').fillna(0)
     else:
-        # Fallback jika kolom sisa belum ada (masa transisi), buat sisa 0 agar tidak alert
         df_alert[COL_SISA_BAYAR] = 0
 
-    # 4. KRITERIA PINTAR: Filter hanya data yang benar-benar belum lunas (Sisa > 0)
-    # Fitur lama 'COL_STATUS_BAYAR == False' otomatis terwakili oleh 'Sisa > 0'
+    # 3. FILTER TAGIHAN AKTIF: Ambil yang sisa bayarnya > 0 DAN tanggalnya ada
     df_tagihan_aktif = df_alert[
         (df_alert[COL_SISA_BAYAR] > 0) & 
         (pd.notna(df_alert[COL_JATUH_TEMPO]))
     ].copy()
 
-    # Jika tidak ada tagihan aktif (semua sudah lunas), kembalikan DF kosong
     if df_tagihan_aktif.empty:
         return pd.DataFrame(columns=df.columns), pd.DataFrame(columns=df.columns)
 
-    # 5. PEMBAGIAN KATEGORI (Overdue vs Due Soon)
-    
-    # Kategori A: Overdue (Sisa > 0 DAN Tanggal sudah terlewat)
+    # 4. KATEGORI OVERDUE: Jatuh tempo sudah terlewat ( < today )
     overdue = df_tagihan_aktif[df_tagihan_aktif[COL_JATUH_TEMPO] < today].copy()
     
-    # Kategori B: Due Soon (Sisa > 0 DAN Tanggal mendekati/hari ini)
-    # Menggunakan parameter 'days_due_soon' agar fitur lama tetap berfungsi
+    # 5. KATEGORI JATUH TEMPO DEKAT: Hari ini sampai H+3 ( >= today & <= today+3 )
     due_soon = df_tagihan_aktif[
         (df_tagihan_aktif[COL_JATUH_TEMPO] >= today) & 
         (df_tagihan_aktif[COL_JATUH_TEMPO] <= (today + timedelta(days=days_due_soon)))
