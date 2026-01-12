@@ -5610,41 +5610,27 @@ elif menu_nav == "📊 Dashboard Admin":
 
         with all_tabs[tab_ptr]: # Tab Master Data
             st.markdown("### 📦 Master Data Editor")
-            st.caption("Mengedit data global. Pastikan format input (Angka/Tanggal) benar.")
+            st.caption("Mengedit data global. Data diambil langsung dari database utama.")
             
             md_opt = st.radio("Pilih Data Master:", ["Closing Deal", "Pembayaran (DP/Termin)"], horizontal=True, key="adm_md_radio")
             
-            # [FIX 1] Tentukan Urutan Kolom Standar secara Eksplisit
-            if md_opt == "Closing Deal":
-                target_sheet_md = SHEET_CLOSING_DEAL
-                target_cols = CLOSING_COLUMNS # Gunakan konstanta urutan kolom yang benar
-            else:
-                target_sheet_md = SHEET_PEMBAYARAN
-                target_cols = PAYMENT_COLUMNS # [Timestamp, Group, Marketing, ... Nominal ...]
+            # [PERBAIKAN] Gunakan Loader Standar agar format Rupiah/Tanggal terbaca otomatis
+            df_md = pd.DataFrame()
+            target_sheet_md = ""
 
-            ws_md = get_or_create_worksheet(target_sheet_md)
-            
-            # Gunakan get_all_records untuk mengambil data
-            records = ws_md.get_all_records()
-            df_md = pd.DataFrame(records)
+            if md_opt == "Closing Deal":
+                df_md = load_closing_deal() # Fungsi ini sudah otomatis parsing angka & tanggal
+                target_sheet_md = SHEET_CLOSING_DEAL
+            else:
+                df_md = load_pembayaran_dp() # Fungsi ini sudah otomatis handle parsing Rupiah
+                target_sheet_md = SHEET_PEMBAYARAN
             
             if not df_md.empty:
-                # [FIX 2] Paksa Dataframe mengikuti urutan kolom standar
-                # Langkah ini mencegah "Link Foto" muncul di kolom "Nominal"
-                for col in target_cols:
-                    if col not in df_md.columns:
-                        df_md[col] = "" # Isi kolom kosong jika hilang
-                
-                # Reorder: Buang kolom sampah & urutkan
-                df_md = df_md[target_cols].copy()
-
-                # [FIX 3] Bersihkan Tipe Data (String Rupiah jadi Angka Integer)
-                df_md = clean_df_types_dynamically(df_md)
-                
-                # Tampilkan Editor
+                # Tampilkan Editor dengan data yang sudah bersih
+                # Note: admin_smart_editor_ui akan otomatis menangani diff checking
                 admin_smart_editor_ui(df_md, f"md_editor_{md_opt}", target_sheet_md)
             else:
-                st.info(f"Data Master '{md_opt}' masih kosong.")
+                st.info(f"Data Master '{md_opt}' masih kosong atau belum ada entri.")
         tab_ptr += 1
 
         with all_tabs[tab_ptr]: # Tab Config
@@ -5761,23 +5747,35 @@ elif menu_nav == "📊 Dashboard Admin":
                 st.markdown(f"**Editing: `{target_sheet_se}`**")
                 try:
                     ws_se = get_or_create_worksheet(target_sheet_se)
-                    df_se = pd.DataFrame(ws_se.get_all_records())
                     
-                    if not df_se.empty:
-                        # [FIX] Terapkan pemaksaan urutan kolom (Reordering)
+                    # [PERBAIKAN KRUSIAL] Pastikan header sinkron sebelum load data
+                    # Ini memperbaiki masalah data kosong pada Target Individu/Team
+                    if forced_cols:
+                        ensure_headers(ws_se, forced_cols)
+
+                    # Load ulang setelah memastikan header
+                    raw_data = ws_se.get_all_records()
+                    df_se = pd.DataFrame(raw_data)
+                    
+                    # Jika dataframe kosong tapi kita punya header, buat dataframe kosong dengan kolom tersebut
+                    if df_se.empty and forced_cols:
+                        df_se = pd.DataFrame(columns=forced_cols)
+
+                    # Jika ada data atau minimal kolom
+                    if not df_se.empty or forced_cols:
+                        # Terapkan pemaksaan urutan kolom (Reordering) & Normalisasi
                         if forced_cols:
-                            # Isi kolom hilang dengan string kosong
                             for c in forced_cols:
-                                if c not in df_se.columns: df_se[c] = ""
-                            # Urutkan dataframe berdasarkan standar kolom
+                                if c not in df_se.columns: 
+                                    df_se[c] = "" # Isi default string agar tidak error
                             df_se = df_se[forced_cols].copy()
 
-                        # Bersihkan tipe data (Integer, Date)
+                        # Bersihkan tipe data (Integer, Date) agar editor tidak error
                         df_se = clean_df_types_dynamically(df_se)
                         
                         admin_smart_editor_ui(df_se, f"super_edit_{target_sheet_se}", target_sheet_se)
                     else:
-                        st.info(f"Sheet '{target_sheet_se}' kosong.")
+                        st.info(f"Sheet '{target_sheet_se}' benar-benar kosong.")
                 except Exception as e:
                     st.error(f"Gagal memuat sheet: {e}")
 
