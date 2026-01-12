@@ -1233,26 +1233,40 @@ SHEET_CLOSING_DEAL = "Closing_Deal"
 SHEET_PEMBAYARAN = "Pembayaran_DP"
 SHEET_PRESENSI = "Presensi_Kehadiran"
 PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari",
-                    "Tanggal", "Bulan", "Tahun", "Waktu"]
+                    "Tanggal", "Bulan", "Tahun", "Waktu","Link Foto"]
 
 
 def init_presensi_db():
-    """Memastikan sheet presensi tersedia."""
+    """Memastikan sheet presensi tersedia dan header sesuai standar terbaru (termasuk Link Foto)."""
     try:
         try:
+            # 1. Mencoba membuka worksheet yang sudah ada
             ws = spreadsheet.worksheet(SHEET_PRESENSI)
         except gspread.WorksheetNotFound:
+            # 2. Jika worksheet benar-benar belum ada, buat baru
             ws = spreadsheet.add_worksheet(
-                title=SHEET_PRESENSI, rows=2000, cols=len(PRESENSI_COLUMNS))
+                title=SHEET_PRESENSI, 
+                rows=2000, 
+                cols=len(PRESENSI_COLUMNS)
+            )
+            # Masukkan header awal untuk pertama kali
             ws.append_row(PRESENSI_COLUMNS, value_input_option="USER_ENTERED")
             maybe_auto_format_sheet(ws, force=True)
+        
+        # 3. KUNCI REVISI: Pastikan kolom selalu sinkron. 
+        # Jika Anda baru saja menambah "Link Foto" ke PRESENSI_COLUMNS, 
+        # fungsi ini akan otomatis menambahkannya di Google Sheets Anda.
+        ensure_headers(ws, PRESENSI_COLUMNS)
+        
         return ws
-    except Exception:
+    except Exception as e:
+        # Menampilkan log error di terminal agar mudah dilacak jika koneksi bermasalah
+        print(f"Error init_presensi_db: {e}")
         return None
 
 
-def catat_presensi(nama_staf):
-    """Logika utama presensi: Otomatis, Real-time, No-edit."""
+def catat_presensi(nama_staf, file_foto=None):
+    """Logika utama presensi: Otomatis, Real-time, No-edit + Upload Foto Dropbox."""
     ws = init_presensi_db()
     if not ws:
         return False, "Database Presensi Error"
@@ -1260,7 +1274,7 @@ def catat_presensi(nama_staf):
     # 1. Ambil Waktu Real-Time (WIB)
     now = datetime.now(TZ_JKT)
 
-    # Mapping Hari Indonesia
+    # Mapping Hari Indonesia (Tetap dipertahankan dari flow lama)
     hari_map = {
         "Monday": "Senin", "Tuesday": "Selasa", "Wednesday": "Rabu",
         "Thursday": "Kamis", "Friday": "Jumat", "Saturday": "Sabtu", "Sunday": "Minggu"
@@ -1273,16 +1287,28 @@ def catat_presensi(nama_staf):
     tahun = now.strftime("%Y")
     waktu = now.strftime("%H:%M:%S")
 
-    # 2. Cek Duplikasi (Opsional: Cegah absen 2x di hari yang sama)
-    # Jika ingin membolehkan absen berkali-kali, bagian ini bisa dihapus
+    # 2. Cek Duplikasi (Cegah absen 2x di hari yang sama)
     records = ws.get_all_records()
     today_str = now.strftime("%d-%m-%Y")
     for r in records:
         if str(r.get("Nama")) == nama_staf and today_str in str(r.get("Timestamp")):
             return False, f"Anda sudah melakukan presensi hari ini pada {r.get('Waktu')}."
 
-    # 3. Masukkan Data (User tidak input manual, semua dari sistem)
-    row = [f"'{ts_full}", nama_staf, hari, tanggal, bulan, tahun, waktu]
+    # 3. Handle Upload Foto ke Dropbox (Logika Baru)
+    link_foto = "-" # Default jika tidak ada foto
+    if file_foto is not None:
+        if KONEKSI_DROPBOX_BERHASIL:
+            # Menggunakan fungsi upload_ke_dropbox yang sudah Anda miliki
+            url = upload_ke_dropbox(file_foto, nama_staf, kategori="Presensi")
+            if url and url != "-":
+                link_foto = url
+        else:
+            # Jika koneksi dropbox gagal tapi user melampirkan foto
+            return False, "Gagal simpan: Koneksi Dropbox bermasalah."
+
+    # 4. Masukkan Data ke GSheet (Update: Menambahkan link_foto di urutan terakhir)
+    # Urutan sesuai PRESENSI_COLUMNS baru: [Timestamp, Nama, Hari, Tanggal, Bulan, Tahun, Waktu, Link Foto]
+    row = [f"'{ts_full}", nama_staf, hari, tanggal, bulan, tahun, waktu, link_foto]
     ws.append_row(row, value_input_option="USER_ENTERED")
 
     return True, f"Berhasil! Presensi tercatat pukul {waktu} WIB."
@@ -4538,15 +4564,26 @@ def render_audit_mobile():
 # =========================================================
 
 # --- 1. HALAMAN PRESENSI (REAL-TIME & NO-EDIT) ---
+# --- 1. HALAMAN PRESENSI (REAL-TIME + PHOTO UPLOAD) ---
 if menu_nav == "📅 Presensi":
     st.markdown("## 📅 Presensi Kehadiran Real-Time")
     st.caption(
-        "Silakan pilih nama Anda. Waktu, hari, dan tanggal akan tercatat otomatis oleh sistem (WIB).")
+        "Silakan pilih nama Anda dan lampirkan foto selfie/bukti kehadiran. Waktu akan tercatat otomatis (WIB).")
 
     with st.container(border=True):
         staff_list = get_daftar_staf_terbaru()
         pilih_nama = st.selectbox(
             "Pilih Nama Anda:", ["-- Pilih Nama --"] + staff_list, key="presensi_name_sel")
+
+        # --- FITUR UPLOAD FOTO ---
+        input_foto = st.file_uploader("Ambil Foto Selfie / Bukti (Kamera/Galeri)", 
+                                     type=['png', 'jpg', 'jpeg'],
+                                     help="Gunakan kamera HP untuk selfie saat presensi.")
+        
+        if input_foto:
+            # Menampilkan preview foto kecil agar user yakin file sudah terpilih
+            st.image(input_foto, caption="Preview Selfie", width=150)
+        # -------------------------
 
         waktu_skrg = datetime.now(TZ_JKT)
         st.info(
@@ -4555,17 +4592,22 @@ if menu_nav == "📅 Presensi":
         if st.button("✅ Kirim Presensi Sekarang", type="primary", use_container_width=True):
             if pilih_nama == "-- Pilih Nama --":
                 st.error("Silakan pilih nama terlebih dahulu!")
+            elif input_foto is None:
+                st.error("Wajib melampirkan foto selfie/bukti untuk presensi!")
             else:
-                with st.spinner("Mencatat kehadiran..."):
-                    ok, msg = catat_presensi(pilih_nama)
+                with st.spinner("Mengupload foto & mencatat kehadiran..."):
+                    # Memanggil fungsi catat_presensi dengan parameter file_foto
+                    ok, msg = catat_presensi(pilih_nama, file_foto=input_foto)
+                    
                     if ok:
                         st.success(msg)
+                        # Mencatat ke Global Audit Log
                         force_audit_log(
                             actor=pilih_nama,
                             action="✅ PRESENSI",
                             target_sheet="Presensi_Kehadiran",
-                            chat_msg="Absensi Masuk Real-time",
-                            details_input=f"Presensi sukses pukul {waktu_skrg.strftime('%H:%M:%S')}"
+                            chat_msg="Presensi Masuk + Upload Foto",
+                            details_input=f"Waktu: {waktu_skrg.strftime('%H:%M:%S')} | Foto tersimpan di Dropbox"
                         )
                         time.sleep(2)
                         st.rerun()
@@ -4574,18 +4616,30 @@ if menu_nav == "📅 Presensi":
 
     st.divider()
     st.markdown("### 📋 Kehadiran Hari Ini")
+    
+    # Menampilkan riwayat kehadiran hari ini di bawah form
     ws_p = init_presensi_db()
     if ws_p:
         data_p = ws_p.get_all_records()
         if data_p:
             df_p = pd.DataFrame(data_p)
+            # Filter data berdasarkan Tanggal dan Bulan hari ini agar list tidak terlalu panjang
             tgl_hari_ini = waktu_skrg.strftime("%d")
             bln_hari_ini = waktu_skrg.strftime("%B")
+            
             df_today = df_p[(df_p['Tanggal'].astype(str) == tgl_hari_ini) & (
                 df_p['Bulan'] == bln_hari_ini)]
+            
             if not df_today.empty:
-                st.dataframe(df_today, use_container_width=True,
-                             hide_index=True)
+                # Menggunakan column_config agar Link Foto bisa diklik langsung
+                st.dataframe(
+                    df_today, 
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Link Foto": st.column_config.LinkColumn("Lihat Foto")
+                    }
+                )
             else:
                 st.info("Belum ada data kehadiran hari ini.")
 
