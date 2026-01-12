@@ -2204,15 +2204,24 @@ def append_payment_ts_update(existing_log: str, ts: str, actor: str, changes):
 # UI DISPLAY HELPERS (RUPIAH)
 # =========================================================
 def payment_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    """Untuk tampilan UI saja."""
+    """
+    Mengubah kolom angka menjadi format string 'Rp 2.000.000' khusus untuk tampilan UI.
+    """
     dfv = df.copy()
     if dfv is None or dfv.empty:
         return dfv
-    if COL_NOMINAL_BAYAR in dfv.columns:
-        dfv[COL_NOMINAL_BAYAR] = dfv[COL_NOMINAL_BAYAR].apply(
-            lambda x: "" if x is None or pd.isna(
-                x) else format_rupiah_display(x)
-        )
+    
+    # Daftar kolom yang harus diformat Rupiah
+    money_cols = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
+    
+    for col in money_cols:
+        if col in dfv.columns:
+            # Fungsi lambda: Cek validitas angka -> Format Rupiah dengan Titik
+            dfv[col] = dfv[col].apply(
+                lambda x: "Rp " + "{:,.0f}".format(parse_rupiah_to_int(x)).replace(",", ".") 
+                if parse_rupiah_to_int(x) is not None else "Rp 0"
+            )
+            
     return dfv
 
 
@@ -4504,29 +4513,37 @@ def render_payment_mobile():
                 )
 
         # =========================================================
-
-        # =========================================================
         # 3. EDITOR DATA (Audit Log Otomatis)
         # =========================================================
+
         st.markdown("#### 📋 Edit Data & Cek Status")
         st.caption("Ubah status 'Lunas' atau 'Jatuh Tempo' langsung di tabel bawah ini.")
 
-        # Formatting Rupiah untuk tampilan editor (hanya visual)
+        # [UPDATE] 1. Format Data untuk Tampilan (Ada Titik & Rp)
+        # Menggunakan helper payment_df_for_display yang sudah diperbarui
         df_view = payment_df_for_display(df_pay)
         
-        # Sesuai Code Kedua: Batasi kolom yang boleh diubah staf via HP
+        # [UPDATE] 2. Konfigurasi Kolom
+        # Kita set kolom uang sebagai TextColumn agar format "Rp 200.000" tidak diubah balik oleh Streamlit
+        # Kolom lain (Status, Tanggal, dll) tetap menggunakan konfigurasi lama
+        column_configs = {
+            COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Lunas?", width="small"),
+            COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", format="DD/MM/YYYY"),
+            COL_BUKTI_BAYAR: st.column_config.LinkColumn("Bukti"),
+            COL_TS_UPDATE: st.column_config.TextColumn("Riwayat Perubahan (Log)", disabled=True),
+            # Kolom Uang (Disabled karena ini view mobile, edit status/tanggal saja)
+            COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True),
+            COL_NILAI_KESEPAKATAN: st.column_config.TextColumn("Total Deal", disabled=True),
+            COL_SISA_BAYAR: st.column_config.TextColumn("Sisa", disabled=True),
+        }
+
+        # Sesuai Code Lama: Batasi kolom yang boleh diubah staf via HP
         editable_cols = [COL_STATUS_BAYAR, COL_JATUH_TEMPO, COL_CATATAN_BAYAR]
         disabled_cols = [c for c in df_view.columns if c not in editable_cols]
 
         edited_pay_mob = st.data_editor(
             df_view,
-            column_config={
-                COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Lunas?", width="small"),
-                COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", format="DD/MM/YYYY"),
-                COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal", disabled=True),
-                COL_BUKTI_BAYAR: st.column_config.LinkColumn("Bukti"),
-                COL_TS_UPDATE: st.column_config.TextColumn("Riwayat Perubahan (Log)", disabled=True)
-            },
+            column_config=column_configs,
             disabled=disabled_cols,
             hide_index=True,
             use_container_width=True,
@@ -4539,9 +4556,21 @@ def render_payment_mobile():
                 # Actor diambil dari sesi login (Staff/Admin)
                 actor_name = st.session_state.get("user_name", "Mobile User")
                 
-                # Membandingkan data lama vs baru untuk membuat catatan log otomatis
-                # Menggunakan helper apply_audit_payments_changes dari migrasi sebelumnya
-                final_df = apply_audit_payments_changes(df_pay, edited_pay_mob, actor=actor_name)
+                # [UPDATE] 3. Cleaning Data Sebelum Disimpan
+                # Karena tampilan menggunakan Text (Rp ...), kita harus kembalikan ke Integer
+                # agar saat dibandingkan dengan database asli (df_pay) tidak dianggap berbeda semua.
+                
+                df_clean_edit = edited_pay_mob.copy()
+                
+                # Daftar kolom uang yang perlu dibersihkan kembali menjadi angka
+                cols_to_clean = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
+                for c in cols_to_clean:
+                    if c in df_clean_edit.columns:
+                        df_clean_edit[c] = df_clean_edit[c].apply(parse_rupiah_to_int)
+
+                # Membandingkan data lama (df_pay) vs data baru yang sudah dibersihkan (df_clean_edit)
+                # Menggunakan helper apply_audit_payments_changes dari kode lama
+                final_df = apply_audit_payments_changes(df_pay, df_clean_edit, actor=actor_name)
                 
                 if save_pembayaran_dp(final_df):
                     st.success("✅ Perubahan database berhasil disimpan!")
