@@ -4257,10 +4257,50 @@ def render_payment_mobile():
     if not df_pay.empty:
         # Sistem Peringatan (Overdue & Due Soon)
         overdue, due_soon = build_alert_pembayaran(df_pay)
+
+        # [UPDATE] TABEL RINCIAN UNTUK FOLLOW UP (MOBILE)
+        
+        # 1. ALERT OVERDUE (MERAH)
         if not overdue.empty:
-            st.error(f"⛔ **{len(overdue)} Data Overdue!** Segera follow up pembayaran yang terlambat.")
+            st.error(f"⛔ **{len(overdue)} TAGIHAN OVERDUE!**")
+            # Expander otomatis terbuka (expanded=True) agar langsung terlihat
+            with st.expander("📄 LIHAT DATA & KONTAK (Klik)", expanded=True):
+                # Ambil kolom penting: Marketing, Klien, Sisa, Catatan
+                df_ov_mob = overdue[[COL_MARKETING, COL_GROUP, COL_SISA_BAYAR, COL_CATATAN_BAYAR]].copy()
+                # Format Rupiah
+                df_ov_mob[COL_SISA_BAYAR] = df_ov_mob[COL_SISA_BAYAR].apply(format_rupiah_display)
+                
+                st.dataframe(
+                    df_ov_mob,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        COL_MARKETING: st.column_config.TextColumn("Sales", width="small"),
+                        COL_GROUP: st.column_config.TextColumn("Klien"),
+                        COL_SISA_BAYAR: st.column_config.TextColumn("Sisa"),
+                        COL_CATATAN_BAYAR: st.column_config.TextColumn("Kontak/WA")
+                    }
+                )
+
+        # 2. ALERT JATUH TEMPO DEKAT (KUNING)
         if not due_soon.empty:
-            st.warning(f"⚠️ **{len(due_soon)} Jatuh Tempo Dekat.** Batas bayar dalam 3 hari ke depan.")
+            st.warning(f"⚠️ **{len(due_soon)} Jatuh Tempo Dekat (≤3 Hari)**")
+            with st.expander("📄 Lihat Detail", expanded=False):
+                df_ds_mob = due_soon[[COL_GROUP, COL_SISA_BAYAR, COL_JATUH_TEMPO]].copy()
+                df_ds_mob[COL_SISA_BAYAR] = df_ds_mob[COL_SISA_BAYAR].apply(format_rupiah_display)
+                
+                st.dataframe(
+                    df_ds_mob,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        COL_GROUP: "Klien",
+                        COL_SISA_BAYAR: "Sisa",
+                        COL_JATUH_TEMPO: st.column_config.DateColumn("Tgl", format="DD/MM")
+                    }
+                )
+
+        # =========================================================
 
         # =========================================================
         # 3. EDITOR DATA (Audit Log Otomatis)
@@ -4937,16 +4977,58 @@ elif menu_nav == "💳 Pembayaran":
             # --- Sistem Alert Pintar (Berdasarkan Sisa Bayar) ---
             overdue, due_soon = build_alert_pembayaran(df_pay)
             col_stat1, col_stat2 = st.columns(2)
+            
+            # Tampilkan Angka Summary
             with col_stat1:
                 st.metric("⛔ Overdue (Belum Lunas)", len(overdue))
-                if not overdue.empty:
-                    st.error("Ada tagihan yang melewati jatuh tempo!")
             with col_stat2:
                 st.metric("⚠️ Jatuh Tempo Dekat (≤ 3 Hari)", len(due_soon))
-                if not due_soon.empty:
-                    st.warning("Segera lakukan penagihan ulang.")
 
-            st.caption("Klik dua kali pada sel untuk mengedit. Kolom Log & Timestamp otomatis terkunci.")
+            # [UPDATE] TABEL DETAIL UNTUK ADMIN (DESKTOP)
+            # Ditampilkan lebar penuh di bawah angka statistik
+            
+            if not overdue.empty:
+                st.error(f"🚨 **PERHATIAN: Ada {len(overdue)} Tagihan Lewat Jatuh Tempo!**")
+                with st.expander("🔴 KLIK UNTUK LIHAT DAFTAR PENAGIHAN & KONTAK WA", expanded=True):
+                    # Menampilkan kolom lengkap: Sales, Klien, Tanggal, Sisa Uang, dan Catatan Kontak
+                    df_ov_desk = overdue[[COL_MARKETING, COL_GROUP, COL_JATUH_TEMPO, COL_SISA_BAYAR, COL_CATATAN_BAYAR]].copy()
+                    # Format angka jadi Rupiah
+                    df_ov_desk[COL_SISA_BAYAR] = df_ov_desk[COL_SISA_BAYAR].apply(format_rupiah_display)
+                    
+                    st.dataframe(
+                        df_ov_desk,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            COL_MARKETING: st.column_config.TextColumn("👤 Sales PIC", width="medium"),
+                            COL_GROUP: st.column_config.TextColumn("🏢 Nama Klien", width="medium"),
+                            COL_JATUH_TEMPO: st.column_config.DateColumn("📅 Jatuh Tempo", format="DD MMM YYYY"),
+                            COL_SISA_BAYAR: st.column_config.TextColumn("💰 Sisa Tagihan", width="medium"),
+                            COL_CATATAN_BAYAR: st.column_config.TextColumn("📞 Catatan / Kontak WA", width="large")
+                        }
+                    )
+
+            if not due_soon.empty:
+                st.warning(f"🔔 **REMINDER: {len(due_soon)} Tagihan akan jatuh tempo dalam 3 hari.**")
+                with st.expander("🟡 LIHAT DAFTAR DUE SOON", expanded=True):
+                    df_soon_desk = due_soon[[COL_MARKETING, COL_GROUP, COL_JATUH_TEMPO, COL_SISA_BAYAR, COL_CATATAN_BAYAR]].copy()
+                    df_soon_desk[COL_SISA_BAYAR] = df_soon_desk[COL_SISA_BAYAR].apply(format_rupiah_display)
+                    
+                    st.dataframe(
+                        df_soon_desk,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            COL_MARKETING: st.column_config.TextColumn("👤 Sales PIC", width="medium"),
+                            COL_GROUP: st.column_config.TextColumn("🏢 Nama Klien", width="medium"),
+                            COL_JATUH_TEMPO: st.column_config.DateColumn("📅 Jatuh Tempo", format="DD MMM YYYY"),
+                            COL_SISA_BAYAR: st.column_config.TextColumn("💰 Sisa Tagihan", width="medium"),
+                            COL_CATATAN_BAYAR: st.column_config.TextColumn("📞 Catatan / Kontak WA", width="large")
+                        }
+                    )
+
+            st.divider()
+            st.caption("Klik dua kali pada sel tabel utama di bawah ini untuk mengedit data pembayaran.")
 
             # --- 1. PROSES DATA SECARA DINAMIS (Normalisasi Tipe Data) ---
             df_ready = clean_df_types_dynamically(df_pay)
