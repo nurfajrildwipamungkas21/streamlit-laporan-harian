@@ -5361,7 +5361,7 @@ elif menu_nav == "📊 Dashboard Admin":
                         # Penyiapan Data Non-Visual
                         staf_stats_str = json.dumps(report_counts.to_dict(), indent=2)
                         
-                        # 1. Konstruksi Prompt Terstruktur (Meniru format [META], [SYSTEM], [TASK])
+                        # 1. Konstruksi Prompt Terstruktur
                         full_prompt = f"""
                         [CONTEXT_DATA]
                         Nama Pemimpin: Pak Nugroho
@@ -5384,7 +5384,7 @@ elif menu_nav == "📊 Dashboard Admin":
                         Berikan analisis kinerja tim Sales kepada Pak Nugroho secara naratif dan kreatif berdasarkan data laporan yang terkumpul hari ini.
                         """
 
-                        # 2. Eksekusi Pemanggilan dengan Mekanisme Fallback (Anti-Gagal)
+                        # 2. Eksekusi Pemanggilan dengan Mekanisme Fallback
                         ai_reply = ""
                         last_error = ""
                         
@@ -5398,16 +5398,19 @@ elif menu_nav == "📊 Dashboard Admin":
                                     resp = model.generate_content(full_prompt)
                                     ai_reply = resp.text
                                 
-                                if ai_reply: break # Jika berhasil, keluar dari perulangan model
+                                if ai_reply: break 
                             except Exception as e:
                                 last_error = str(e)
-                                continue # Coba model berikutnya jika model ini gagal
+                                continue 
 
                         # 3. Tampilkan Hasil
                         if ai_reply:
                             st.info(ai_reply)
                         else:
                             st.error(f"⚠️ Gagal mendapatkan insight setelah mencoba semua model. Error terakhir: {last_error}")
+
+            # --- PERBAIKAN UTAMA ADA DI SINI (Menambahkan Increment Tab Pointer) ---
+            tab_ptr += 1
 
             # -----------------------------------------------------------
             # 3. TAB LEADS & INTEREST (EXPORT ENABLED)
@@ -5420,7 +5423,7 @@ elif menu_nav == "📊 Dashboard Admin":
                     df_leads = df_all[df_all[COL_INTEREST].astype(
                         str).str.strip() == sel_in]
                     st.dataframe(df_leads[[COL_TIMESTAMP, COL_NAMA, COL_NAMA_KLIEN,
-                                 COL_KONTAK_KLIEN, COL_KESIMPULAN]], use_container_width=True)
+                                           COL_KONTAK_KLIEN, COL_KESIMPULAN]], use_container_width=True)
 
                     if HAS_OPENPYXL and not df_leads.empty:
                         xb = df_to_excel_bytes(df_leads, sheet_name="Leads")
@@ -5499,7 +5502,7 @@ elif menu_nav == "📊 Dashboard Admin":
             tab_ptr += 1
 
             # -----------------------------------------------------------
-            # 8. TAB HAPUS AKUN (FITUR KHUSUS DARI CODE PERTAMA)
+            # 8. TAB HAPUS AKUN
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 🗑️ Hapus Personel")
@@ -5526,7 +5529,7 @@ elif menu_nav == "📊 Dashboard Admin":
             tab_ptr += 1
 
             # -----------------------------------------------------------
-            # 9. TAB SUPER EDITOR (THE MASTER KEY)
+            # 9. TAB SUPER EDITOR
             # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### ⚡ Super Admin Editor")
