@@ -3220,6 +3220,7 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
 # =========================================================
 @st.cache_data(ttl=3600)
 def load_pembayaran_dp():
+    """Membaca data pembayaran dengan normalisasi tipe data numerik & tanggal untuk sistem Alert."""
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
@@ -3238,33 +3239,43 @@ def load_pembayaran_dp():
         data = ws.get_all_records()
         df = pd.DataFrame(data)
 
+        # 1. Pastikan semua kolom standar tersedia
         for c in PAYMENT_COLUMNS:
             if c not in df.columns:
                 df[c] = ""
 
-        if COL_NOMINAL_BAYAR in df.columns:
-            parsed = df[COL_NOMINAL_BAYAR].apply(parse_rupiah_to_int)
-            df[COL_NOMINAL_BAYAR] = pd.Series(parsed, dtype="Int64")
+        # 2. REVISI UTAMA: Normalisasi Kolom Numerik (Uang)
+        # Agar sisa pembayaran bisa dihitung (tidak dianggap teks "Rp...")
+        numeric_targets = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
+        for col in numeric_targets:
+            if col in df.columns:
+                # Gunakan parser Rupiah, paksa ke numeric murni, isi kosong dengan 0
+                df[col] = df[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x)
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+        # 3. Normalisasi Status Boolean
         if COL_STATUS_BAYAR in df.columns:
             df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(
                 lambda x: True if str(x).upper() == "TRUE" else False)
 
+        # 4. Normalisasi Tanggal Jatuh Tempo
         if COL_JATUH_TEMPO in df.columns:
             df[COL_JATUH_TEMPO] = pd.to_datetime(
                 df[COL_JATUH_TEMPO], errors="coerce").dt.date
 
-        for c in [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
-                  COL_BUKTI_BAYAR, COL_CATATAN_BAYAR, COL_TS_UPDATE, COL_UPDATED_BY]:
+        # 5. Normalisasi Kolom Teks Lainnya
+        text_cols = [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
+                     COL_BUKTI_BAYAR, COL_CATATAN_BAYAR, COL_TS_UPDATE, COL_UPDATED_BY]
+        for c in text_cols:
             if c in df.columns:
                 df[c] = df[c].fillna("").astype(str)
 
-        # rapihkan log agar tampil bernomor & multiline
+        # 6. Perapihan Log Perubahan
         if COL_TS_UPDATE in df.columns:
             df[COL_TS_UPDATE] = df[COL_TS_UPDATE].apply(
                 lambda x: build_numbered_log(parse_payment_log_lines(x)))
 
-        # fallback: kalau log kosong tapi ada timestamp input
+        # 7. Logika Fallback jika kolom Log kosong
         if COL_TS_BAYAR in df.columns and COL_TS_UPDATE in df.columns:
             def _fix_empty_log(row):
                 logv = safe_str(row.get(COL_TS_UPDATE, ""), "").strip()
@@ -3275,9 +3286,9 @@ def load_pembayaran_dp():
             df[COL_TS_UPDATE] = df.apply(_fix_empty_log, axis=1)
 
         return df[PAYMENT_COLUMNS].copy()
-    except Exception:
+    except Exception as e:
+        print(f"Error load_pembayaran_dp: {e}")
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
-
 
 def save_pembayaran_dp(df: pd.DataFrame) -> bool:
     try:
