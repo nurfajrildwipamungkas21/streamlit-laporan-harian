@@ -5525,12 +5525,16 @@ elif menu_nav == "📊 Dashboard Admin":
                     if col not in df_staff_current.columns:
                         df_staff_current[col] = ""
 
-        is_manager = (st.session_state.get("user_role") == "manager")
+        # --- LOGIC MANAGER TAB ---
+        # Cek apakah user adalah manager
+        is_manager = (st.session_state.get("user_role") == "manager") or (st.session_state.get("user_role") == "boss")
         
         tabs_labels = []
+        # Jika Manager, tambahkan Tab Approval di urutan pertama
         if is_manager:
             tabs_labels.append("🔔 APPROVAL (ACC)")
         
+        # Tab standar Admin
         tabs_labels.extend([
             "📈 Produktivitas & AI",
             "🧲 Leads & Interest",
@@ -5543,38 +5547,51 @@ elif menu_nav == "📊 Dashboard Admin":
         ])
 
         all_tabs = st.tabs(tabs_labels)
-        tab_ptr = 0 
+        tab_ptr = 0 # Pointer untuk melacak index tab yang sedang aktif
 
+        # --- TAB 1 KHUSUS MANAGER: APPROVAL ---
         if is_manager:
             with all_tabs[tab_ptr]:
                 st.markdown("### 🔔 Pusat Persetujuan Manager")
-                pending_data = get_pending_approvals()
+                st.caption("Review pengajuan perubahan data dari Admin sebelum masuk ke database.")
+                
+                pending_data = get_pending_approvals() # Fungsi helper ambil data pending
                 
                 if not pending_data:
-                    st.success("✅ Tidak ada data yang menunggu persetujuan.")
+                    st.success("✅ Tidak ada data yang menunggu persetujuan (All Clear).")
                 else:
-                    st.markdown(f"Menunggu persetujuan: **{len(pending_data)} data**")
+                    st.markdown(f"**Menunggu persetujuan: {len(pending_data)} request**")
                     for i, req in enumerate(pending_data):
                         with st.container(border=True):
                             c1, c2 = st.columns([3, 1])
                             with c1:
-                                st.markdown(f"👤 **{req['Requestor']}** mengajukan perubahan pada `{req['Target Sheet']}`")
-                                st.info(f"📝 Alasan: {req['Reason']}")
+                                st.markdown(f"👤 **{req.get('Requestor','-')}** memohon update pada `{req.get('Target Sheet','-')}`")
+                                st.info(f"📝 Alasan: {req.get('Reason','-')}")
                             with c2:
-                                st.caption(f"📅 {req['Timestamp']}")
+                                st.caption(f"📅 {req.get('Timestamp','-')}")
                             
-                            try:
-                                new_d = json.loads(req.get("New Data JSON", "{}"))
-                                old_d = json.loads(req.get("Old Data JSON", "{}"))
-                                diff_list = [f"- {k}: `{old_d.get(k,'')}` ➡ **{v}**" for k, v in new_d.items() if str(v) != str(old_d.get(k,''))]
-                                if diff_list:
-                                    st.markdown("\n".join(diff_list))
-                            except:
-                                st.warning("Detail perubahan tidak dapat ditampilkan.")
+                            # Tampilkan Diff (Perbedaan Data)
+                            with st.expander("🔍 Lihat Detail Perubahan Data"):
+                                try:
+                                    new_d = json.loads(req.get("New Data JSON", "{}"))
+                                    old_d = json.loads(req.get("Old Data JSON", "{}"))
+                                    diff_found = False
+                                    for k, v in new_d.items():
+                                        old_val = old_d.get(k, "")
+                                        # Tampilkan hanya jika beda
+                                        if str(v).strip() != str(old_val).strip():
+                                            st.markdown(f"• **{k}**: `{old_val}` ➡ **{v}**")
+                                            diff_found = True
+                                    if not diff_found:
+                                        st.caption("Tidak ada perubahan nilai (Re-save).")
+                                except:
+                                    st.warning("Gagal memparsing detail data.")
 
-                            ca, cb = st.columns(2)
-                            if ca.button("✅ SETUJUI", key=f"acc_{i}", type="primary", use_container_width=True):
-                                ok, m = execute_approval(i, "APPROVE", st.session_state["user_name"])
+                            # Tombol Aksi
+                            ca, cb = st.columns([1, 1])
+                            # Tombol ACC
+                            if ca.button("✅ SETUJUI (ACC)", key=f"acc_{i}", type="primary", use_container_width=True):
+                                ok, m = execute_approval(i, "APPROVE", st.session_state.get("user_name", "Boss"))
                                 if ok:
                                     st.success(m)
                                     time.sleep(1)
@@ -5582,13 +5599,16 @@ elif menu_nav == "📊 Dashboard Admin":
                                 else:
                                     st.error(m)
                             
-                            with cb.popover("❌ TOLAK REQUEST", use_container_width=True):
-                                reason_rej = st.text_input("Alasan Penolakan:", key=f"rej_txt_{i}")
+                            # Tombol Tolak (Popover agar bisa isi alasan)
+                            with cb.popover("❌ TOLAK / REJECT", use_container_width=True):
+                                st.markdown("Isi catatan penolakan (opsional):")
+                                reason_rej = st.text_input("Alasan:", key=f"rej_txt_{i}", placeholder="Contoh: Data kurang lengkap")
                                 if st.button("Konfirmasi Tolak", key=f"rej_btn_{i}", type="primary", use_container_width=True):
-                                    execute_approval(i, "REJECT", st.session_state["user_name"], reason_rej)
+                                    execute_approval(i, "REJECT", st.session_state.get("user_name", "Boss"), reason_rej)
                                     st.warning("Request ditolak.")
+                                    time.sleep(1)
                                     st.rerun()
-            tab_ptr += 1
+            tab_ptr += 1 # Geser pointer ke tab berikutnya
 
         with all_tabs[tab_ptr]:
             st.markdown("### 🚀 Analisa Kinerja & AI Insight")
