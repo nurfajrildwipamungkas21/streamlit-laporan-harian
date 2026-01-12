@@ -5499,7 +5499,7 @@ elif menu_nav == "📊 Dashboard Admin":
                         fig = px.pie(df_f, names="Kategori_Aktivitas", title="Proporsi Jenis Aktivitas", hole=0.3)
                         st.plotly_chart(fig, use_container_width=True)
 
-                st.markdown("#### 🤖 AI Management Insight")
+                st.markdown("#### 🤖 AI / Machine Learning Management Insight")
                 with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
                     staf_stats_str = json.dumps(report_counts.to_dict(), indent=2)
                     full_prompt = f"""
