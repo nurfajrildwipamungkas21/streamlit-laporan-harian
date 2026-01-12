@@ -5221,16 +5221,17 @@ elif menu_nav == "💳 Pembayaran":
                 st.metric("⚠️ Jatuh Tempo Dekat (≤ 3 Hari)", len(due_soon))
 
             # [UPDATE] TABEL DETAIL UNTUK ADMIN (DESKTOP)
-            # Ditampilkan lebar penuh di bawah angka statistik
-            
             if not overdue.empty:
                 st.error(f"🚨 **PERHATIAN: Ada {len(overdue)} Tagihan Lewat Jatuh Tempo!**")
                 with st.expander("🔴 KLIK UNTUK LIHAT DAFTAR PENAGIHAN & KONTAK WA", expanded=True):
-                    # Menampilkan kolom lengkap: Sales, Klien, Tanggal, Sisa Uang, dan Catatan Kontak
                     df_ov_desk = overdue[[COL_MARKETING, COL_GROUP, COL_JATUH_TEMPO, COL_SISA_BAYAR, COL_CATATAN_BAYAR]].copy()
-                    # Format angka jadi Rupiah
-                    df_ov_desk[COL_SISA_BAYAR] = df_ov_desk[COL_SISA_BAYAR].apply(format_rupiah_display)
                     
+                    # Format angka jadi Rupiah (Display Only)
+                    cols_rupiah = [COL_SISA_BAYAR]
+                    for c in cols_rupiah:
+                        if c in df_ov_desk.columns:
+                            df_ov_desk[c] = df_ov_desk[c].apply(format_rupiah_display)
+
                     st.dataframe(
                         df_ov_desk,
                         use_container_width=True,
@@ -5248,7 +5249,12 @@ elif menu_nav == "💳 Pembayaran":
                 st.warning(f"🔔 **REMINDER: {len(due_soon)} Tagihan akan jatuh tempo dalam 3 hari.**")
                 with st.expander("🟡 LIHAT DAFTAR DUE SOON", expanded=True):
                     df_soon_desk = due_soon[[COL_MARKETING, COL_GROUP, COL_JATUH_TEMPO, COL_SISA_BAYAR, COL_CATATAN_BAYAR]].copy()
-                    df_soon_desk[COL_SISA_BAYAR] = df_soon_desk[COL_SISA_BAYAR].apply(format_rupiah_display)
+                    
+                    # Format angka jadi Rupiah (Display Only)
+                    cols_rupiah = [COL_SISA_BAYAR]
+                    for c in cols_rupiah:
+                        if c in df_soon_desk.columns:
+                            df_soon_desk[c] = df_soon_desk[c].apply(format_rupiah_display)
                     
                     st.dataframe(
                         df_soon_desk,
@@ -5270,16 +5276,25 @@ elif menu_nav == "💳 Pembayaran":
             # Menggunakan helper payment_df_for_display agar tampilan "Rp 2.000.000" muncul
             df_view_desktop = payment_df_for_display(df_pay)
             
+            # [FIX ERROR STREAMLIT API EXCEPTION]
+            # Kita WAJIB memaksa kolom uang menjadi tipe STRING agar cocok dengan TextColumn
+            force_str_cols = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
+            for c in force_str_cols:
+                if c in df_view_desktop.columns:
+                    df_view_desktop[c] = df_view_desktop[c].astype(str)
+
             # --- 2. KONFIGURASI KOLOM ---
-            # Menggunakan TextColumn untuk kolom uang agar format titik ribuan muncul
             desk_col_config = {
                 COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Lunas?", width="small"),
                 COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", format="DD/MM/YYYY"),
                 COL_TGL_EVENT: st.column_config.DateColumn("Tgl Event", format="DD/MM/YYYY"),
                 COL_BUKTI_BAYAR: st.column_config.LinkColumn("Bukti"),
+                
+                # Gunakan TextColumn agar titik ribuan muncul (karena datanya sudah diubah jadi string di atas)
                 COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal (Rp)", width="medium", help="Format otomatis saat disimpan"),
                 COL_NILAI_KESEPAKATAN: st.column_config.TextColumn("Total Deal (Rp)", width="medium"),
                 COL_SISA_BAYAR: st.column_config.TextColumn("Sisa Tagihan (Rp)", disabled=True, width="medium"),
+                
                 COL_GROUP: st.column_config.TextColumn("Nama Group/Klien"),
                 COL_MARKETING: st.column_config.TextColumn("Sales"),
                 COL_TS_UPDATE: st.column_config.TextColumn("Log Perubahan", disabled=True),
@@ -5294,7 +5309,7 @@ elif menu_nav == "💳 Pembayaran":
                 hide_index=True,
                 use_container_width=True,
                 num_rows="dynamic",
-                key="smart_payment_editor_desktop_v4"
+                key="smart_payment_editor_desktop_fix_v5" 
             )
 
             # --- 4. LOGIKA SIMPAN PERUBAHAN ---
@@ -5303,7 +5318,6 @@ elif menu_nav == "💳 Pembayaran":
                     current_user = st.session_state.get("user_name", "Admin Desktop")
                     
                     # --- CLEANING STEP: KEMBALIKAN FORMAT RUPIAH KE ANGKA MURNI ---
-                    # Salin hasil edit dari tabel
                     df_clean_edit = edited_pay.copy()
                     
                     # Daftar kolom uang yang harus dibersihkan dari "Rp" dan titik
@@ -5311,16 +5325,16 @@ elif menu_nav == "💳 Pembayaran":
                     
                     for c in cols_to_clean:
                         if c in df_clean_edit.columns:
-                            # Bersihkan format string kembali menjadi integer agar database tetap rapi
+                            # Bersihkan format string kembali menjadi integer
                             df_clean_edit[c] = df_clean_edit[c].apply(parse_rupiah_to_int)
                     
-                    # Hitung ulang Sisa Bayar agar konsisten (Total - Nominal)
+                    # Hitung ulang Sisa Bayar agar konsisten
                     if COL_NILAI_KESEPAKATAN in df_clean_edit.columns and COL_NOMINAL_BAYAR in df_clean_edit.columns:
                          val_total = df_clean_edit[COL_NILAI_KESEPAKATAN].fillna(0)
                          val_bayar = df_clean_edit[COL_NOMINAL_BAYAR].fillna(0)
                          df_clean_edit[COL_SISA_BAYAR] = val_total - val_bayar
 
-                    # Bandingkan data lama (df_pay) vs data bersih (df_clean_edit) untuk log audit
+                    # Bandingkan data lama vs data baru
                     final_df = apply_audit_payments_changes(df_pay, df_clean_edit, actor=current_user)
                     
                     # Simpan ke Google Sheets
