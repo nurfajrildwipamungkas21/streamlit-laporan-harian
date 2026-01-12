@@ -1892,7 +1892,7 @@ if SDK == "new":
 else:
     genai_legacy.configure(api_key=API_KEY)
 # Daftar model cadangan agar tidak muncul pesan "berhalangan" jika satu model error
-MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+MODEL_FALLBACKS = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
 
 if SDK == "new":
     client_ai = genai_new.Client(api_key=API_KEY)
