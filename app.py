@@ -1232,7 +1232,7 @@ SHEET_CONFIG_TEAM = "Config_Team"
 SHEET_CLOSING_DEAL = "Closing_Deal"
 SHEET_PEMBAYARAN = "Pembayaran_DP"
 SHEET_PRESENSI = "Presensi_Kehadiran"
-PRESENSI_COLUMNS = ["Timestamp", "Nama", "Hari",
+PRESENSI_COLUMNS = ["Timestamp", "Nama", "Tipe Absen", "Hari",
                     "Tanggal", "Bulan", "Tahun", "Waktu","Link Foto"]
 
 
@@ -1265,8 +1265,11 @@ def init_presensi_db():
         return None
 
 
-def catat_presensi(nama_staf, file_foto=None):
-    """Logika utama presensi: Otomatis, Real-time, No-edit + Upload Foto Dropbox."""
+def catat_presensi(nama_staf, tipe="Masuk", file_foto=None):
+    """
+    Logika utama presensi terpadu: 
+    Mendukung tipe Masuk/Pulang, Real-time, Upload Dropbox, dan Validasi Alur.
+    """
     ws = init_presensi_db()
     if not ws:
         return False, "Database Presensi Error"
@@ -1274,7 +1277,7 @@ def catat_presensi(nama_staf, file_foto=None):
     # 1. Ambil Waktu Real-Time (WIB)
     now = datetime.now(TZ_JKT)
 
-    # Mapping Hari Indonesia (Tetap dipertahankan dari flow lama)
+    # Mapping Hari Indonesia (Tetap sesuai flow lama Anda)
     hari_map = {
         "Monday": "Senin", "Tuesday": "Selasa", "Wednesday": "Rabu",
         "Thursday": "Kamis", "Friday": "Jumat", "Saturday": "Sabtu", "Sunday": "Minggu"
@@ -1286,32 +1289,61 @@ def catat_presensi(nama_staf, file_foto=None):
     bulan = now.strftime("%B")
     tahun = now.strftime("%Y")
     waktu = now.strftime("%H:%M:%S")
-
-    # 2. Cek Duplikasi (Cegah absen 2x di hari yang sama)
-    records = ws.get_all_records()
     today_str = now.strftime("%d-%m-%Y")
-    for r in records:
-        if str(r.get("Nama")) == nama_staf and today_str in str(r.get("Timestamp")):
-            return False, f"Anda sudah melakukan presensi hari ini pada {r.get('Waktu')}."
 
-    # 3. Handle Upload Foto ke Dropbox (Logika Baru)
-    link_foto = "-" # Default jika tidak ada foto
+    # 2. VALIDASI PINTAR (Mencegah double masuk/pulang & urutan yang salah)
+    records = ws.get_all_records()
+    sudah_masuk = False
+    sudah_pulang = False
+
+    for r in records:
+        # Cek apakah nama sama dan tanggal hari ini ada di kolom Timestamp
+        if str(r.get("Nama")) == nama_staf and today_str in str(r.get("Timestamp")):
+            tipe_record = str(r.get("Tipe Absen", "")).strip()
+            if tipe_record == "Masuk":
+                sudah_masuk = True
+            if tipe_record == "Pulang":
+                sudah_pulang = True
+
+    # Logika pencegahan
+    if tipe == "Masuk":
+        if sudah_masuk:
+            return False, f"Anda sudah melakukan Presensi Masuk hari ini pada sistem."
+    
+    elif tipe == "Pulang":
+        if not sudah_masuk:
+            return False, "Gagal: Anda belum melakukan Presensi Masuk. Silakan Masuk terlebih dahulu."
+        if sudah_pulang:
+            return False, "Anda sudah melakukan Presensi Pulang hari ini."
+
+    # 3. Handle Upload Foto ke Dropbox
+    link_foto = "-" 
     if file_foto is not None:
         if KONEKSI_DROPBOX_BERHASIL:
-            # Menggunakan fungsi upload_ke_dropbox yang sudah Anda miliki
-            url = upload_ke_dropbox(file_foto, nama_staf, kategori="Presensi")
+            # Folder kategori dinamis sesuai tipe: Presensi_Masuk atau Presensi_Pulang
+            url = upload_ke_dropbox(file_foto, nama_staf, kategori=f"Presensi_{tipe}")
             if url and url != "-":
                 link_foto = url
         else:
-            # Jika koneksi dropbox gagal tapi user melampirkan foto
-            return False, "Gagal simpan: Koneksi Dropbox bermasalah."
+            return False, "Gagal simpan: Koneksi Dropbox bermasalah (Foto wajib untuk presensi)."
 
-    # 4. Masukkan Data ke GSheet (Update: Menambahkan link_foto di urutan terakhir)
-    # Urutan sesuai PRESENSI_COLUMNS baru: [Timestamp, Nama, Hari, Tanggal, Bulan, Tahun, Waktu, Link Foto]
-    row = [f"'{ts_full}", nama_staf, hari, tanggal, bulan, tahun, waktu, link_foto]
+    # 4. Masukkan Data ke GSheet (Update: Menambahkan kolom 'tipe' di posisi ketiga)
+    # Urutan Kolom: Timestamp, Nama, Tipe Absen, Hari, Tanggal, Bulan, Tahun, Waktu, Link Foto
+    row = [
+        f"'{ts_full}", 
+        nama_staf, 
+        tipe,        # Masuk ke kolom Tipe Absen
+        hari, 
+        tanggal, 
+        bulan, 
+        tahun, 
+        waktu, 
+        link_foto
+    ]
+    
     ws.append_row(row, value_input_option="USER_ENTERED")
 
-    return True, f"Berhasil! Presensi tercatat pukul {waktu} WIB."
+    return True, f"Berhasil! Presensi {tipe} tercatat pukul {waktu} WIB."
 
 
 # Kolom laporan harian
@@ -4563,81 +4595,99 @@ def render_audit_mobile():
 # MAIN ROUTER LOGIC: IMPLEMENTASI SELURUH FITUR
 # =========================================================
 
-# --- 1. HALAMAN PRESENSI (REAL-TIME & NO-EDIT) ---
-# --- 1. HALAMAN PRESENSI (REAL-TIME + PHOTO UPLOAD) ---
+# --- 1. HALAMAN PRESENSI (REAL-TIME + MASUK/PULANG + PHOTO UPLOAD) ---
 if menu_nav == "📅 Presensi":
     st.markdown("## 📅 Presensi Kehadiran Real-Time")
     st.caption(
-        "Silakan pilih nama Anda dan lampirkan foto selfie/bukti kehadiran. Waktu akan tercatat otomatis (WIB).")
+        "Pilih Nama, Tipe Absen (Masuk/Pulang), dan lampirkan foto selfie. Waktu akan tercatat otomatis oleh sistem (WIB).")
 
     with st.container(border=True):
         staff_list = get_daftar_staf_terbaru()
         pilih_nama = st.selectbox(
             "Pilih Nama Anda:", ["-- Pilih Nama --"] + staff_list, key="presensi_name_sel")
 
+        # --- PILIHAN TIPE ABSEN ---
+        # Membuat pilihan Masuk atau Pulang dengan Radio Button horizontal
+        col_absen1, col_absen2 = st.columns(2)
+        with col_absen1:
+            tipe_absen = st.radio("Tipe Presensi:", ["Masuk", "Pulang"], horizontal=True, key="tipe_absen_radio")
+        
+        # Penentuan Icon dinamis berdasarkan pilihan
+        icon_absen = "🚀" if tipe_absen == "Masuk" else "🏠"
+        
         # --- FITUR UPLOAD FOTO ---
-        input_foto = st.file_uploader("Ambil Foto Selfie / Bukti (Kamera/Galeri)", 
+        input_foto = st.file_uploader(f"Ambil Foto Selfie {tipe_absen} (Kamera/Galeri)", 
                                      type=['png', 'jpg', 'jpeg'],
-                                     help="Gunakan kamera HP untuk selfie saat presensi.")
+                                     help=f"Gunakan kamera HP untuk selfie saat jam {tipe_absen.lower()}.")
         
         if input_foto:
-            # Menampilkan preview foto kecil agar user yakin file sudah terpilih
-            st.image(input_foto, caption="Preview Selfie", width=150)
-        # -------------------------
+            # Menampilkan preview foto kecil
+            st.image(input_foto, caption=f"Preview Selfie {tipe_absen}", width=150)
 
+        # --- INFO WAKTU & TOMBOL KIRIM ---
         waktu_skrg = datetime.now(TZ_JKT)
         st.info(
             f"🕒 Waktu Sistem Saat Ini: **{waktu_skrg.strftime('%A, %d %B %Y - %H:%M:%S')} WIB**")
 
-        if st.button("✅ Kirim Presensi Sekarang", type="primary", use_container_width=True):
+        # Tombol Kirim dengan label dinamis (Kirim Presensi Masuk / Kirim Presensi Pulang)
+        if st.button(f"{icon_absen} Kirim Presensi {tipe_absen}", type="primary", use_container_width=True):
             if pilih_nama == "-- Pilih Nama --":
                 st.error("Silakan pilih nama terlebih dahulu!")
             elif input_foto is None:
-                st.error("Wajib melampirkan foto selfie/bukti untuk presensi!")
+                st.error(f"Wajib melampirkan foto untuk presensi {tipe_absen.lower()}!")
             else:
-                with st.spinner("Mengupload foto & mencatat kehadiran..."):
-                    # Memanggil fungsi catat_presensi dengan parameter file_foto
-                    ok, msg = catat_presensi(pilih_nama, file_foto=input_foto)
+                with st.spinner(f"Mencatat {tipe_absen.lower()} & mengupload foto..."):
+                    # Memanggil fungsi catat_presensi yang sudah mendukung parameter 'tipe'
+                    ok, msg = catat_presensi(pilih_nama, tipe=tipe_absen, file_foto=input_foto)
                     
                     if ok:
                         st.success(msg)
-                        # Mencatat ke Global Audit Log
+                        # Mencatat aktivitas ke Global Audit Log
                         force_audit_log(
                             actor=pilih_nama,
-                            action="✅ PRESENSI",
+                            action=f"✅ {tipe_absen.upper()}",
                             target_sheet="Presensi_Kehadiran",
-                            chat_msg="Presensi Masuk + Upload Foto",
-                            details_input=f"Waktu: {waktu_skrg.strftime('%H:%M:%S')} | Foto tersimpan di Dropbox"
+                            chat_msg=f"Presensi {tipe_absen} sukses.",
+                            details_input=f"Jam: {waktu_skrg.strftime('%H:%M:%S')} | Bukti foto terlampir"
                         )
                         time.sleep(2)
                         st.rerun()
                     else:
-                        st.warning(msg)
+                        # Pesan error jika gagal validasi (misal: belum masuk sudah mau pulang)
+                        st.error(msg)
 
     st.divider()
     st.markdown("### 📋 Kehadiran Hari Ini")
     
-    # Menampilkan riwayat kehadiran hari ini di bawah form
+    # Menampilkan riwayat kehadiran hari ini di bawah form agar staf tahu statusnya
     ws_p = init_presensi_db()
     if ws_p:
         data_p = ws_p.get_all_records()
         if data_p:
             df_p = pd.DataFrame(data_p)
-            # Filter data berdasarkan Tanggal dan Bulan hari ini agar list tidak terlalu panjang
+            
+            # Filter data khusus hari ini agar tampilan ringkas
             tgl_hari_ini = waktu_skrg.strftime("%d")
             bln_hari_ini = waktu_skrg.strftime("%B")
+            thn_hari_ini = waktu_skrg.strftime("%Y")
             
-            df_today = df_p[(df_p['Tanggal'].astype(str) == tgl_hari_ini) & (
-                df_p['Bulan'] == bln_hari_ini)]
+            # Pastikan kolom Tanggal, Bulan, Tahun tersedia sesuai PRESENSI_COLUMNS
+            df_today = df_p[
+                (df_p['Tanggal'].astype(str) == tgl_hari_ini) & 
+                (df_p['Bulan'] == bln_hari_ini) &
+                (df_p['Tahun'].astype(str) == thn_hari_ini)
+            ]
             
             if not df_today.empty:
-                # Menggunakan column_config agar Link Foto bisa diklik langsung
+                # Konfigurasi tabel agar Link Foto bisa langsung diklik
                 st.dataframe(
                     df_today, 
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Link Foto": st.column_config.LinkColumn("Lihat Foto")
+                        "Link Foto": st.column_config.LinkColumn("📸 Lihat Foto"),
+                        "Tipe Absen": st.column_config.TextColumn("Status", width="small"),
+                        "Waktu": st.column_config.TextColumn("Jam", width="small")
                     }
                 )
             else:
