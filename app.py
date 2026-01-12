@@ -144,107 +144,124 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
 # =========================================================
 # [BARU] HELPER: ADMIN SMART EDITOR (AUTO-APPROVAL)
 # =========================================================
+# =========================================================
+# [REVISI V2] HELPER: ADMIN SMART EDITOR (FIX TITIK RUPIAH)
+# =========================================================
 def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
     """
     Komponen UI standar untuk Admin mengedit data tabel.
-    Otomatis mendeteksi perubahan data (diff) dan mengirimkan 
-    permintaan persetujuan (Request Approval) ke Manager.
-    
-    [UPDATE]: Auto-format Rupiah (Rp 2.000.000) dan Date Picker.
+    [UPDATE]: Menampilkan format 'Rp 2.000.000' (ada titik) sebagai teks agar rapi,
+    tapi otomatis dikonversi balik ke Angka saat disimpan.
     """
     if df_data.empty:
         st.info("Data tidak tersedia untuk ditampilkan.")
         return
 
-    # --- 1. PRE-PROCESS: Auto-Config Format (Uang & Tanggal) ---
-    # Kita copy data agar tidak merusak data asli di cache, dan mengubah tipe data agar support formatting
+    # --- 1. PRE-PROCESS: Format Tampilan (Uang jadi String dengan Titik) ---
     df_display = df_data.copy()
     column_configs = {}
+    
+    # Identifikasi kolom uang untuk diproses
+    money_cols = []
+    for col in df_display.columns:
+        if any(k in col.lower() for k in ["nilai", "nominal", "harga", "total", "kontrak", "sisa", "sepakat", "amount", "bayar"]):
+            money_cols.append(col)
+
+    # Fungsi format rupiah lokal
+    def _fmt_money(x):
+        try:
+            # Pastikan hanya angka
+            val = parse_rupiah_to_int(x)
+            if val is None: return ""
+            # Format: Rp 2.000.000 (Titik sebagai pemisah ribuan)
+            return "Rp " + "{:,.0f}".format(val).replace(",", ".")
+        except:
+            return str(x)
 
     for col in df_display.columns:
         col_lower = col.lower()
         
-        # A. Deteksi Kolom Uang (Nilai, Nominal, Harga, Kontrak, Sisa, Amount, Total)
-        if any(k in col_lower for k in ["nilai", "nominal", "harga", "total", "kontrak", "sisa", "sepakat", "amount", "bayar"]):
-            # Pastikan tipe datanya Numeric/Float agar st.data_editor bisa memformatnya
-            # Kita gunakan pd.to_numeric dengan errors='coerce' untuk jaga-jaga
-            df_display[col] = pd.to_numeric(
-                df_display[col].apply(lambda x: str(x).replace("Rp","").replace(".","").replace(",","") if isinstance(x, str) else x),
-                errors='coerce'
-            ).fillna(0)
-
-            # Konfigurasi Tampilan: Format "Rp 2.000.000"
-            column_configs[col] = st.column_config.NumberColumn(
+        # A. KOLOM UANG: Ubah ke String berformat "Rp 2.000.000"
+        if col in money_cols:
+            df_display[col] = df_display[col].apply(_fmt_money)
+            # Kita set sebagai TextColumn agar user bisa edit teksnya langsung
+            column_configs[col] = st.column_config.TextColumn(
                 col,
-                format="Rp %d",   # Format ini otomatis memberi titik pemisah ribuan
-                min_value=0,
-                step=50000        # Step 50rb saat klik panah atas/bawah
+                help="Format: Rp 2.000.000 (Edit angkanya saja, sistem akan merapikan)",
+                width="medium"
             )
 
-        # B. Deteksi Kolom Tanggal (agar muncul kalender picker)
+        # B. KOLOM TANGGAL: Tetap Date Picker
         elif any(k in col_lower for k in ["tanggal", "tgl", "date", "event", "tempo", "waktu"]):
-            if "timestamp" not in col_lower: # Kecualikan timestamp sistem (biasanya text/datetime string)
+            if "timestamp" not in col_lower: 
                 try:
                     df_display[col] = pd.to_datetime(df_display[col], errors='coerce')
                     column_configs[col] = st.column_config.DateColumn(
                         col,
-                        format="DD/MM/YYYY" # Format tampilan Indonesia
+                        format="DD/MM/YYYY"
                     )
                 except:
                     pass
 
-    # --- 2. Tampilkan Editor Data (Editable) ---
-    # num_rows="fixed" digunakan agar index baris tetap sinkron
+    # --- 2. Tampilkan Editor Data ---
     edited_df = st.data_editor(
-        df_display, # Gunakan dataframe yang sudah diformat tipe datanya
+        df_display,
         key=f"editor_{unique_key}",
         use_container_width=True,
         num_rows="fixed",
-        column_config=column_configs # Terapkan config format uang & tanggal
+        column_config=column_configs
     )
 
-    # --- 3. Form Alasan & Submit Perubahan ---
+    # --- 3. Form Alasan & Tombol Submit ---
     col_reason, col_btn = st.columns([3, 1])
     with col_reason:
-        reason = st.text_input("📝 Alasan Perubahan (Wajib diisi):", key=f"reason_{unique_key}", placeholder="Contoh: Koreksi typo, update status leads...")
+        reason = st.text_input("📝 Alasan Perubahan (Wajib diisi):", key=f"reason_{unique_key}", placeholder="Contoh: Koreksi typo, update nilai kontrak...")
+    
     with col_btn:
-        st.markdown("<br>", unsafe_allow_html=True) # Spacer
+        st.markdown("<br>", unsafe_allow_html=True) 
         is_submit = st.button("📤 Ajukan Perubahan", key=f"btn_{unique_key}", type="primary", use_container_width=True)
 
     if is_submit:
         if not reason.strip():
             st.error("⚠️ Harap isi alasan perubahan terlebih dahulu!")
         else:
-            # --- 4. Logika Deteksi Perubahan (Diff Checker) ---
+            # --- 4. Logic Deteksi Perubahan & Pembersihan Data ---
             changes_found = []
             
-            # Convert ke string agar aman dari perbedaan tipe data (int vs str) saat compare
-            # Kita bandingkan df_display (yang dilihat user) dengan edited_df (hasil edit user)
+            # Gunakan string compare untuk mendeteksi perubahan visual
             df_old_str = df_display.astype(str).reset_index(drop=True)
             df_new_str = edited_df.astype(str).reset_index(drop=True)
 
-            # Loop cek per baris
             for i in df_old_str.index:
                 row_old = df_old_str.iloc[i]
                 row_new = df_new_str.iloc[i]
                 
-                # Jika ada perbedaan data pada baris ini
                 if not row_old.equals(row_new):
-                    # Ambil data asli (non-string) dari dataframe editor untuk dikirim
-                    # Kita ambil dari edited_df agar format angka yang tersimpan tetap benar (int/float)
+                    # Ambil data baris yang diedit
+                    dirty_row = edited_df.iloc[i].copy()
+                    
+                    # [PENTING] BERSIHKAN KEMBALI FORMAT RUPIAH KE INTEGER
+                    # Agar database menerima angka murni (2000000), bukan string "Rp 2.000.000"
+                    for m_col in money_cols:
+                        if m_col in dirty_row:
+                            # Bersihkan "Rp", Titik, Koma -> Jadi Integer
+                            raw_val = dirty_row[m_col]
+                            clean_val = parse_rupiah_to_int(raw_val)
+                            # Jika hasil cleaning valid, simpan. Jika error/kosong, simpan 0 atau biarkan.
+                            dirty_row[m_col] = clean_val if clean_val is not None else 0
+
                     changes_found.append({
                         "row_idx": i,
-                        "new_data": edited_df.iloc[i],
-                        "old_data": df_display.iloc[i] # Data awal sebelum edit
+                        "new_data": dirty_row, # Data yang sudah dibersihkan jadi angka
+                        "old_data": df_data.iloc[i] # Data asli (angka) dari database
                     })
 
             if not changes_found:
-                st.warning("Tidak ada perubahan data yang terdeteksi pada baris yang ada.")
+                st.warning("Tidak ada perubahan data yang terdeteksi.")
             else:
-                # --- 5. Kirim Request ke System Pending Approval ---
+                # Kirim Request
                 success_count = 0
                 current_user = st.session_state.get("user_name", "Admin")
-                
                 progress_bar = st.progress(0, text="Mengirim permintaan ke Manager...")
 
                 for idx, change in enumerate(changes_found):
@@ -262,7 +279,7 @@ def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
                 progress_bar.empty()
 
                 if success_count > 0:
-                    st.success(f"✅ Berhasil mengirim {success_count} permintaan perubahan ke Manager!")
+                    st.success(f"✅ Berhasil mengirim {success_count} permintaan perubahan!")
                     time.sleep(2)
                     st.rerun()
                 else:
