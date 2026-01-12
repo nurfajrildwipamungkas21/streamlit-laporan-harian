@@ -1696,12 +1696,24 @@ except Exception as e:
 
 # 2) Dropbox
 try:
-    if "dropbox" in st.secrets and "access_token" in st.secrets["dropbox"]:
-        dbx = dropbox.Dropbox(st.secrets["dropbox"]["access_token"])
-        dbx.users_get_current_account()
-        KONEKSI_DROPBOX_BERHASIL = True
+    # Kita langsung masukkan data yang didapat dari terminal tadi
+    # agar script bisa otomatis refresh token sendiri
+    APP_KEY = "6bks8aq249cy8kv"
+    APP_SECRET = "2ai0jov47sx4b7y"
+    REFRESH_TOKEN = "iFeGPgijH6kAAAAAAAAAAbxwoi6Sr8IYH3KZ1qxENSc_ejlR0p98K2mSUfIKXTo6"
+
+    dbx = dropbox.Dropbox(
+        app_key=APP_KEY,
+        app_secret=APP_SECRET,
+        oauth2_refresh_token=REFRESH_TOKEN
+    )
+    
+    # Tes koneksi
+    dbx.users_get_current_account()
+    KONEKSI_DROPBOX_BERHASIL = True
+    
 except AuthError:
-    st.error("Dropbox Error: Token Autentikasi tidak valid.")
+    st.error("Dropbox Error: Token Autentikasi tidak valid atau sudah dicabut.")
 except Exception as e:
     st.error(f"Dropbox Error: {e}")
     
