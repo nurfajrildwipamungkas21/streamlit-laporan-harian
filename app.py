@@ -4584,7 +4584,7 @@ def render_admin_mobile():
             st.bar_chart(report_counts)
 
             st.divider()
-            st.markdown("#### 🤖 AI Management Insight")
+            st.markdown("#### 🤖 AI / Machine Learning Management Insight")
             
             with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
                 try:
