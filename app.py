@@ -5263,43 +5263,76 @@ elif menu_nav == "💳 Pembayaran":
                         }
                     )
 
+            # =========================================================
+            # [REVISI DESKTOP] EDITOR DATA PEMBAYARAN (FIX TITIK RUPIAH)
+            # =========================================================
             st.divider()
             st.caption("Klik dua kali pada sel tabel utama di bawah ini untuk mengedit data pembayaran.")
 
-            # --- 1. PROSES DATA SECARA DINAMIS (Normalisasi Tipe Data) ---
-            df_ready = clean_df_types_dynamically(df_pay)
+            # 1. Format Data untuk Tampilan UI (Ubah Angka jadi String "Rp 2.000.000")
+            # Menggunakan helper payment_df_for_display yang sudah diperbarui
+            df_view_desktop = payment_df_for_display(df_pay)
             
-            # --- 2. GENERATE CONFIG SECARA OTOMATIS (Mencegah Error Tipe Data) ---
-            auto_config = generate_dynamic_column_config(df_ready)
-            
-            # --- 3. LOGIKA PENGUNCIAN KOLOM OTOMATIS ---
-            locked_keywords = ["timestamp", "updated by", "log", "pelaku", "waktu", "input"]
-            disabled_list = [c for c in df_ready.columns if any(k in c.lower() for k in locked_keywords)]
+            # 2. Konfigurasi Kolom Desktop
+            # Kita set kolom uang sebagai TextColumn agar format "Rp 200.000" muncul (bukan Rp 200000)
+            desk_col_config = {
+                # Kolom Status & Tanggal
+                COL_STATUS_BAYAR: st.column_config.CheckboxColumn("Lunas?", width="small"),
+                COL_JATUH_TEMPO: st.column_config.DateColumn("Jatuh Tempo", format="DD/MM/YYYY"),
+                COL_TGL_EVENT: st.column_config.DateColumn("Tgl Event", format="DD/MM/YYYY"),
+                COL_BUKTI_BAYAR: st.column_config.LinkColumn("Bukti"),
+                
+                # Kolom Uang -> TextColumn (Agar User bisa edit teksnya & lihat titik ribuan)
+                COL_NOMINAL_BAYAR: st.column_config.TextColumn("Nominal (Rp)", width="medium", help="Format otomatis saat disimpan"),
+                COL_NILAI_KESEPAKATAN: st.column_config.TextColumn("Total Deal (Rp)", width="medium"),
+                COL_SISA_BAYAR: st.column_config.TextColumn("Sisa Tagihan (Rp)", disabled=True, width="medium"),
+                
+                # Kolom Lainnya
+                COL_GROUP: st.column_config.TextColumn("Nama Group/Klien"),
+                COL_MARKETING: st.column_config.TextColumn("Sales"),
+                
+                # Kolom Log (Read-only)
+                COL_TS_UPDATE: st.column_config.TextColumn("Log Perubahan", disabled=True),
+                COL_TS_BAYAR: st.column_config.TextColumn("Waktu Input", disabled=True),
+                COL_UPDATED_BY: st.column_config.TextColumn("Editor Terakhir", disabled=True),
+            }
 
+            # 3. Render Editor (Desktop)
             edited_pay = st.data_editor(
-                df_ready,
-                column_config=auto_config,
-                # ... sisanya tetap
-            )
-
-            # --- 4. RENDER DATA EDITOR ---
-            edited_pay = st.data_editor(
-                df_ready,
-                column_config=auto_config,
-                disabled=disabled_list,
+                df_view_desktop,
+                column_config=desk_col_config,
                 hide_index=True,
                 use_container_width=True,
                 num_rows="dynamic",
-                key="smart_payment_editor_v3"
+                key="smart_payment_editor_desktop_fix_v2" 
             )
 
-            # --- 5. LOGIKA SIMPAN PERUBAHAN ---
+            # 4. Logika Simpan (Cleaning Data: String -> Integer)
             if st.button("💾 Simpan Perubahan Riwayat", use_container_width=True):
                 with st.spinner("Memproses audit log dan menyimpan data..."):
                     current_user = st.session_state.get("user_name", "Admin Desktop")
                     
-                    # Bandingkan data lama (df_pay) dengan data yang diedit (edited_pay)
-                    final_df = apply_audit_payments_changes(df_pay, edited_pay, actor=current_user)
+                    # --- CLEANING STEP ---
+                    # Karena di tabel bentuknya Text ("Rp 2.000.000"), kita harus kembalikan ke Angka (2000000)
+                    # agar bisa disimpan ke Google Sheets dengan benar.
+                    df_clean_edit = edited_pay.copy()
+                    
+                    # Daftar kolom uang yang perlu dibersihkan
+                    cols_to_clean = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
+                    
+                    for c in cols_to_clean:
+                        if c in df_clean_edit.columns:
+                            # parse_rupiah_to_int otomatis menangani "Rp 2.000.000" atau "200.000"
+                            df_clean_edit[c] = df_clean_edit[c].apply(parse_rupiah_to_int)
+                    
+                    # Hitung ulang Sisa Bayar (untuk konsistensi jika Nominal diedit)
+                    if COL_NILAI_KESEPAKATAN in df_clean_edit.columns and COL_NOMINAL_BAYAR in df_clean_edit.columns:
+                         val_total = df_clean_edit[COL_NILAI_KESEPAKATAN].fillna(0)
+                         val_bayar = df_clean_edit[COL_NOMINAL_BAYAR].fillna(0)
+                         df_clean_edit[COL_SISA_BAYAR] = val_total - val_bayar
+
+                    # Bandingkan data lama (df_pay) vs data bersih (df_clean_edit)
+                    final_df = apply_audit_payments_changes(df_pay, df_clean_edit, actor=current_user)
                     
                     if save_pembayaran_dp(final_df):
                         st.success("✅ Perubahan database berhasil disimpan!")
