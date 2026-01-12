@@ -1688,46 +1688,62 @@ def dynamic_column_mapper(df):
 # =========================================================
 # [BARU] FALLBACK INSIGHT GENERATOR (MACHINE LEARNING/STATISTIK)
 # =========================================================
+# =========================================================
+# [FINAL REVISI] FALLBACK INSIGHT (MOTIVATIONAL & INCLUSIVE)
+# =========================================================
 def generate_smart_insight_fallback(df_data, total_laporan):
     """
-    Menghasilkan insight naratif otomatis berdasarkan statistik data 
-    ketika LLM (Gemini) tidak tersedia/habis kuota.
+    Menghasilkan insight otomatis dengan nada motivasi tinggi.
+    Fokus: Mengangkat kerja keras tim vs kompetitor luar (Us vs Them).
     """
     try:
         if df_data.empty:
-            return "Data belum cukup untuk menghasilkan analisis otomatis."
+            return "Belum ada laporan masuk. Tim sedang bersiap untuk memulai pergerakan hari ini."
 
-        # 1. Analisis Top Performer
-        top_staf = df_data[COL_NAMA].value_counts()
-        best_employee = top_staf.index[0]
-        best_count = top_staf.iloc[0]
+        # 1. Ambil Nama Tim (Inklusif - menyebut semua yang berkontribusi)
+        active_names = df_data[COL_NAMA].unique().tolist()
         
-        # 2. Analisis Kategori Kegiatan
-        # Cek apakah kolom Kategori_Aktivitas ada (dari desktop), jika tidak buat manual
+        # Format nama agar rapi (A, B, dan C)
+        if len(active_names) > 2:
+            names_str = ", ".join(active_names[:-1]) + ", dan " + active_names[-1]
+        elif len(active_names) == 2:
+            names_str = " dan ".join(active_names)
+        else:
+            names_str = active_names[0]
+
+        # 2. Deteksi Dominasi Kegiatan untuk Konteks
         if "Kategori_Aktivitas" not in df_data.columns:
              df_data["Kategori_Aktivitas"] = df_data[COL_TEMPAT].apply(
                 lambda x: "Digital/Kantor" if any(k in str(x) for k in ["Digital", "Ads", "Konten"]) else "Kunjungan Lapangan"
             )
-        
-        cat_counts = df_data["Kategori_Aktivitas"].value_counts()
-        top_cat = cat_counts.index[0]
-        pct_cat = int((cat_counts.iloc[0] / total_laporan) * 100)
+        top_activity = df_data["Kategori_Aktivitas"].mode()[0]
 
-        # 3. Analisis Waktu (Pagi/Siang/Sore) - Opsional sederhana
-        # Mengasumsikan format jam ada di data, tapi kita skip agar robust
-
-        # 4. Generate Narasi (Template Dinamis)
-        insight = (
-            f"**Analisis Kinerja Otomatis (Fallback Mode):**\n\n"
-            f"Berdasarkan data terkini, total produktivitas tim mencapai **{total_laporan} laporan**. "
-            f"Kontributor paling aktif periode ini adalah **{best_employee}** dengan total **{best_count} aktivitas**, "
-            f"yang menunjukkan dedikasi tinggi.\n\n"
-            f"Secara operasional, fokus tim saat ini didominasi oleh kegiatan **{top_cat}** ({pct_cat}% dari total aktivitas). "
-            f"Disarankan untuk mengevaluasi apakah proporsi ini sudah sesuai dengan target KPI mingguan Bapak."
+        # 3. Narasi Psikologis (Sesuai Request)
+        # Paragraf 1: Fakta Data (Total & Siapa)
+        p1 = (
+            f"Saat ini, total produktivitas yang terekam telah mencapai **{total_laporan} laporan**. "
+            f"Seluruh aktivitas ini merupakan hasil eksekusi langsung dari **semua anggota team Bapak** ({names_str}) yang bergerak sinergis."
         )
+
+        # Paragraf 2: Perbandingan dengan Kompetitor (Motivational Hook)
+        p2 = (
+            f"Secara performa, nilai aktivitas ini **jauh lebih baik daripada tim lapangan pada perusahaan lain di luar sana**. "
+            f"Di saat kompetitor mungkin hari ini masih sibuk berkutat dengan rapat atau baru sekadar merencanakan strategi di atas kertas, "
+            f"team Bapak sudah satu langkah di depan dengan eksekusi nyata di lapangan."
+        )
+
+        # Paragraf 3: Penutup (Validasi Usaha)
+        if "Kunjungan" in top_activity:
+            p3 = "Setiap kunjungan yang terjadi hari ini adalah aset data riil yang tidak dimiliki oleh mereka yang hanya menunggu di kantor."
+        else:
+            p3 = "Konsistensi aktivitas ini adalah fondasi yang kuat untuk memenangkan pasar sebelum kompetitor menyadarinya."
+
+        # Gabungkan
+        insight = f"**Analisis Eksekutif (Mode Statistik):**\n\n{p1}\n\n{p2}\n\n{p3}"
         return insight
+
     except Exception as e:
-        return f"Gagal menghasilkan fallback insight: {str(e)}"
+        return f"Sistem sedang mengkalkulasi data tim... ({str(e)})"
 
 # =========================================================
 # [BARU] DYNAMIC UI HELPERS (Anti-Crash & Auto-Type)
