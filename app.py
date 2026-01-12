@@ -3220,7 +3220,7 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
 # =========================================================
 @st.cache_data(ttl=3600)
 def load_pembayaran_dp():
-    """Membaca data pembayaran dengan normalisasi tipe data numerik & tanggal untuk sistem Alert."""
+    """Membaca data pembayaran dengan normalisasi tipe data numerik & tanggal yang stabil."""
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
@@ -3244,54 +3244,54 @@ def load_pembayaran_dp():
             if c not in df.columns:
                 df[c] = ""
 
-        # 2. REVISI UTAMA: Normalisasi Kolom Numerik (Uang)
-        # Agar sisa pembayaran bisa dihitung (tidak dianggap teks "Rp...")
+        # 2. Normalisasi Kolom Numerik (Uang) - FIX PENTING
+        # Pastikan angka terbaca sebagai int/float, bukan string "Rp ..."
         numeric_targets = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
         for col in numeric_targets:
             if col in df.columns:
-                # Gunakan parser Rupiah, paksa ke numeric murni, isi kosong dengan 0
                 df[col] = df[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x)
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
-        mask_sisa_nol = (df[COL_SISA_BAYAR] == 0) & (df[COL_NILAI_KESEPAKATAN] > 0)
-        df.loc[mask_sisa_nol, COL_SISA_BAYAR] = df[COL_NILAI_KESEPAKATAN] - df[COL_NOMINAL_BAYAR]
+        # 3. Hitung Ulang Sisa Bayar (Self-Correction)
+        # Jika kolom sisa kosong/0 tapi ada nilai kesepakatan, hitung otomatis
+        mask_sisa_valid = (df[COL_NILAI_KESEPAKATAN] > 0)
+        df.loc[mask_sisa_valid, COL_SISA_BAYAR] = df.loc[mask_sisa_valid, COL_NILAI_KESEPAKATAN] - df.loc[mask_sisa_valid, COL_NOMINAL_BAYAR]
 
-        # 3. Normalisasi Status Boolean
+        # 4. Normalisasi Status Boolean
         if COL_STATUS_BAYAR in df.columns:
             df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(
                 lambda x: True if str(x).upper() == "TRUE" else False)
 
-        # 4. Normalisasi Tanggal Jatuh Tempo (ROBUST FIX)
+        # 5. Normalisasi Tanggal Jatuh Tempo (FIX ROBUST)
+        # Hapus replace('-', '/') yang merusak format ISO 2026-01-12
         if COL_JATUH_TEMPO in df.columns:
-            # Langkah 1: Ubah semua ke string, hilangkan spasi, ubah '-' jadi '/'
-            df[COL_JATUH_TEMPO] = df[COL_JATUH_TEMPO].astype(str).str.strip().str.replace('-', '/', regex=False)
+            def smart_date_parser(x):
+                s = str(x).strip()
+                if not s or s.lower() in ["nan", "none", "-", ""]:
+                    return pd.NaT
+                try:
+                    # Prioritas 1: Format ISO (YYYY-MM-DD) - Standar GSheet/Database
+                    return pd.to_datetime(s, format="%Y-%m-%d").date()
+                except:
+                    try:
+                        # Prioritas 2: Format Indo/Excel (DD/MM/YYYY atau DD-MM-YYYY)
+                        return pd.to_datetime(s, dayfirst=True).date()
+                    except:
+                        return pd.NaT
             
-            # Langkah 2: Konversi dengan dayfirst=True (memaksa bacaan DD/MM/YYYY)
-            df[COL_JATUH_TEMPO] = pd.to_datetime(
-                df[COL_JATUH_TEMPO], dayfirst=True, errors="coerce"
-            ).dt.date
+            df[COL_JATUH_TEMPO] = df[COL_JATUH_TEMPO].apply(smart_date_parser)
 
-        # 5. Normalisasi Kolom Teks Lainnya
+        # 6. Normalisasi Kolom Teks Lainnya
         text_cols = [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
                      COL_BUKTI_BAYAR, COL_CATATAN_BAYAR, COL_TS_UPDATE, COL_UPDATED_BY]
         for c in text_cols:
             if c in df.columns:
                 df[c] = df[c].fillna("").astype(str)
 
-        # 6. Perapihan Log Perubahan
+        # 7. Perapihan Log & Fallback
         if COL_TS_UPDATE in df.columns:
             df[COL_TS_UPDATE] = df[COL_TS_UPDATE].apply(
                 lambda x: build_numbered_log(parse_payment_log_lines(x)))
-
-        # 7. Logika Fallback jika kolom Log kosong
-        if COL_TS_BAYAR in df.columns and COL_TS_UPDATE in df.columns:
-            def _fix_empty_log(row):
-                logv = safe_str(row.get(COL_TS_UPDATE, ""), "").strip()
-                if logv:
-                    return logv
-                ts_in = safe_str(row.get(COL_TS_BAYAR, ""), "").strip()
-                return build_numbered_log([ts_in]) if ts_in else ""
-            df[COL_TS_UPDATE] = df.apply(_fix_empty_log, axis=1)
 
         return df[PAYMENT_COLUMNS].copy()
     except Exception as e:
@@ -3535,39 +3535,47 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
     today = datetime.now(tz=TZ_JKT).date()
     df_alert = df.copy()
 
-    # 1. Normalisasi Tanggal (Pre-Cleaning ketat)
+    # 1. Validasi Kolom Tanggal (Pastikan formatnya date object)
     if COL_JATUH_TEMPO in df_alert.columns:
-        # Pastikan format string bersih (ganti strip dengan slash)
-        df_alert[COL_JATUH_TEMPO] = df_alert[COL_JATUH_TEMPO].astype(str).str.strip().str.replace('-', '/', regex=False)
-        
-        df_alert[COL_JATUH_TEMPO] = pd.to_datetime(
-            df_alert[COL_JATUH_TEMPO], 
-            dayfirst=True, 
-            errors="coerce"
-        ).dt.date
-    
-    # 2. Normalisasi Sisa Pembayaran (Pastikan angka murni)
+        # Helper untuk memastikan tipe data adalah Date (bukan string/datetime timestamp)
+        def ensure_date_obj(x):
+            if isinstance(x, (datetime, pd.Timestamp)):
+                return x.date()
+            if isinstance(x, date):
+                return x
+            return pd.NaT # Jika masih string error, jadikan NaT
+            
+        df_alert[COL_JATUH_TEMPO] = df_alert[COL_JATUH_TEMPO].apply(ensure_date_obj)
+
+    # 2. Normalisasi Sisa Pembayaran
     if COL_SISA_BAYAR in df_alert.columns:
         df_alert[COL_SISA_BAYAR] = pd.to_numeric(df_alert[COL_SISA_BAYAR], errors='coerce').fillna(0)
     else:
         df_alert[COL_SISA_BAYAR] = 0
 
-    # 3. FILTER TAGIHAN AKTIF: Ambil yang sisa bayarnya > 0 DAN tanggalnya ada
-    df_tagihan_aktif = df_alert[
-        (df_alert[COL_SISA_BAYAR] > 0) & 
+    # 3. FILTER TAGIHAN AKTIF
+    # Syarat: (Sisa > 0) DAN (Tanggal Valid) DAN (Status Belum Lunas/False)
+    mask_aktif = (
+        (df_alert[COL_SISA_BAYAR] > 100) & 
         (pd.notna(df_alert[COL_JATUH_TEMPO]))
-    ].copy()
+    )
+    
+    if COL_STATUS_BAYAR in df_alert.columns:
+         mask_aktif = mask_aktif & (df_alert[COL_STATUS_BAYAR] == False)
+
+    df_tagihan_aktif = df_alert[mask_aktif].copy()
 
     if df_tagihan_aktif.empty:
         return pd.DataFrame(columns=df.columns), pd.DataFrame(columns=df.columns)
 
-    # 4. KATEGORI OVERDUE: Jatuh tempo sudah terlewat ( < today )
+    # 4. KATEGORI OVERDUE: Jatuh tempo < Hari Ini
     overdue = df_tagihan_aktif[df_tagihan_aktif[COL_JATUH_TEMPO] < today].copy()
     
-    # 5. KATEGORI JATUH TEMPO DEKAT: Hari ini sampai H+3 ( >= today & <= today+3 )
+    # 5. KATEGORI JATUH TEMPO DEKAT: Hari ini <= Jatuh Tempo <= H+3
+    limit_date = today + timedelta(days=days_due_soon)
     due_soon = df_tagihan_aktif[
         (df_tagihan_aktif[COL_JATUH_TEMPO] >= today) & 
-        (df_tagihan_aktif[COL_JATUH_TEMPO] <= (today + timedelta(days=days_due_soon)))
+        (df_tagihan_aktif[COL_JATUH_TEMPO] <= limit_date)
     ].copy()
 
     return overdue, due_soon
