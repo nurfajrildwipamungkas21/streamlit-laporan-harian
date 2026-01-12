@@ -5525,16 +5525,15 @@ elif menu_nav == "📊 Dashboard Admin":
                     if col not in df_staff_current.columns:
                         df_staff_current[col] = ""
 
-        # --- LOGIC MANAGER TAB ---
-        # Cek apakah user adalah manager
-        is_manager = (st.session_state.get("user_role") == "manager") or (st.session_state.get("user_role") == "boss")
+        is_manager = (st.session_state.get("user_role") == "manager")
         
         tabs_labels = []
-        # Jika Manager, tambahkan Tab Approval di urutan pertama
+        
+        # 1. Jika Manager, tambahkan Tab Approval di urutan pertama
         if is_manager:
             tabs_labels.append("🔔 APPROVAL (ACC)")
         
-        # Tab standar Admin
+        # 2. Tambahkan Tab Standar Admin
         tabs_labels.extend([
             "📈 Produktivitas & AI",
             "🧲 Leads & Interest",
@@ -5546,52 +5545,55 @@ elif menu_nav == "📊 Dashboard Admin":
             "⚡ SUPER EDITOR"
         ])
 
+        # 3. Render Tabs
         all_tabs = st.tabs(tabs_labels)
-        tab_ptr = 0 # Pointer untuk melacak index tab yang sedang aktif
+        tab_ptr = 0  # Pointer untuk melacak index tab yang aktif
 
-        # --- TAB 1 KHUSUS MANAGER: APPROVAL ---
+        # =========================================================
+        # TAB APPROVAL (HANYA MUNCUL JIKA MANAGER)
+        # =========================================================
         if is_manager:
             with all_tabs[tab_ptr]:
                 st.markdown("### 🔔 Pusat Persetujuan Manager")
-                st.caption("Review pengajuan perubahan data dari Admin sebelum masuk ke database.")
+                st.caption("Validasi perubahan data yang diajukan oleh Admin.")
                 
-                pending_data = get_pending_approvals() # Fungsi helper ambil data pending
+                pending_data = get_pending_approvals()
                 
                 if not pending_data:
                     st.success("✅ Tidak ada data yang menunggu persetujuan (All Clear).")
                 else:
-                    st.markdown(f"**Menunggu persetujuan: {len(pending_data)} request**")
+                    st.info(f"Menunggu persetujuan: **{len(pending_data)} permintaan**")
                     for i, req in enumerate(pending_data):
                         with st.container(border=True):
                             c1, c2 = st.columns([3, 1])
                             with c1:
-                                st.markdown(f"👤 **{req.get('Requestor','-')}** memohon update pada `{req.get('Target Sheet','-')}`")
-                                st.info(f"📝 Alasan: {req.get('Reason','-')}")
+                                st.markdown(f"👤 **{req.get('Requestor','-')}** edit pada `{req.get('Target Sheet','-')}`")
+                                st.warning(f"📝 Alasan: {req.get('Reason','-')}")
                             with c2:
                                 st.caption(f"📅 {req.get('Timestamp','-')}")
                             
-                            # Tampilkan Diff (Perbedaan Data)
+                            # Tampilkan Detail Perubahan (Diff)
                             with st.expander("🔍 Lihat Detail Perubahan Data"):
                                 try:
                                     new_d = json.loads(req.get("New Data JSON", "{}"))
                                     old_d = json.loads(req.get("Old Data JSON", "{}"))
-                                    diff_found = False
+                                    diff_list = []
                                     for k, v in new_d.items():
                                         old_val = old_d.get(k, "")
-                                        # Tampilkan hanya jika beda
                                         if str(v).strip() != str(old_val).strip():
-                                            st.markdown(f"• **{k}**: `{old_val}` ➡ **{v}**")
-                                            diff_found = True
-                                    if not diff_found:
-                                        st.caption("Tidak ada perubahan nilai (Re-save).")
+                                            diff_list.append(f"- **{k}**: `{old_val}` ➡ `{v}`")
+                                    
+                                    if diff_list:
+                                        st.markdown("\n".join(diff_list))
+                                    else:
+                                        st.text("Tidak ada perubahan nilai (hanya save ulang).")
                                 except:
-                                    st.warning("Gagal memparsing detail data.")
+                                    st.error("Gagal memparsing data JSON.")
 
                             # Tombol Aksi
-                            ca, cb = st.columns([1, 1])
-                            # Tombol ACC
-                            if ca.button("✅ SETUJUI (ACC)", key=f"acc_{i}", type="primary", use_container_width=True):
-                                ok, m = execute_approval(i, "APPROVE", st.session_state.get("user_name", "Boss"))
+                            ca, cb = st.columns(2)
+                            if ca.button("✅ SETUJUI", key=f"acc_{i}", type="primary", use_container_width=True):
+                                ok, m = execute_approval(i, "APPROVE", st.session_state["user_name"])
                                 if ok:
                                     st.success(m)
                                     time.sleep(1)
@@ -5599,16 +5601,16 @@ elif menu_nav == "📊 Dashboard Admin":
                                 else:
                                     st.error(m)
                             
-                            # Tombol Tolak (Popover agar bisa isi alasan)
-                            with cb.popover("❌ TOLAK / REJECT", use_container_width=True):
-                                st.markdown("Isi catatan penolakan (opsional):")
-                                reason_rej = st.text_input("Alasan:", key=f"rej_txt_{i}", placeholder="Contoh: Data kurang lengkap")
+                            with cb.popover("❌ TOLAK", use_container_width=True):
+                                reason_rej = st.text_input("Alasan Penolakan:", key=f"rej_txt_{i}")
                                 if st.button("Konfirmasi Tolak", key=f"rej_btn_{i}", type="primary", use_container_width=True):
-                                    execute_approval(i, "REJECT", st.session_state.get("user_name", "Boss"), reason_rej)
-                                    st.warning("Request ditolak.")
+                                    execute_approval(i, "REJECT", st.session_state["user_name"], reason_rej)
+                                    st.warning("Permintaan ditolak.")
                                     time.sleep(1)
                                     st.rerun()
-            tab_ptr += 1 # Geser pointer ke tab berikutnya
+            
+            # PENTING: Geser pointer ke tab berikutnya
+            tab_ptr += 1
 
         with all_tabs[tab_ptr]:
             st.markdown("### 🚀 Analisa Kinerja & AI Insight")
