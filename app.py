@@ -5212,10 +5212,8 @@ elif menu_nav == "📊 Dashboard Admin":
     if IS_MOBILE:
         render_admin_mobile()
     else:
-        # --- LOGIC DESKTOP (PC/LAPTOP) ---
         st.markdown("## 📊 Dashboard Admin & Analytics")
 
-        # 1. Verifikasi Akses Admin
         if not st.session_state.get("is_admin"):
             col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
             with col_l2:
@@ -5230,11 +5228,9 @@ elif menu_nav == "📊 Dashboard Admin":
                         else:
                             st.error("Password salah. Akses ditolak.")
         else:
-            # --- SETUP DATA DASHBOARD ---
             staff_list = get_daftar_staf_terbaru()
             df_all = load_all_reports(staff_list)
 
-            # Pre-processing Kategori (Sales vs Digital)
             if not df_all.empty:
                 try:
                     df_all[COL_TIMESTAMP] = pd.to_datetime(
@@ -5247,10 +5243,8 @@ elif menu_nav == "📊 Dashboard Admin":
                 except Exception:
                     pass
 
-            # --- DINAMIS TABS BERDASARKAN ROLE ---
             is_manager = (st.session_state.get("user_role") == "manager")
 
-            # Susun Label Tab (Approval hanya muncul jika Manager)
             tabs_labels = []
             if is_manager:
                 tabs_labels.append("🔔 APPROVAL (ACC)")
@@ -5267,11 +5261,8 @@ elif menu_nav == "📊 Dashboard Admin":
             ])
 
             all_tabs = st.tabs(tabs_labels)
-            tab_ptr = 0  # Pointer untuk melacak index tab
+            tab_ptr = 0 
 
-            # -----------------------------------------------------------
-            # 1. TAB APPROVAL (HANYA MANAGER)
-            # -----------------------------------------------------------
             if is_manager:
                 with all_tabs[tab_ptr]:
                     st.markdown("### 🔔 Pusat Persetujuan Manager")
@@ -5289,7 +5280,6 @@ elif menu_nav == "📊 Dashboard Admin":
                                 with c_h2:
                                     st.caption(f"📅 {req['Timestamp']}")
 
-                                # Tampilkan Perbandingan Data
                                 try:
                                     old_json = json.loads(
                                         req.get("Old Data JSON", "{}"))
@@ -5307,7 +5297,6 @@ elif menu_nav == "📊 Dashboard Admin":
                                     st.warning(
                                         "Detail perubahan tidak dapat ditampilkan.")
 
-                                # Tombol Approve/Reject
                                 b1, b2 = st.columns(2)
                                 if b1.button("✅ SETUJUI SEKARANG", key=f"btn_acc_{i}", type="primary", use_container_width=True):
                                     ok, m = execute_approval(
@@ -5330,10 +5319,6 @@ elif menu_nav == "📊 Dashboard Admin":
                                             st.rerun()
                 tab_ptr += 1
 
-
-            # -----------------------------------------------------------
-            # 2. TAB PRODUKTIVITAS (PLOTLY CHART + AI GEMINI)
-            # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 🚀 Analisa Kinerja Tim")
                 if not df_all.empty:
@@ -5354,14 +5339,11 @@ elif menu_nav == "📊 Dashboard Admin":
                                          title="Proporsi Jenis Aktivitas", hole=0.3)
                             st.plotly_chart(fig, use_container_width=True)
 
-                    # --- INTEGRASI AI GEMINI UNTUK DESKTOP ---
                     st.divider()
                     st.markdown("#### 🤖 AI Management Insight")
                     with st.spinner("Asisten Pak Nugroho sedang meninjau kinerja tim..."):
-                        # Penyiapan Data Non-Visual
                         staf_stats_str = json.dumps(report_counts.to_dict(), indent=2)
                         
-                        # 1. Konstruksi Prompt Terstruktur
                         full_prompt = f"""
                         [CONTEXT_DATA]
                         Nama Pemimpin: Pak Nugroho
@@ -5384,7 +5366,6 @@ elif menu_nav == "📊 Dashboard Admin":
                         Berikan analisis kinerja tim Sales kepada Pak Nugroho secara naratif dan kreatif berdasarkan data laporan yang terkumpul hari ini.
                         """
 
-                        # 2. Eksekusi Pemanggilan dengan Mekanisme Fallback
                         ai_reply = ""
                         last_error = ""
                         
@@ -5403,18 +5384,12 @@ elif menu_nav == "📊 Dashboard Admin":
                                 last_error = str(e)
                                 continue 
 
-                        # 3. Tampilkan Hasil
                         if ai_reply:
                             st.info(ai_reply)
                         else:
                             st.error(f"⚠️ Gagal mendapatkan insight setelah mencoba semua model. Error terakhir: {last_error}")
-
-            # --- PERBAIKAN UTAMA ADA DI SINI (Menambahkan Increment Tab Pointer) ---
             tab_ptr += 1
 
-            # -----------------------------------------------------------
-            # 3. TAB LEADS & INTEREST (EXPORT ENABLED)
-            # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 🧲 Leads Management")
                 if not df_all.empty and COL_INTEREST in df_all.columns:
@@ -5431,13 +5406,9 @@ elif menu_nav == "📊 Dashboard Admin":
                             "⬇️ Download Leads (Excel)", data=xb, file_name=f"leads_{sel_in}.xlsx")
             tab_ptr += 1
 
-            # -----------------------------------------------------------
-            # 4. TAB REVIEW & FEEDBACK
-            # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 💬 Review & Beri Feedback")
                 if not df_all.empty:
-                    # Ambil 10 laporan terbaru
                     for i, r in df_all.sort_values(by=COL_TIMESTAMP, ascending=False).head(10).iterrows():
                         with st.container(border=True):
                             st.markdown(
@@ -5453,9 +5424,6 @@ elif menu_nav == "📊 Dashboard Admin":
                                     st.rerun()
             tab_ptr += 1
 
-            # -----------------------------------------------------------
-            # 5. TAB GALERI BUKTI
-            # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 🖼️ Galeri Foto Aktivitas")
                 if not df_all.empty:
@@ -5470,17 +5438,11 @@ elif menu_nav == "📊 Dashboard Admin":
                                      caption=f"{row[COL_NAMA]} @ {row[COL_TEMPAT]}")
             tab_ptr += 1
 
-            # -----------------------------------------------------------
-            # 6. TAB MASTER DATA
-            # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 📦 Database Utama")
                 st.dataframe(df_all, use_container_width=True)
             tab_ptr += 1
 
-            # -----------------------------------------------------------
-            # 7. TAB CONFIG STAFF (TAMBAH STAF)
-            # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 👥 Kelola Personel & Tim")
                 with st.form("form_add_staf_new"):
@@ -5501,9 +5463,6 @@ elif menu_nav == "📊 Dashboard Admin":
                 st.dataframe(df_tm, use_container_width=True)
             tab_ptr += 1
 
-            # -----------------------------------------------------------
-            # 8. TAB HAPUS AKUN
-            # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### 🗑️ Hapus Personel")
                 st.error(
@@ -5528,9 +5487,6 @@ elif menu_nav == "📊 Dashboard Admin":
                             "Pilih nama dan centang konfirmasi terlebih dahulu.")
             tab_ptr += 1
 
-            # -----------------------------------------------------------
-            # 9. TAB SUPER EDITOR
-            # -----------------------------------------------------------
             with all_tabs[tab_ptr]:
                 st.markdown("### ⚡ Super Admin Editor")
                 st.caption(
@@ -5556,7 +5512,6 @@ elif menu_nav == "📊 Dashboard Admin":
                     alasan_edit = st.text_input(
                         "📝 Alasan Edit (Wajib):", key="alasan_super_desk")
 
-                    # Data Editor
                     edited_result = st.data_editor(
                         st.session_state["df_editor_raw"], use_container_width=True, num_rows="dynamic")
 
