@@ -144,6 +144,9 @@ def submit_change_request(target_sheet, row_idx_0based, new_df_row, old_df_row, 
 # =========================================================
 # [BARU] HELPER: ADMIN SMART EDITOR (AUTO-APPROVAL)
 # =========================================================
+# =========================================================
+# [REVISI FIX] HELPER: ADMIN SMART EDITOR (AUTO-FORMAT RUPIAH)
+# =========================================================
 def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
     """
     Komponen UI standar untuk Admin mengedit data tabel.
@@ -154,33 +157,33 @@ def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
         st.info("Data tidak tersedia untuk ditampilkan.")
         return
 
-    # --- [MODIFIKASI START]: Auto-Format Rupiah & Tanggal ---
-    # Kita copy data agar tidak merusak data asli di cache
+    # --- 1. Auto-Format Rupiah & Tanggal ---
+    # Kita copy data agar tidak merusak data asli
     df_display = df_data.copy()
     column_configs = {}
 
     for col in df_display.columns:
         col_lower = col.lower()
         
-        # 1. Deteksi Kolom Uang (Nilai, Nominal, Harga, Kontrak, Sisa, Amount)
+        # Deteksi Kolom Uang
         if any(k in col_lower for k in ["nilai", "nominal", "harga", "total", "kontrak", "sisa", "sepakat", "amount"]):
-            # Pastikan tipe datanya Numeric/Float agar bisa diformat angka
+            # Paksa jadi angka murni dulu agar editor bisa memformatnya
             df_display[col] = pd.to_numeric(
                 df_display[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x),
                 errors='coerce'
             ).fillna(0)
 
-            # Konfigurasi Tampilan: Format "Rp 2.000.000"
+            # Config tampilan: Rp 2.000.000
             column_configs[col] = st.column_config.NumberColumn(
                 col,
-                format="Rp %d",   # Format ini otomatis memberi titik pemisah ribuan
+                format="Rp %d",
                 min_value=0,
-                step=100000       # Step 100rb saat klik panah atas/bawah
+                step=100000
             )
 
-        # 2. Deteksi Kolom Tanggal (agar muncul kalender picker)
+        # Deteksi Kolom Tanggal
         elif any(k in col_lower for k in ["tanggal", "tgl", "date", "event", "tempo", "waktu"]):
-            if "timestamp" not in col_lower: # Kecualikan timestamp sistem
+            if "timestamp" not in col_lower: 
                 try:
                     df_display[col] = pd.to_datetime(df_display[col], errors='coerce')
                     column_configs[col] = st.column_config.DateColumn(
@@ -189,21 +192,23 @@ def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
                     )
                 except:
                     pass
-    # --- [MODIFIKASI END] ---
 
-    # 1. Tampilkan Editor Data (Editable)
+    # --- 2. Tampilkan Editor Data ---
+    # num_rows="fixed" agar baris sinkron dengan GSheet
     edited_df = st.data_editor(
-        df_display, # Gunakan df_display yang sudah bersih tipe datanya
+        df_display,
         key=f"editor_{unique_key}",
         use_container_width=True,
         num_rows="fixed",
-        column_config=column_configs # Terapkan config format uang & tanggal
+        column_config=column_configs
     )
 
-    # 2. Form Alasan & Submit Perubahan
+    # --- 3. Form Alasan & Tombol Submit ---
     col_reason, col_btn = st.columns([3, 1])
     with col_reason:
+        # INI SUMBER ERROR SEBELUMNYA: Pastikan baris ini hanya muncul 1 kali di fungsi ini
         reason = st.text_input("📝 Alasan Perubahan (Wajib diisi):", key=f"reason_{unique_key}", placeholder="Contoh: Koreksi typo, update status leads...")
+    
     with col_btn:
         st.markdown("<br>", unsafe_allow_html=True) # Spacer
         is_submit = st.button("📤 Ajukan Perubahan", key=f"btn_{unique_key}", type="primary", use_container_width=True)
@@ -212,20 +217,18 @@ def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
         if not reason.strip():
             st.error("⚠️ Harap isi alasan perubahan terlebih dahulu!")
         else:
-            # 3. Logika Deteksi Perubahan (Diff Checker)
+            # Logic Deteksi Perubahan (Diff Checker)
             changes_found = []
             
-            # Gunakan df_display sebagai acuan data lama agar tipe datanya apple-to-apple dengan edited_df
+            # Gunakan data string untuk perbandingan agar aman
             df_old_str = df_display.astype(str).reset_index(drop=True)
             df_new_str = edited_df.astype(str).reset_index(drop=True)
 
-            # Loop cek per baris
             for i in df_old_str.index:
                 row_old = df_old_str.iloc[i]
                 row_new = df_new_str.iloc[i]
                 
                 if not row_old.equals(row_new):
-                    # Ambil data asli (non-string) dari dataframe editor untuk dikirim
                     changes_found.append({
                         "row_idx": i,
                         "new_data": edited_df.iloc[i],
@@ -233,9 +236,8 @@ def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
                     })
 
             if not changes_found:
-                st.warning("Tidak ada perubahan data yang terdeteksi pada baris yang ada.")
+                st.warning("Tidak ada perubahan data yang terdeteksi.")
             else:
-                # 4. Kirim Request ke System Pending Approval
                 success_count = 0
                 current_user = st.session_state.get("user_name", "Admin")
                 
@@ -256,7 +258,7 @@ def admin_smart_editor_ui(df_data, unique_key, sheet_target_name):
                 progress_bar.empty()
 
                 if success_count > 0:
-                    st.success(f"✅ Berhasil mengirim {success_count} permintaan perubahan ke Manager!")
+                    st.success(f"✅ Berhasil mengirim {success_count} permintaan perubahan!")
                     time.sleep(2)
                     st.rerun()
                 else:
