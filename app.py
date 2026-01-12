@@ -3252,6 +3252,9 @@ def load_pembayaran_dp():
                 # Gunakan parser Rupiah, paksa ke numeric murni, isi kosong dengan 0
                 df[col] = df[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x)
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        mask_sisa_nol = (df[COL_SISA_BAYAR] == 0) & (df[COL_NILAI_KESEPAKATAN] > 0)
+        df.loc[mask_sisa_nol, COL_SISA_BAYAR] = df[COL_NILAI_KESEPAKATAN] - df[COL_NOMINAL_BAYAR]
 
         # 3. Normalisasi Status Boolean
         if COL_STATUS_BAYAR in df.columns:
@@ -3535,7 +3538,12 @@ def build_alert_pembayaran(df: pd.DataFrame, days_due_soon: int = 3):
     # 3. Normalisasi Tipe Data (Penting untuk kalkulator sisa)
     # Pastikan Jatuh Tempo adalah objek date dan Sisa Pembayaran adalah angka
     if COL_JATUH_TEMPO in df_alert.columns:
-        df_alert[COL_JATUH_TEMPO] = pd.to_datetime(df_alert[COL_JATUH_TEMPO], errors="coerce").dt.date
+        # Gunakan dayfirst=True agar 12/01/2026 dibaca 12 Januari, bukan 1 Desember
+        df_alert[COL_JATUH_TEMPO] = pd.to_datetime(
+            df_alert[COL_JATUH_TEMPO], 
+            dayfirst=True, 
+            errors="coerce"
+        ).dt.date
     
     if COL_SISA_BAYAR in df_alert.columns:
         df_alert[COL_SISA_BAYAR] = pd.to_numeric(df_alert[COL_SISA_BAYAR], errors='coerce').fillna(0)
