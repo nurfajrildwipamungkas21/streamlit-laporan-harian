@@ -694,8 +694,8 @@ def login_page():
                             role_str = str(user_info.get("role", "staff")).lower()
                             st.session_state["user_role"] = role_str
 
-                            # [FIX] Manager dimasukkan ke dalam list admin agar menu Dashboard muncul
-                            if role_str in ["admin", "manager"]:
+                            # [FIX] Manager DAN Atasan dimasukkan ke dalam list admin
+                            if role_str in ["admin", "manager", "atasan"]:
                                 st.session_state["is_admin"] = True
                             else:
                                 st.session_state["is_admin"] = False
