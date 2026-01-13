@@ -5522,8 +5522,14 @@ elif menu_nav == "📊 Dashboard Admin":
                     if col not in df_staff_current.columns:
                         df_staff_current[col] = ""
 
-# 1. Tentukan Role
-        is_manager = (str(st.session_state.get("user_role", "")).lower() == "manager")
+        # ========================================================
+        # [PERBAIKAN] LOGIKA ROLE (SUPORT ATASAN & MANAGER)
+        # ========================================================
+        # 1. Tentukan Role (Ambil role saat ini dan jadikan huruf kecil)
+        current_role_str = str(st.session_state.get("user_role", "")).lower().strip()
+        
+        # Cek apakah role termasuk 'manager' ATAU 'atasan'
+        is_manager = (current_role_str in ["manager", "atasan", "boss", "admin"]) 
         
         # 2. Susun Label Tab secara Dinamis
         tabs_labels = []
@@ -5548,7 +5554,7 @@ elif menu_nav == "📊 Dashboard Admin":
         # --- TAB KHUSUS MANAGER: APPROVAL ---
         if is_manager:
             with all_tabs[tab_ptr]:
-                st.markdown("### 🔔 Pusat Persetujuan Manager")
+                st.markdown("### 🔔 Pusat Persetujuan Manager/Atasan")
                 pending_data = get_pending_approvals()
                 
                 if not pending_data:
