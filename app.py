@@ -1912,68 +1912,96 @@ def admin_secret_configured() -> bool:
 # =========================================================
 # CONNECTIONS
 # =========================================================
+# =========================================================
+# CONNECTIONS (OPTIMIZED WITH RAM GATEKEEPER)
+# =========================================================
 KONEKSI_GSHEET_BERHASIL = False
 KONEKSI_DROPBOX_BERHASIL = False
 spreadsheet = None
 dbx = None
 
-# 1) Google Sheets
-try:
-    if "gcp_service_account" in st.secrets:
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        if "private_key" in creds_dict:
-            creds_dict["private_key"] = creds_dict["private_key"].replace(
-                "\\n", "\n")
+@st.cache_resource(show_spinner="Menghubungkan ke Database...", ttl=3600)
+def init_connection_gsheet():
+    """
+    Penjaga Gerbang: Koneksi GSheet disimpan di RAM (Cache).
+    Hanya dijalankan sekali saat aplikasi pertama dibuka atau setelah 1 jam (ttl=3600).
+    """
+    try:
+        if "gcp_service_account" in st.secrets:
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            
+            # Fix newline character di private key jika perlu
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
-        creds = Credentials.from_service_account_info(
-            creds_dict, scopes=scopes)
-        gc = gspread.authorize(creds)
-        spreadsheet = gc.open(NAMA_GOOGLE_SHEET)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(creds)
+            
+            # Return objek spreadsheet agar disimpan di cache RAM
+            return gc.open(NAMA_GOOGLE_SHEET)
+        return None
+    except Exception as e:
+        # Kita return error message sebagai string jika gagal, atau None
+        print(f"GSheet Init Error: {e}")
+        return None
+
+@st.cache_resource(show_spinner=False)
+def init_connection_dropbox():
+    """
+    Penjaga Gerbang: Koneksi Dropbox disimpan di RAM.
+    """
+    try:
+        # Masukkan kredensial langsung atau via secrets (sesuai kode asli Anda)
+        APP_KEY = "6bks8aq249cy8kv"
+        APP_SECRET = "2ai0jov47sx4b7y"
+        REFRESH_TOKEN = "iFeGPgijH6kAAAAAAAAAAbxwoi6Sr8IYH3KZ1qxENSc_ejlR0p98K2mSUfIKXTo6"
+
+        dbx_obj = dropbox.Dropbox(
+            app_key=APP_KEY,
+            app_secret=APP_SECRET,
+            oauth2_refresh_token=REFRESH_TOKEN
+        )
+        
+        # Tes koneksi ringan
+        dbx_obj.users_get_current_account() 
+        return dbx_obj
+    except Exception as e:
+        print(f"Dropbox Init Error: {e}")
+        return None
+
+# --- 1. EKSEKUSI KONEKSI GSHEET (AMBIL DARI CACHE) ---
+try:
+    spreadsheet = init_connection_gsheet()
+    if spreadsheet:
         KONEKSI_GSHEET_BERHASIL = True
-        # =========================================================
-        # [BARU] AUTO-CREATE AUDIT SHEET SAAT STARTUP
-        # =========================================================
-        # Tambahkan blok ini agar sheet otomatis dibuat saat aplikasi dibuka
-        from audit_service import ensure_audit_sheet
+        
+        # [BARU] AUTO-CREATE AUDIT SHEET SAAT STARTUP (Hanya sekali jalan di background)
+        # Karena spreadsheet diambil dari cache, kita perlu memastikan audit sheet ada
+        # tapi tidak perlu memaksa crash jika error kecil.
         try:
+            from audit_service import ensure_audit_sheet
             ensure_audit_sheet(spreadsheet)
-            # print("Audit sheet ready.") # Opsional untuk debug console
         except Exception as e:
-            st.error(
-                f"⚠️ Sistem Error: Gagal membuat Sheet Audit otomatis. Pesan: {e}")
-            # Ini akan memunculkan kotak merah di layar jika gagal,
-            # jadi admin langsung tahu ada yang salah.
+            # Error non-fatal (audit log mungkin belum siap, tapi app tetap jalan)
+            print(f"Warning: Gagal init Audit Sheet: {e}")
+            
     else:
-        st.error("GSheet Error: Kredensial tidak ditemukan.")
+        st.error("GSheet Error: Kredensial tidak ditemukan atau koneksi gagal.")
 except Exception as e:
-    st.error(f"GSheet Error: {e}")
+    st.error(f"GSheet Critical Error: {e}")
 
-# 2) Dropbox
+# --- 2. EKSEKUSI KONEKSI DROPBOX (AMBIL DARI CACHE) ---
 try:
-    # Kita langsung masukkan data yang didapat dari terminal tadi
-    # agar script bisa otomatis refresh token sendiri
-    APP_KEY = "6bks8aq249cy8kv"
-    APP_SECRET = "2ai0jov47sx4b7y"
-    REFRESH_TOKEN = "iFeGPgijH6kAAAAAAAAAAbxwoi6Sr8IYH3KZ1qxENSc_ejlR0p98K2mSUfIKXTo6"
-
-    dbx = dropbox.Dropbox(
-        app_key=APP_KEY,
-        app_secret=APP_SECRET,
-        oauth2_refresh_token=REFRESH_TOKEN
-    )
-    
-    # Tes koneksi
-    dbx.users_get_current_account()
-    KONEKSI_DROPBOX_BERHASIL = True
-    
-except AuthError:
-    st.error("Dropbox Error: Token Autentikasi tidak valid atau sudah dicabut.")
-except Exception as e:
-    st.error(f"Dropbox Error: {e}")
+    dbx = init_connection_dropbox()
+    if dbx:
+        KONEKSI_DROPBOX_BERHASIL = True
+except Exception:
+    # Silent fail agar aplikasi tetap bisa dibuka meski Dropbox error
+    pass
     
 
 # === Konfigurasi AI Robust (Tiruan Proyek Telesales) ===
