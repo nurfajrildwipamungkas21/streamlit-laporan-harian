@@ -1908,70 +1908,49 @@ def admin_secret_configured() -> bool:
     except Exception:
         return False
 
-
 # =========================================================
-# CONNECTIONS
-# =========================================================
-# =========================================================
-# CONNECTIONS (OPTIMIZED WITH RAM GATEKEEPER)
+# CONNECTIONS (PERSISTENT FOR VPS)
 # =========================================================
 KONEKSI_GSHEET_BERHASIL = False
 KONEKSI_DROPBOX_BERHASIL = False
 spreadsheet = None
 dbx = None
 
-@st.cache_resource(show_spinner="Menghubungkan ke Database...", ttl=3600)
+@st.cache_resource(show_spinner="Menghubungkan ke Database VPS...", ttl=None)
 def init_connection_gsheet():
-    """
-    Penjaga Gerbang: Koneksi GSheet disimpan di RAM (Cache).
-    Hanya dijalankan sekali saat aplikasi pertama dibuka atau setelah 1 jam (ttl=3600).
-    """
+    """Koneksi disimpan selamanya di RAM Server (VPS)."""
     try:
         if "gcp_service_account" in st.secrets:
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
             creds_dict = dict(st.secrets["gcp_service_account"])
-            
-            # Fix newline character di private key jika perlu
             if "private_key" in creds_dict:
                 creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-
             creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
             gc = gspread.authorize(creds)
-            
-            # Return objek spreadsheet agar disimpan di cache RAM
             return gc.open(NAMA_GOOGLE_SHEET)
-        return None
     except Exception as e:
-        # Kita return error message sebagai string jika gagal, atau None
-        print(f"GSheet Init Error: {e}")
-        return None
+        print(f"GSheet Error: {e}")
+    return None
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, ttl=None)
 def init_connection_dropbox():
-    """
-    Penjaga Gerbang: Koneksi Dropbox disimpan di RAM.
-    """
+    """Koneksi Dropbox persisten."""
     try:
-        # Masukkan kredensial langsung atau via secrets (sesuai kode asli Anda)
-        APP_KEY = "6bks8aq249cy8kv"
-        APP_SECRET = "2ai0jov47sx4b7y"
-        REFRESH_TOKEN = "iFeGPgijH6kAAAAAAAAAAbxwoi6Sr8IYH3KZ1qxENSc_ejlR0p98K2mSUfIKXTo6"
+        if "dropbox" in st.secrets:
+            APP_KEY = st.secrets["dropbox"]["app_key"]
+            APP_SECRET = st.secrets["dropbox"]["app_secret"]
+            REFRESH_TOKEN = st.secrets["dropbox"]["refresh_token"]
+            dbx_obj = dropbox.Dropbox(app_key=APP_KEY, app_secret=APP_SECRET, oauth2_refresh_token=REFRESH_TOKEN)
+            dbx_obj.users_get_current_account()
+            return dbx_obj
+    except: return None
 
-        dbx_obj = dropbox.Dropbox(
-            app_key=APP_KEY,
-            app_secret=APP_SECRET,
-            oauth2_refresh_token=REFRESH_TOKEN
-        )
-        
-        # Tes koneksi ringan
-        dbx_obj.users_get_current_account() 
-        return dbx_obj
-    except Exception as e:
-        print(f"Dropbox Init Error: {e}")
-        return None
+# Eksekusi Koneksi
+spreadsheet = init_connection_gsheet()
+if spreadsheet: KONEKSI_GSHEET_BERHASIL = True
+
+dbx = init_connection_dropbox()
+if dbx: KONEKSI_DROPBOX_BERHASIL = True
 
 # --- 1. EKSEKUSI KONEKSI GSHEET (AMBIL DARI CACHE) ---
 try:
@@ -3374,41 +3353,42 @@ def render_laporan_harian_mobile():
 # =========================================================
 # CLOSING DEAL
 # =========================================================
-@st.cache_data(ttl=3600)
 def load_closing_deal():
-    if not KONEKSI_GSHEET_BERHASIL:
-        return pd.DataFrame(columns=CLOSING_COLUMNS)
-
+    # Cek RAM
+    ram = get_ram_data("closing")
+    if ram is not None: return ram.copy()
+    
+    # Download
+    if not KONEKSI_GSHEET_BERHASIL: return pd.DataFrame(columns=CLOSING_COLUMNS)
     try:
-        try:
-            ws = spreadsheet.worksheet(SHEET_CLOSING_DEAL)
-        except Exception:
-            ws = spreadsheet.add_worksheet(
-                title=SHEET_CLOSING_DEAL, rows=300, cols=len(CLOSING_COLUMNS))
-            ws.append_row(CLOSING_COLUMNS, value_input_option="USER_ENTERED")
-            maybe_auto_format_sheet(ws, force=True)
-            return pd.DataFrame(columns=CLOSING_COLUMNS)
-
+        ws = get_or_create_worksheet(SHEET_CLOSING_DEAL)
         ensure_headers(ws, CLOSING_COLUMNS)
+        df = pd.DataFrame(ws.get_all_records())
+        # Cleaning
+        for c in CLOSING_COLUMNS: 
+            if c not in df.columns: df[c] = ""
+        if "Nilai Kontrak" in df.columns:
+            df["Nilai Kontrak"] = df["Nilai Kontrak"].apply(lambda x: parse_rupiah_to_int(x) or 0)
+            
+        update_ram_data("closing", df)
+        return df
+    except: return pd.DataFrame(columns=CLOSING_COLUMNS)
 
-        data = ws.get_all_records()
-        df = pd.DataFrame(data)
-
-        for c in CLOSING_COLUMNS:
-            if c not in df.columns:
-                df[c] = ""
-
-        if COL_NILAI_KONTRAK in df.columns:
-            parsed = df[COL_NILAI_KONTRAK].apply(parse_rupiah_to_int)
-            df[COL_NILAI_KONTRAK] = pd.Series(parsed, dtype="Int64")
-
-        for c in [COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_BIDANG]:
-            if c in df.columns:
-                df[c] = df[c].fillna("").astype(str)
-
-        return df[CLOSING_COLUMNS].copy()
-    except Exception:
-        return pd.DataFrame(columns=CLOSING_COLUMNS)
+def get_daftar_staf_terbaru():
+    # Cek RAM
+    ram = get_ram_data("staff")
+    if ram: return ram
+    
+    # Download
+    default = ["Saya"]
+    if not KONEKSI_GSHEET_BERHASIL: return default
+    try:
+        ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
+        vals = ws.col_values(1)
+        res = vals[1:] if len(vals) > 1 else default
+        update_ram_data("staff", res)
+        return res
+    except: return default
 
 
 def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai_kontrak_input):
@@ -3455,126 +3435,162 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
 # =========================================================
 # PEMBAYARAN
 # =========================================================
-@st.cache_data(ttl=3600)
 def load_pembayaran_dp():
+    """
+    [SMART LOAD] 
+    1. Cek RAM. Jika ada, return detik itu juga.
+    2. Jika kosong, Download dari GSheet, simpan ke RAM, baru return.
+    """
+    # 1. Cek RAM
+    ram_data = get_ram_data("payment")
+    if ram_data is not None:
+        return ram_data.copy()
+
+    # 2. Download (Hanya terjadi 1x saat VPS start/reload)
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
     try:
         try:
             ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
-        except Exception:
-            ws = spreadsheet.add_worksheet(
-                title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
-            ws.append_row(PAYMENT_COLUMNS, value_input_option="USER_ENTERED")
-            maybe_auto_format_sheet(ws, force=True)
-            return pd.DataFrame(columns=PAYMENT_COLUMNS)
+        except:
+            ws = spreadsheet.add_worksheet(title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
+            ws.append_row(PAYMENT_COLUMNS)
+            # Return frame kosong & save RAM
+            empty = pd.DataFrame(columns=PAYMENT_COLUMNS)
+            update_ram_data("payment", empty)
+            return empty
 
         ensure_headers(ws, PAYMENT_COLUMNS)
-
         data = ws.get_all_records()
         df = pd.DataFrame(data)
 
+        # Normalisasi Kolom
         for c in PAYMENT_COLUMNS:
-            if c not in df.columns:
-                df[c] = ""
+            if c not in df.columns: df[c] = ""
 
-        numeric_targets = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
-        for col in numeric_targets:
-            if col in df.columns:
-                df[col] = df[col].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x)
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
-        if COL_NILAI_KESEPAKATAN in df.columns and COL_NOMINAL_BAYAR in df.columns:
-            df[COL_SISA_BAYAR] = df[COL_NILAI_KESEPAKATAN] - df[COL_NOMINAL_BAYAR]
-            df[COL_SISA_BAYAR] = df[COL_SISA_BAYAR].apply(lambda x: x if x > 0 else 0)
-
-        if COL_STATUS_BAYAR in df.columns:
-            df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(
-                lambda x: True if str(x).strip().upper() == "TRUE" else False)
-
-        if COL_JATUH_TEMPO in df.columns:
-            def smart_date_parser(x):
-                s = str(x).strip()
-                if not s or s.lower() in ["nan", "none", "-", ""]:
-                    return pd.NaT
-                try:
-                    return pd.to_datetime(s, format="%Y-%m-%d").date()
-                except:
-                    try:
-                        return pd.to_datetime(s, dayfirst=True).date()
-                    except:
-                        return pd.NaT
-            
-            df[COL_JATUH_TEMPO] = df[COL_JATUH_TEMPO].apply(smart_date_parser)
-
-        text_cols = [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
-                     COL_BUKTI_BAYAR, COL_CATATAN_BAYAR, COL_TS_UPDATE, COL_UPDATED_BY]
-        for c in text_cols:
+        # Parsing Angka (Wajib agar tidak error di Editor)
+        numeric_cols = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
+        for c in numeric_cols:
             if c in df.columns:
-                df[c] = df[c].fillna("").astype(str)
+                df[c] = df[c].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x)
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
-        if COL_TS_UPDATE in df.columns:
-            df[COL_TS_UPDATE] = df[COL_TS_UPDATE].apply(
-                lambda x: build_numbered_log(parse_payment_log_lines(x)))
+        # Parsing Tanggal
+        if COL_JATUH_TEMPO in df.columns:
+            def _parse_dt(x):
+                s = str(x).strip()
+                if not s or s.lower() in ["nan", "none", "-", ""]: return pd.NaT
+                try: return pd.to_datetime(s, format="%Y-%m-%d").date()
+                except: return pd.NaT
+            df[COL_JATUH_TEMPO] = df[COL_JATUH_TEMPO].apply(_parse_dt)
 
+        # Parsing Boolean Status
+        if COL_STATUS_BAYAR in df.columns:
+            df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(lambda x: str(x).upper() == "TRUE")
+
+        # 3. Simpan ke RAM agar akses selanjutnya instan
+        update_ram_data("payment", df[PAYMENT_COLUMNS])
+        
         return df[PAYMENT_COLUMNS].copy()
 
     except Exception as e:
-        print(f"Error load_pembayaran_dp: {e}")
+        print(f"Load Error: {e}")
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
-def save_pembayaran_dp(df: pd.DataFrame) -> bool:
+def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nominal_input, total_sepakat_input, tenor, jatuh_tempo, bukti_file, catatan):
+    """
+    [SMART SAVE] Simpan ke GSheet (Aman) + Update RAM (Cepat).
+    """
+    if not KONEKSI_GSHEET_BERHASIL: return False, "Koneksi Gagal"
+
     try:
+        # ... (Logika validasi data tetap sama seperti kode lama) ...
+        group = str(nama_group).strip() if nama_group else "-"
+        marketing = str(nama_marketing).strip() if nama_marketing else "Unknown"
+        catatan_clean = str(catatan).strip() if catatan else "-"
+        
+        nom_bayar = parse_rupiah_to_int(nominal_input) or 0
+        total_sepakat = parse_rupiah_to_int(total_sepakat_input) or 0
+        tenor_val = int(tenor) if tenor else 0
+        
+        if total_sepakat <= 0: return False, "Total kesepakatan harus diisi."
+        
+        sisa_bayar = total_sepakat - nom_bayar
+        info_cicilan = ""
+        if tenor_val > 0 and sisa_bayar > 0:
+            info_cicilan = f" | Cicilan: {format_rupiah_display(sisa_bayar/tenor_val)} x{tenor_val}"
+
+        status_fix = "✅ Lunas" if sisa_bayar <= 0 else f"⏳ Belum Lunas{info_cicilan}"
+        if sisa_bayar <= 0 and jenis_bayar == "Cash": status_fix += " (Cash)"
+
+        link_bukti = "-"
+        if bukti_file and KONEKSI_DROPBOX_BERHASIL:
+            link_bukti = upload_ke_dropbox(bukti_file, marketing, kategori="Bukti_Pembayaran")
+
+        ts_in = now_ts_str()
+        fmt_tgl = tgl_event.strftime("%Y-%m-%d") if hasattr(tgl_event, "strftime") else str(tgl_event)
+        fmt_due = jatuh_tempo.strftime("%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
+        log_entry = f"[{ts_in}] Input Baru: {jenis_bayar}{info_cicilan}"
+
+        # 1. SIMPAN KE CLOUD (I/O Operation)
+        row_gsheet = [
+            ts_in, group, marketing, fmt_tgl, total_sepakat,
+            jenis_bayar, nom_bayar, tenor_val, sisa_bayar, fmt_due,
+            status_fix, link_bukti, catatan_clean, build_numbered_log([log_entry]), marketing
+        ]
         ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
         ensure_headers(ws, PAYMENT_COLUMNS)
+        ws.append_row(row_gsheet, value_input_option="USER_ENTERED")
 
+        # 2. UPDATE RAM (In-Memory Operation)
+        # Kita buat dictionary yang strukturnya SAMA PERSIS dengan DataFrame di RAM
+        new_ram_data = {
+            COL_TS_BAYAR: ts_in,
+            COL_GROUP: group,
+            COL_MARKETING: marketing,
+            COL_TGL_EVENT: fmt_tgl,
+            COL_NILAI_KESEPAKATAN: total_sepakat, # Int
+            COL_JENIS_BAYAR: jenis_bayar,
+            COL_NOMINAL_BAYAR: nom_bayar, # Int
+            COL_TENOR_CICILAN: tenor_val, # Int
+            COL_SISA_BAYAR: sisa_bayar, # Int
+            COL_JATUH_TEMPO: jatuh_tempo, # Object Date (Penting untuk Editor UI)
+            COL_STATUS_BAYAR: (sisa_bayar <= 0), # Boolean (Penting untuk Checkbox UI)
+            COL_BUKTI_BAYAR: link_bukti,
+            COL_CATATAN_BAYAR: catatan_clean,
+            COL_TS_UPDATE: log_entry,
+            COL_UPDATED_BY: marketing
+        }
+        # Suntikkan data ini ke RAM tanpa download ulang
+        append_ram_data("payment", new_ram_data)
+
+        return True, f"Berhasil disimpan! Sisa: {format_rupiah_display(sisa_bayar)}"
+
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+def save_pembayaran_dp(df_edited):
+    """Simpan perubahan tabel editor ke RAM & Cloud."""
+    try:
+        # 1. Update RAM Langsung (Optimistic Update)
+        update_ram_data("payment", df_edited)
+        
+        # 2. Update Cloud
+        ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
         ws.clear()
-
-        rows_needed = len(df) + 1
-        if ws.row_count < rows_needed:
-            ws.resize(rows=rows_needed)
-
-        df_save = df.copy()
-
-        for c in PAYMENT_COLUMNS:
-            if c not in df_save.columns:
-                df_save[c] = ""
-
-        df_save[COL_STATUS_BAYAR] = df_save[COL_STATUS_BAYAR].apply(
-            lambda x: "TRUE" if bool(x) else "FALSE")
-
-        def _to_int_or_blank(x):
-            if x is None or pd.isna(x):
-                return ""
-            val = parse_rupiah_to_int(x)
-            return "" if val is None else int(val)
-
-        df_save[COL_NOMINAL_BAYAR] = df_save[COL_NOMINAL_BAYAR].apply(
-            _to_int_or_blank)
-
-        def _fmt_date(d):
-            if d is None or pd.isna(d):
-                return ""
-            if hasattr(d, "strftime"):
-                return d.strftime("%Y-%m-%d")
-            s = str(d).strip()
-            return s if s and s.lower() not in {"nan", "none"} else ""
-
-        df_save[COL_JATUH_TEMPO] = df_save[COL_JATUH_TEMPO].apply(_fmt_date)
-
-        df_save[COL_TS_UPDATE] = df_save[COL_TS_UPDATE].apply(
-            lambda x: build_numbered_log(parse_payment_log_lines(x)))
-        df_save[COL_UPDATED_BY] = df_save[COL_UPDATED_BY].apply(
-            lambda x: safe_str(x, "-").strip() or "-")
-
-        df_save = df_save[PAYMENT_COLUMNS].fillna("")
-        data_to_save = [df_save.columns.values.tolist()] + \
-            df_save.values.tolist()
-
-        ws.update(range_name="A1", values=data_to_save,
-                  value_input_option="USER_ENTERED")
-        # maybe_auto_format_sheet(ws)
+        
+        # Siapkan data untuk GSheet (Convert tipe data Object/Date ke String)
+        df_save = df_edited.copy()
+        if COL_STATUS_BAYAR in df_save.columns:
+            df_save[COL_STATUS_BAYAR] = df_save[COL_STATUS_BAYAR].apply(lambda x: "TRUE" if x else "FALSE")
+        if COL_JATUH_TEMPO in df_save.columns:
+            df_save[COL_JATUH_TEMPO] = df_save[COL_JATUH_TEMPO].apply(lambda x: str(x) if x else "")
+            
+        # Tulis ulang sheet
+        payload = [PAYMENT_COLUMNS] + df_save.astype(str).values.tolist()
+        ws.update(range_name="A1", values=payload, value_input_option="USER_ENTERED")
+        
         return True
     except Exception:
         return False
@@ -4250,6 +4266,9 @@ if IS_MOBILE and menu_nav != "📝 Laporan Harian":
 
     st.divider()
 
+with st.sidebar:
+    if st.button("🔄 Hard Refresh (Sync Cloud)", type="primary", use_container_width=True):
+        manual_hard_refresh()
 
 # =========================================================
 # FUNGSI RENDER MOBILE PER FITUR (BARU)
