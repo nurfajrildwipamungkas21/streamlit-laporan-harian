@@ -22,6 +22,8 @@ import hmac
 import base64
 import textwrap
 
+from audit_service import log_admin_action, compare_and_get_changes
+
 # =========================================================
 # [BARU] SYSTEM: RAM STATE MANAGER
 # =========================================================
@@ -95,8 +97,6 @@ def load_daily_report_ram(nama_staf):
         return df
     except Exception:
         return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
-
-from audit_service import log_admin_action, compare_and_get_changes
 
 # =========================================================
 # [BARU] SISTEM LOGGING LANGSUNG (ANTI-GAGAL)
