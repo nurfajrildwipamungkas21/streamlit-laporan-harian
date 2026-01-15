@@ -22,6 +22,80 @@ import hmac
 import base64
 import textwrap
 
+# =========================================================
+# [BARU] SYSTEM: RAM STATE MANAGER
+# =========================================================
+def init_ram_storage():
+    """Menyiapkan struktur memori di RAM Session State."""
+    if "RAM_DB" not in st.session_state:
+        st.session_state["RAM_DB"] = {
+            "loaded": False,
+            "payment": None,
+            "closing": None,
+            "staff": [],          # Cache daftar nama
+            "kpi_team": None,
+            "kpi_indiv": None,
+            "reports": {}         # [BARU] Dictionary { "Nama Staf": DataFrame }
+        }
+
+def get_ram_data(key):
+    init_ram_storage()
+    return st.session_state["RAM_DB"].get(key, None)
+
+def update_ram_data(key, val):
+    init_ram_storage()
+    st.session_state["RAM_DB"][key] = val
+    
+def load_daily_report_ram(nama_staf):
+    """
+    Smart Loader: 
+    1. Cek RAM. Jika ada, return instan.
+    2. Jika tidak, download GSheet, simpan RAM, return.
+    """
+    if not nama_staf or nama_staf in ["-- Pilih Nama --", ""]:
+        return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+
+    init_ram_storage()
+    
+    # 1. CEK RAM (Hit Cache) - Kecepatan 0.00s
+    if nama_staf in st.session_state["RAM_DB"]["reports"]:
+        return st.session_state["RAM_DB"]["reports"][nama_staf].copy()
+
+    # 2. DOWNLOAD CLOUD (Miss Cache) - Hanya terjadi 1x per sesi
+    if not KONEKSI_GSHEET_BERHASIL:
+        return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+
+    try:
+        # Kita pakai _get_or_create_ws_cached yang sudah ada di code Anda
+        ws = get_or_create_worksheet(nama_staf)
+        if not ws:
+            return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+            
+        # Ambil semua value (lebih cepat dibanding get_all_records untuk data besar)
+        rows = ws.get_all_values()
+        if len(rows) > 1:
+            headers = rows[0]
+            data = rows[1:]
+            df = pd.DataFrame(data, columns=headers)
+        else:
+            df = pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+
+        # Normalisasi Kolom (Agar tidak error key missing)
+        for col in NAMA_KOLOM_STANDAR:
+            if col not in df.columns:
+                df[col] = ""
+        
+        # Bersihkan format Tanggal (Penting untuk sorting di dashboard admin)
+        if COL_TIMESTAMP in df.columns:
+            df[COL_TIMESTAMP] = pd.to_datetime(df[COL_TIMESTAMP], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+
+        # 3. SIMPAN KE RAM (Cache Data)
+        st.session_state["RAM_DB"]["reports"][nama_staf] = df
+        
+        return df
+    except Exception:
+        return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+
 from audit_service import log_admin_action, compare_and_get_changes
 
 # =========================================================
@@ -1908,6 +1982,7 @@ def admin_secret_configured() -> bool:
     except Exception:
         return False
 
+
 # =========================================================
 # CONNECTIONS (PERSISTENT FOR VPS)
 # =========================================================
@@ -2543,33 +2618,21 @@ def get_or_create_worksheet(nama_worksheet):
         ensure_headers(ws, NAMA_KOLOM_STANDAR)
     return ws
 
-
-@st.cache_data(ttl=3600)
 def get_daftar_staf_terbaru():
-    default_staf = ["Saya"]
-    if not KONEKSI_GSHEET_BERHASIL:
-        return default_staf
-
+    # Cek RAM
+    ram = get_ram_data("staff")
+    if ram: return ram
+    
+    # Download
+    default = ["Saya"]
+    if not KONEKSI_GSHEET_BERHASIL: return default
     try:
-        try:
-            ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
-        except Exception:
-            ws = spreadsheet.add_worksheet(
-                title=SHEET_CONFIG_NAMA, rows=100, cols=1)
-            ws.append_row(["Daftar Nama Staf"],
-                          value_input_option="USER_ENTERED")
-            ws.append_row(["Saya"], value_input_option="USER_ENTERED")
-            maybe_auto_format_sheet(ws, force=True)
-            return default_staf
-
-        nama_list = ws.col_values(1)
-        if nama_list and nama_list[0] == "Daftar Nama Staf":
-            nama_list.pop(0)
-
-        return nama_list if nama_list else default_staf
-    except Exception:
-        return default_staf
-
+        ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
+        vals = ws.col_values(1)
+        res = vals[1:] if len(vals) > 1 else default
+        update_ram_data("staff", res)
+        return res
+    except: return default
 
 def hapus_staf_by_name(nama_staf):
     """Menghapus nama staf dari worksheet Config_Staf."""
@@ -2974,57 +3037,101 @@ def update_evidence_row(sheet_name, target_name, note, file_obj, user_folder_nam
 # FEEDBACK + DAILY REPORT
 # =========================================================
 def kirim_feedback_admin(nama_staf, timestamp_key, isi_feedback):
+    """
+    Kirim feedback ke GSheet DAN update RAM secara lokal agar UI responsif.
+    """
     try:
+        # 1. Update Cloud (GSheet)
         ws = spreadsheet.worksheet(nama_staf)
-
-        if ws.col_count < len(NAMA_KOLOM_STANDAR):
-            ws.resize(cols=len(NAMA_KOLOM_STANDAR))
-
+        
+        # Pastikan kolom Feedback ada
         headers = ws.row_values(1)
         if COL_FEEDBACK not in headers:
             ws.update_cell(1, len(headers) + 1, COL_FEEDBACK)
             headers.append(COL_FEEDBACK)
-            maybe_auto_format_sheet(ws, force=True)
-
-        all_timestamps = ws.col_values(1)
-
-        def clean_ts(text):
-            return "".join(filter(str.isdigit, str(text)))
-
-        target_clean = clean_ts(timestamp_key)
-        found_row = None
-
-        for idx, val in enumerate(all_timestamps):
-            if clean_ts(val) == target_clean:
-                found_row = idx + 1
-                break
-
-        if not found_row:
-            return False, "Data tidak ditemukan."
-
+            
         col_idx = headers.index(COL_FEEDBACK) + 1
+        
+        # Cari baris berdasarkan timestamp (String matching)
+        # Kita ambil kolom timestamp (Kolom 1/A)
+        ts_col_values = ws.col_values(1)
+        
+        # Helper pembersih string angka
+        def clean_ts(txt): return "".join(filter(str.isdigit, str(txt)))
+        
+        target_clean = clean_ts(timestamp_key)
+        found_row = -1
+        
+        for i, val in enumerate(ts_col_values):
+            if clean_ts(val) == target_clean:
+                found_row = i + 1 # 1-based index
+                break
+        
+        if found_row == -1:
+            return False, "Data laporan tidak ditemukan di sheet."
 
-        ts = now_ts_str()
+        # Siapkan Text
+        ts_now = now_ts_str()
         actor = get_actor_fallback(default="Admin")
-        feedback_text = f"[{ts}] ({actor}) {isi_feedback}"
+        fb_text = f"[{ts_now}] ({actor}) {isi_feedback}"
+        
+        # Eksekusi Update Cloud
+        ws.update_cell(found_row, col_idx, fb_text)
+        
+        # 2. Update RAM (Mirroring)
+        init_ram_storage()
+        if nama_staf in st.session_state["RAM_DB"]["reports"]:
+            df_ram = st.session_state["RAM_DB"]["reports"][nama_staf]
+            
+            # Cari index di DataFrame pandas
+            for idx in df_ram.index:
+                # Bersihkan timestamp di DF RAM juga
+                ts_val_ram = str(df_ram.at[idx, COL_TIMESTAMP])
+                if clean_ts(ts_val_ram) == target_clean:
+                    df_ram.at[idx, COL_FEEDBACK] = fb_text
+                    break
+            
+            # Simpan balik perubahan ke state
+            st.session_state["RAM_DB"]["reports"][nama_staf] = df_ram
 
-        ws.update_cell(found_row, col_idx, feedback_text)
         return True, "Feedback terkirim!"
     except Exception as e:
         return False, f"Error: {e}"
 
 
 def simpan_laporan_harian_batch(list_of_rows, nama_staf):
+    """
+    [SMART SAVE] 
+    1. Kirim data ke Google Sheets (Persistensi).
+    2. Suntikkan data baru langsung ke RAM (Kecepatan UI).
+    """
     try:
+        # 1. Simpan Cloud (GSheet) - Proses I/O
         ws = get_or_create_worksheet(nama_staf)
-        if ws is None:
-            return False
+        if ws is None: return False
 
         ensure_headers(ws, NAMA_KOLOM_STANDAR)
         ws.append_rows(list_of_rows, value_input_option="USER_ENTERED")
-
-        # ✅ Optimasi: jangan format tiap submit (throttled)
-        # maybe_auto_format_sheet(ws)
+        
+        # 2. Simpan RAM (Memory) - UI Update Instan
+        init_ram_storage()
+        
+        # Konversi input list menjadi DataFrame
+        new_df = pd.DataFrame(list_of_rows, columns=NAMA_KOLOM_STANDAR)
+        
+        # Samakan format datetime agar tidak error saat di-sort admin
+        if COL_TIMESTAMP in new_df.columns:
+             new_df[COL_TIMESTAMP] = pd.to_datetime(new_df[COL_TIMESTAMP], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+        
+        # Ambil data lama dari RAM (jika ada)
+        if nama_staf in st.session_state["RAM_DB"]["reports"]:
+            current_df = st.session_state["RAM_DB"]["reports"][nama_staf]
+            # Gabungkan (Append)
+            updated_df = pd.concat([current_df, new_df], ignore_index=True)
+            st.session_state["RAM_DB"]["reports"][nama_staf] = updated_df
+        else:
+            # Jika belum ada di RAM, buat baru
+            st.session_state["RAM_DB"]["reports"][nama_staf] = new_df
 
         return True
     except Exception as e:
@@ -3032,37 +3139,71 @@ def simpan_laporan_harian_batch(list_of_rows, nama_staf):
         return False
 
 
-@st.cache_data(ttl=3600)
 def get_reminder_pending(nama_staf):
+    """Mengambil reminder 'Next Plan' terakhir langsung dari RAM."""
     try:
-        ws = get_or_create_worksheet(nama_staf)
-        if not ws:
+        # Panggil loader RAM (Cepat)
+        # Jika data staf belum ada di RAM, dia akan download sekali.
+        # Jika sudah ada, dia langsung return.
+        df = load_daily_report_ram(nama_staf)
+        
+        if df.empty:
             return None
-        all_vals = ws.get_all_records()
-        if not all_vals:
-            return None
-        last_row = all_vals[-1]
-        pending_task = last_row.get(COL_PENDING, "")
-        if pending_task and str(pending_task).strip() not in {"-", ""}:
+            
+        # Ambil baris terakhir
+        last_row = df.iloc[-1]
+        pending_task = str(last_row.get(COL_PENDING, "")).strip()
+        
+        if pending_task and pending_task not in ["-", "", "nan", "None"]:
             return pending_task
         return None
     except Exception:
         return None
 
 
-@st.cache_data(ttl=3600)
 def load_all_reports(daftar_staf):
-    all_data = []
-    for nama in daftar_staf:
-        try:
-            ws = get_or_create_worksheet(nama)
-            if ws:
-                d = ws.get_all_records()
-                if d:
-                    all_data.extend(d)
-        except Exception:
-            pass
-    return pd.DataFrame(all_data) if all_data else pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+    """
+    Menggabungkan laporan semua staf.
+    Looping memanggil `load_daily_report_ram` sehingga efisien.
+    """
+    all_dfs = []
+    
+    # Progress bar agar Admin tahu proses sedang berjalan (hanya muncul jika belum di-cache)
+    init_ram_storage()
+    show_progress = any(nm not in st.session_state["RAM_DB"]["reports"] for nm in daftar_staf if nm != "Saya")
+    
+    p_bar = None
+    if show_progress:
+        p_bar = st.progress(0, text="Sinkronisasi Data Laporan dari Cloud...")
+        
+    total = len(daftar_staf)
+
+    for i, nama in enumerate(daftar_staf):
+        if nama == "Saya": continue # Skip placeholder
+        
+        # Ini otomatis cek RAM dulu. Jika sudah ada, dia skip download.
+        df_staf = load_daily_report_ram(nama)
+        
+        if not df_staf.empty:
+            # Pastikan kolom Nama terisi agar Admin tahu ini punya siapa
+            if COL_NAMA in df_staf.columns:
+                 # Isi kolom nama jika kosong/NaN/Dash
+                 df_staf[COL_NAMA] = df_staf[COL_NAMA].replace(["", "-"], nama)
+                 # Jika kolom benar-benar kosong (NaN semua), isi paksa
+                 df_staf[COL_NAMA] = df_staf[COL_NAMA].fillna(nama)
+            
+            all_dfs.append(df_staf)
+        
+        if p_bar: p_bar.progress((i + 1) / total)
+    
+    if p_bar: p_bar.empty()
+
+    if not all_dfs:
+        return pd.DataFrame(columns=NAMA_KOLOM_STANDAR)
+        
+    # Gabung semua jadi satu DataFrame besar
+    final_df = pd.concat(all_dfs, ignore_index=True)
+    return final_df
 
 
 def render_hybrid_table(df_data, unique_key, main_text_col):
@@ -3374,22 +3515,6 @@ def load_closing_deal():
         return df
     except: return pd.DataFrame(columns=CLOSING_COLUMNS)
 
-def get_daftar_staf_terbaru():
-    # Cek RAM
-    ram = get_ram_data("staff")
-    if ram: return ram
-    
-    # Download
-    default = ["Saya"]
-    if not KONEKSI_GSHEET_BERHASIL: return default
-    try:
-        ws = spreadsheet.worksheet(SHEET_CONFIG_NAMA)
-        vals = ws.col_values(1)
-        res = vals[1:] if len(vals) > 1 else default
-        update_ram_data("staff", res)
-        return res
-    except: return default
-
 
 def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai_kontrak_input):
     if not KONEKSI_GSHEET_BERHASIL:
@@ -3431,81 +3556,187 @@ def tambah_closing_deal(nama_group, nama_marketing, tanggal_event, bidang, nilai
     except Exception as e:
         return False, str(e)
 
-
 # =========================================================
-# PEMBAYARAN
+# PEMBAYARAN (OPTIMIZED: RAM + CLOUD DUAL WRITE)
 # =========================================================
 def load_pembayaran_dp():
     """
     [SMART LOAD] 
-    1. Cek RAM. Jika ada, return detik itu juga.
-    2. Jika kosong, Download dari GSheet, simpan ke RAM, baru return.
+    1. Cek RAM. Jika ada, return detik itu juga (Instan).
+    2. Jika kosong, Download dari GSheet, normalisasi data, simpan ke RAM, baru return.
     """
-    # 1. Cek RAM
+    # 1. Cek RAM (Hit Cache)
     ram_data = get_ram_data("payment")
     if ram_data is not None:
         return ram_data.copy()
 
-    # 2. Download (Hanya terjadi 1x saat VPS start/reload)
+    # 2. Download Cloud (Miss Cache - Hanya terjadi 1x saat VPS start/restart)
     if not KONEKSI_GSHEET_BERHASIL:
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
 
     try:
         try:
             ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
-        except:
+        except Exception:
+            # Buat baru jika tidak ada dan kembalikan frame kosong ke RAM
             ws = spreadsheet.add_worksheet(title=SHEET_PEMBAYARAN, rows=500, cols=len(PAYMENT_COLUMNS))
-            ws.append_row(PAYMENT_COLUMNS)
-            # Return frame kosong & save RAM
+            ws.append_row(PAYMENT_COLUMNS, value_input_option="USER_ENTERED")
             empty = pd.DataFrame(columns=PAYMENT_COLUMNS)
             update_ram_data("payment", empty)
             return empty
 
         ensure_headers(ws, PAYMENT_COLUMNS)
+        
         data = ws.get_all_records()
         df = pd.DataFrame(data)
 
-        # Normalisasi Kolom
+        # --- NORMALISASI DATA (Agar Editor Streamlit Tidak Error) ---
+        
+        # Pastikan semua kolom ada
         for c in PAYMENT_COLUMNS:
-            if c not in df.columns: df[c] = ""
+            if c not in df.columns:
+                df[c] = ""
 
-        # Parsing Angka (Wajib agar tidak error di Editor)
+        # Clean Type Data: Numeric (Hapus Rp/Titik -> Jadi Int)
         numeric_cols = [COL_NOMINAL_BAYAR, COL_NILAI_KESEPAKATAN, COL_SISA_BAYAR]
         for c in numeric_cols:
             if c in df.columns:
                 df[c] = df[c].apply(lambda x: parse_rupiah_to_int(x) if isinstance(x, str) else x)
                 df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
-        # Parsing Tanggal
-        if COL_JATUH_TEMPO in df.columns:
-            def _parse_dt(x):
-                s = str(x).strip()
-                if not s or s.lower() in ["nan", "none", "-", ""]: return pd.NaT
-                try: return pd.to_datetime(s, format="%Y-%m-%d").date()
-                except: return pd.NaT
-            df[COL_JATUH_TEMPO] = df[COL_JATUH_TEMPO].apply(_parse_dt)
+        # Hitung ulang sisa bayar untuk konsistensi
+        if COL_NILAI_KESEPAKATAN in df.columns and COL_NOMINAL_BAYAR in df.columns:
+            df[COL_SISA_BAYAR] = df[COL_NILAI_KESEPAKATAN] - df[COL_NOMINAL_BAYAR]
+            df[COL_SISA_BAYAR] = df[COL_SISA_BAYAR].apply(lambda x: x if x > 0 else 0)
 
-        # Parsing Boolean Status
+        # Clean Type Data: Boolean Status
         if COL_STATUS_BAYAR in df.columns:
-            df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(lambda x: str(x).upper() == "TRUE")
+            df[COL_STATUS_BAYAR] = df[COL_STATUS_BAYAR].apply(
+                lambda x: True if str(x).strip().upper() == "TRUE" else False)
 
-        # 3. Simpan ke RAM agar akses selanjutnya instan
+        # Clean Type Data: Date (String -> Date Object untuk UI DatePicker)
+        if COL_JATUH_TEMPO in df.columns:
+            def smart_date_parser(x):
+                s = str(x).strip()
+                if not s or s.lower() in ["nan", "none", "-", ""]:
+                    return pd.NaT
+                try:
+                    return pd.to_datetime(s, format="%Y-%m-%d").date()
+                except:
+                    try:
+                        return pd.to_datetime(s, dayfirst=True).date()
+                    except:
+                        return pd.NaT
+            
+            df[COL_JATUH_TEMPO] = df[COL_JATUH_TEMPO].apply(smart_date_parser)
+
+        # Clean Type Data: String
+        text_cols = [COL_TS_BAYAR, COL_GROUP, COL_MARKETING, COL_TGL_EVENT, COL_JENIS_BAYAR,
+                     COL_BUKTI_BAYAR, COL_CATATAN_BAYAR, COL_TS_UPDATE, COL_UPDATED_BY]
+        for c in text_cols:
+            if c in df.columns:
+                df[c] = df[c].fillna("").astype(str)
+
+        # Format Log agar rapi (multiline di editor)
+        if COL_TS_UPDATE in df.columns:
+            df[COL_TS_UPDATE] = df[COL_TS_UPDATE].apply(
+                lambda x: build_numbered_log(parse_payment_log_lines(x)))
+
+        # 3. SIMPAN KE RAM (Mirroring)
+        # Dataframe ini bersih dan siap pakai untuk UI
         update_ram_data("payment", df[PAYMENT_COLUMNS])
-        
+
         return df[PAYMENT_COLUMNS].copy()
 
     except Exception as e:
-        print(f"Load Error: {e}")
+        print(f"Error load_pembayaran_dp: {e}")
         return pd.DataFrame(columns=PAYMENT_COLUMNS)
+
+
+def save_pembayaran_dp(df_edited):
+    """
+    Simpan perubahan tabel editor ke RAM (Instan) & Cloud (Background).
+    """
+    try:
+        # 1. Update RAM Langsung (Optimistic Update - UI terasa cepat)
+        update_ram_data("payment", df_edited)
+        
+        # 2. Update Cloud (GSheet)
+        ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
+        ensure_headers(ws, PAYMENT_COLUMNS)
+        ws.clear()
+        
+        rows_needed = len(df_edited) + 1
+        if ws.row_count < rows_needed:
+            ws.resize(rows=rows_needed)
+        
+        # Siapkan data untuk GSheet (Convert object/date/bool kembali ke String)
+        df_save = df_edited.copy()
+        
+        # Pastikan kolom lengkap
+        for c in PAYMENT_COLUMNS:
+            if c not in df_save.columns: df_save[c] = ""
+
+        # Boolean -> String "TRUE"/"FALSE"
+        if COL_STATUS_BAYAR in df_save.columns:
+            df_save[COL_STATUS_BAYAR] = df_save[COL_STATUS_BAYAR].apply(
+                lambda x: "TRUE" if bool(x) else "FALSE")
+            
+        # Format Nominal ke integer bersih (hapus Rp) untuk penyimpanan
+        def _to_int_clean(x):
+            if pd.isna(x) or x == "": return ""
+            val = parse_rupiah_to_int(x)
+            return int(val) if val is not None else ""
+            
+        if COL_NOMINAL_BAYAR in df_save.columns:
+            df_save[COL_NOMINAL_BAYAR] = df_save[COL_NOMINAL_BAYAR].apply(_to_int_clean)
+        if COL_NILAI_KESEPAKATAN in df_save.columns:
+            df_save[COL_NILAI_KESEPAKATAN] = df_save[COL_NILAI_KESEPAKATAN].apply(_to_int_clean)
+        if COL_SISA_BAYAR in df_save.columns:
+            df_save[COL_SISA_BAYAR] = df_save[COL_SISA_BAYAR].apply(_to_int_clean)
+
+        # Format Date -> String YYYY-MM-DD
+        def _fmt_date(d):
+            if d is None or pd.isna(d): return ""
+            if hasattr(d, "strftime"): return d.strftime("%Y-%m-%d")
+            s = str(d).strip()
+            return s if s and s.lower() not in {"nan", "none"} else ""
+            
+        if COL_JATUH_TEMPO in df_save.columns:
+            df_save[COL_JATUH_TEMPO] = df_save[COL_JATUH_TEMPO].apply(_fmt_date)
+        if COL_TGL_EVENT in df_save.columns:
+            df_save[COL_TGL_EVENT] = df_save[COL_TGL_EVENT].apply(_fmt_date)
+
+        # Format Log
+        if COL_TS_UPDATE in df_save.columns:
+            df_save[COL_TS_UPDATE] = df_save[COL_TS_UPDATE].apply(
+                lambda x: build_numbered_log(parse_payment_log_lines(x)))
+        if COL_UPDATED_BY in df_save.columns:
+            df_save[COL_UPDATED_BY] = df_save[COL_UPDATED_BY].apply(
+                lambda x: safe_str(x, "-").strip() or "-")
+            
+        # Tulis ulang sheet
+        df_save = df_save[PAYMENT_COLUMNS].fillna("")
+        payload = [df_save.columns.values.tolist()] + df_save.astype(str).values.tolist()
+        ws.update(range_name="A1", values=payload, value_input_option="USER_ENTERED")
+        
+        return True
+    except Exception as e:
+        print(f"Error saving payment: {e}")
+        return False
+
 
 def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nominal_input, total_sepakat_input, tenor, jatuh_tempo, bukti_file, catatan):
     """
-    [SMART SAVE] Simpan ke GSheet (Aman) + Update RAM (Cepat).
+    [SMART SAVE] 
+    Menambah record pembayaran dengan validasi lengkap.
+    Data disimpan ke GSheet (Cloud) DAN disuntikkan ke RAM (Instan).
     """
-    if not KONEKSI_GSHEET_BERHASIL: return False, "Koneksi Gagal"
+    if not KONEKSI_GSHEET_BERHASIL: 
+        return False, "Sistem Error: Koneksi Google Sheets tidak aktif."
 
     try:
-        # ... (Logika validasi data tetap sama seperti kode lama) ...
+        # --- 1. LOGIKA VALIDASI & KALKULASI (ASLI) ---
         group = str(nama_group).strip() if nama_group else "-"
         marketing = str(nama_marketing).strip() if nama_marketing else "Unknown"
         catatan_clean = str(catatan).strip() if catatan else "-"
@@ -3514,83 +3745,160 @@ def tambah_pembayaran_dp(nama_group, nama_marketing, tgl_event, jenis_bayar, nom
         total_sepakat = parse_rupiah_to_int(total_sepakat_input) or 0
         tenor_val = int(tenor) if tenor else 0
         
-        if total_sepakat <= 0: return False, "Total kesepakatan harus diisi."
-        
+        if total_sepakat <= 0:
+            return False, "Input Gagal: Total nilai kesepakatan harus diisi dengan benar."
+
         sisa_bayar = total_sepakat - nom_bayar
+        
         info_cicilan = ""
         if tenor_val > 0 and sisa_bayar > 0:
-            info_cicilan = f" | Cicilan: {format_rupiah_display(sisa_bayar/tenor_val)} x{tenor_val}"
+            nilai_per_cicilan = sisa_bayar / tenor_val
+            info_cicilan = f" | Cicilan: {format_rupiah_display(nilai_per_cicilan)} x{tenor_val} term"
 
-        status_fix = "✅ Lunas" if sisa_bayar <= 0 else f"⏳ Belum Lunas{info_cicilan}"
-        if sisa_bayar <= 0 and jenis_bayar == "Cash": status_fix += " (Cash)"
+        status_fix = "✅ Lunas"
+        is_lunas_bool = True # Flag untuk Boolean di RAM
+        
+        if sisa_bayar <= 0:
+            status_fix = "✅ Lunas"
+            if jenis_bayar == "Cash": 
+                status_fix += " (Cash)"
+            is_lunas_bool = True
+        else:
+            if jenis_bayar == "Down Payment (DP)":
+                status_fix = f"⏳ DP (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
+            elif jenis_bayar == "Cicilan":
+                status_fix = f"💳 Cicilan (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
+            else:
+                status_fix = f"⚠️ Belum Lunas (Sisa: {format_rupiah_display(sisa_bayar)}){info_cicilan}"
+            is_lunas_bool = False
 
+        # --- 2. UPLOAD DROPBOX (ASLI) ---
         link_bukti = "-"
         if bukti_file and KONEKSI_DROPBOX_BERHASIL:
             link_bukti = upload_ke_dropbox(bukti_file, marketing, kategori="Bukti_Pembayaran")
 
         ts_in = now_ts_str()
-        fmt_tgl = tgl_event.strftime("%Y-%m-%d") if hasattr(tgl_event, "strftime") else str(tgl_event)
-        fmt_due = jatuh_tempo.strftime("%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
-        log_entry = f"[{ts_in}] Input Baru: {jenis_bayar}{info_cicilan}"
+        
+        # Format Tanggal string untuk GSheet (YYYY-MM-DD)
+        fmt_tgl_event = tgl_event.strftime("%Y-%m-%d") if hasattr(tgl_event, "strftime") else str(tgl_event)
+        fmt_jatuh_tempo = jatuh_tempo.strftime("%Y-%m-%d") if hasattr(jatuh_tempo, "strftime") else str(jatuh_tempo)
 
-        # 1. SIMPAN KE CLOUD (I/O Operation)
+        log_entry = f"[{ts_in}] Input Baru: {jenis_bayar}{info_cicilan}"
+        final_log_str = build_numbered_log([log_entry])
+
+        # --- 3. SIMPAN KE CLOUD (GSHEET) ---
         row_gsheet = [
-            ts_in, group, marketing, fmt_tgl, total_sepakat,
-            jenis_bayar, nom_bayar, tenor_val, sisa_bayar, fmt_due,
-            status_fix, link_bukti, catatan_clean, build_numbered_log([log_entry]), marketing
+            ts_in,
+            group,
+            marketing,
+            fmt_tgl_event,
+            total_sepakat,
+            jenis_bayar,
+            nom_bayar,
+            tenor_val,
+            sisa_bayar,
+            fmt_jatuh_tempo,
+            status_fix,
+            link_bukti,
+            catatan_clean,
+            final_log_str,
+            marketing
         ]
+
         ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
         ensure_headers(ws, PAYMENT_COLUMNS)
         ws.append_row(row_gsheet, value_input_option="USER_ENTERED")
 
-        # 2. UPDATE RAM (In-Memory Operation)
-        # Kita buat dictionary yang strukturnya SAMA PERSIS dengan DataFrame di RAM
-        new_ram_data = {
+        # --- 4. UPDATE RAM (DUAL WRITE) ---
+        # Kita suntikkan data baru ke RAM agar user melihatnya seketika (tanpa download ulang)
+        # PENTING: Gunakan tipe data asli (Int, String, Date Object, Bool) agar kompatibel dengan UI Editor
+        new_ram_entry = {
             COL_TS_BAYAR: ts_in,
             COL_GROUP: group,
             COL_MARKETING: marketing,
-            COL_TGL_EVENT: fmt_tgl,
-            COL_NILAI_KESEPAKATAN: total_sepakat, # Int
+            # RAM tetap menyimpan Tgl Event sebagai String agar konsisten dengan kolom Text lain
+            COL_TGL_EVENT: fmt_tgl_event, 
+            COL_NILAI_KESEPAKATAN: int(total_sepakat),
             COL_JENIS_BAYAR: jenis_bayar,
-            COL_NOMINAL_BAYAR: nom_bayar, # Int
-            COL_TENOR_CICILAN: tenor_val, # Int
-            COL_SISA_BAYAR: sisa_bayar, # Int
-            COL_JATUH_TEMPO: jatuh_tempo, # Object Date (Penting untuk Editor UI)
-            COL_STATUS_BAYAR: (sisa_bayar <= 0), # Boolean (Penting untuk Checkbox UI)
+            COL_NOMINAL_BAYAR: int(nom_bayar),
+            COL_TENOR_CICILAN: int(tenor_val),
+            COL_SISA_BAYAR: int(sisa_bayar),
+            # RAM menyimpan Jatuh Tempo sebagai Date Object agar UI DatePicker berfungsi
+            COL_JATUH_TEMPO: jatuh_tempo, 
+            # RAM menyimpan Status sebagai Boolean agar UI Checkbox berfungsi
+            COL_STATUS_BAYAR: is_lunas_bool, 
             COL_BUKTI_BAYAR: link_bukti,
             COL_CATATAN_BAYAR: catatan_clean,
-            COL_TS_UPDATE: log_entry,
+            COL_TS_UPDATE: final_log_str,
             COL_UPDATED_BY: marketing
         }
-        # Suntikkan data ini ke RAM tanpa download ulang
-        append_ram_data("payment", new_ram_data)
+        
+        # Fungsi ini akan menambahkan dict di atas ke DataFrame yang ada di RAM
+        append_ram_data("payment", new_ram_entry)
 
-        return True, f"Berhasil disimpan! Sisa: {format_rupiah_display(sisa_bayar)}"
+        # Pesan Sukses
+        msg_feedback = f"Pembayaran berhasil disimpan! "
+        if sisa_bayar > 0:
+            msg_feedback += f"Sisa tagihan: {format_rupiah_display(sisa_bayar)} dengan rincian {info_cicilan.replace(' | ', '')}."
+        else:
+            msg_feedback += "Status: LUNAS."
+
+        return True, msg_feedback
 
     except Exception as e:
-        return False, f"Error: {str(e)}"
+        return False, f"System Error: {str(e)}"
 
-def save_pembayaran_dp(df_edited):
-    """Simpan perubahan tabel editor ke RAM & Cloud."""
+def save_pembayaran_dp(df: pd.DataFrame) -> bool:
     try:
-        # 1. Update RAM Langsung (Optimistic Update)
-        update_ram_data("payment", df_edited)
-        
-        # 2. Update Cloud
         ws = spreadsheet.worksheet(SHEET_PEMBAYARAN)
+        ensure_headers(ws, PAYMENT_COLUMNS)
+
         ws.clear()
-        
-        # Siapkan data untuk GSheet (Convert tipe data Object/Date ke String)
-        df_save = df_edited.copy()
-        if COL_STATUS_BAYAR in df_save.columns:
-            df_save[COL_STATUS_BAYAR] = df_save[COL_STATUS_BAYAR].apply(lambda x: "TRUE" if x else "FALSE")
-        if COL_JATUH_TEMPO in df_save.columns:
-            df_save[COL_JATUH_TEMPO] = df_save[COL_JATUH_TEMPO].apply(lambda x: str(x) if x else "")
-            
-        # Tulis ulang sheet
-        payload = [PAYMENT_COLUMNS] + df_save.astype(str).values.tolist()
-        ws.update(range_name="A1", values=payload, value_input_option="USER_ENTERED")
-        
+
+        rows_needed = len(df) + 1
+        if ws.row_count < rows_needed:
+            ws.resize(rows=rows_needed)
+
+        df_save = df.copy()
+
+        for c in PAYMENT_COLUMNS:
+            if c not in df_save.columns:
+                df_save[c] = ""
+
+        df_save[COL_STATUS_BAYAR] = df_save[COL_STATUS_BAYAR].apply(
+            lambda x: "TRUE" if bool(x) else "FALSE")
+
+        def _to_int_or_blank(x):
+            if x is None or pd.isna(x):
+                return ""
+            val = parse_rupiah_to_int(x)
+            return "" if val is None else int(val)
+
+        df_save[COL_NOMINAL_BAYAR] = df_save[COL_NOMINAL_BAYAR].apply(
+            _to_int_or_blank)
+
+        def _fmt_date(d):
+            if d is None or pd.isna(d):
+                return ""
+            if hasattr(d, "strftime"):
+                return d.strftime("%Y-%m-%d")
+            s = str(d).strip()
+            return s if s and s.lower() not in {"nan", "none"} else ""
+
+        df_save[COL_JATUH_TEMPO] = df_save[COL_JATUH_TEMPO].apply(_fmt_date)
+
+        df_save[COL_TS_UPDATE] = df_save[COL_TS_UPDATE].apply(
+            lambda x: build_numbered_log(parse_payment_log_lines(x)))
+        df_save[COL_UPDATED_BY] = df_save[COL_UPDATED_BY].apply(
+            lambda x: safe_str(x, "-").strip() or "-")
+
+        df_save = df_save[PAYMENT_COLUMNS].fillna("")
+        data_to_save = [df_save.columns.values.tolist()] + \
+            df_save.values.tolist()
+
+        ws.update(range_name="A1", values=data_to_save,
+                  value_input_option="USER_ENTERED")
+        # maybe_auto_format_sheet(ws)
         return True
     except Exception:
         return False
